@@ -10,6 +10,7 @@ This document summarizes the development workflow and architecture for `twi`. Th
 - `govulncheck` and `staticcheck` are pinned as Go module tools.
 - Use Go modules only. Do not use GOPATH workflows.
 - A stdlib-only CLI/config/mock foundation exists; Bubble Tea and Twitch dependencies are still planned.
+- `internal/app` owns the UI-facing chat boundary and deterministic fake chat client; the app layer consumes normalized `internal/twitch` messages instead of concrete Twitch transport types.
 
 ## Architecture Lanes
 
@@ -46,7 +47,7 @@ The plan calls for interfaces around:
 - `ImageRenderer`
 - `AnimationClock`
 
-Use test fakes for network, asset, image, and animation behavior.
+`internal/app.ChatClient` currently combines the app-facing message stream, connection-state stream, and send contract. Use `internal/app.FakeChatClient` for deterministic UI and send-path tests. Use additional test fakes for network, asset, image, and animation behavior.
 
 ## Tooling
 
