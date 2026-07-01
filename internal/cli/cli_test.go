@@ -50,7 +50,7 @@ func TestLiveChatMissingCredentialsAreActionableAndRedacted(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("Run returned %d, want 2; stderr=%q", code, stderr.String())
 	}
-	for _, want := range []string{"TWI_TWITCH_USERNAME", "chat:read", "--mock"} {
+	for _, want := range []string{"TWI_TWITCH_USERNAME", "chat:read", "chat:edit", "--mock"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr missing %q: %q", want, stderr.String())
 		}

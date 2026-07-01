@@ -147,7 +147,7 @@ func validateLiveChatConfig(cfg config.Config) error {
 		missing = append(missing, "TWI_TWITCH_OAUTH_TOKEN")
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("missing Twitch credentials: set %s for live chat, or run `twi chat --mock`; OAuth token must include chat:read", strings.Join(missing, " and "))
+		return fmt.Errorf("missing Twitch credentials: set %s for live chat, or run `twi chat --mock`; OAuth token must include chat:read and chat:edit", strings.Join(missing, " and "))
 	}
 	return nil
 }
