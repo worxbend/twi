@@ -6,7 +6,7 @@ Progress as of the initial swarm pass:
 
 - Done: Phase 0 requirements matrix, risk register, backlog, and six ADRs.
 - Done: Go module bootstrap, CLI shell, config precedence/redaction tests, normalized message model skeleton, Bubble Tea mock chat shell, module tool directives for `govulncheck`/`staticcheck`, the one-channel Twitch IRC read adapter, the active-channel composer send queue, selected-message replies, and `/me` action sends.
-- Remaining near-term work: richer live-chat validation and asset/image fallbacks.
+- Remaining near-term work: MVP documentation alignment, final validation, richer live-chat credential validation, and real asset/image rendering.
 
 Each task is intended to fit one implementation loop. Agents should keep write scope to
 the listed files where possible and use fakes before network-dependent code.
@@ -55,7 +55,7 @@ Follow-ups: Add CI gate for tooling commands.
 Task: Implement config precedence and secret redaction.
 Owner lane: Core TUI engineer.
 Goal: Load credentials and options safely from flags, env, and config.
-Context: MVP requires credentials and modes from flags/env/config with no secret leakage.
+Context: MVP requires credentials and modes from env/config plus CLI channel/config-path overrides with no secret leakage.
 Files likely touched: `internal/config`, `cmd/twi`.
 Implementation notes: Implement precedence flags > env > file > defaults. Add redaction before any config output or error formatting.
 Acceptance criteria: Username, token, channels, image modes, and animation mode resolve predictably; token is never printed.
@@ -156,13 +156,13 @@ Follow-ups: Add Helix avatar lookup and Kitty renderer.
 
 ## Task 12
 
-Task: Add first `twi doctor` diagnostics skeleton.
+Task: Add first `twi doctor` diagnostics skeleton. Status: implemented in T016.
 Owner lane: QA/release engineer.
 Goal: Give users and agents a single command for setup visibility.
-Context: Full diagnostics are later scope, but early checks reduce support ambiguity.
-Files likely touched: `cmd/twi`, `internal/config`, `internal/diagnostics`.
-Implementation notes: Start with config path, credential presence without values, Go/runtime info, terminal env hints, and redacted output.
+Context: Full token validation remains later scope, but current diagnostics reduce support ambiguity.
+Files likely touched: `internal/app`, `internal/config`, `internal/cli`.
+Implementation notes: Completed in T016 with config path state, credential presence without values, unverified required IRC scopes, Twitch IRC reachability, terminal env hints, Kitty/Ghostty signals, cache writability, feature modes, and redacted output.
 Acceptance criteria: `twi doctor` runs without Twitch credentials and never prints secrets.
 Verification: Unit tests for diagnostic redaction; manual `go run ./cmd/twi doctor`.
 Risks: Terminal feature detection may be incomplete initially.
-Follow-ups: Add token validation, Twitch reachability, mouse, true color, Kitty graphics, and cache writability checks.
+Follow-ups: Add Helix-backed token identity, expiry, and scope validation.

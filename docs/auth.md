@@ -5,7 +5,7 @@ This document describes the authentication model for `twi`. It covers the curren
 ## Current State
 
 - `twi login` is planned, not implemented.
-- The MVP accepts Twitch credentials from CLI flags, environment variables, or a local config file.
+- The MVP accepts Twitch credentials from environment variables or a local flat config file. CLI flags currently override the config path and channels, not username or token values.
 - The first real Twitch transport uses Twitch IRC.
 - Later milestones may add interactive OAuth and richer EventSub/API chat support.
 
@@ -21,12 +21,14 @@ Required IRC scopes:
 - `chat:read` to receive chat.
 - `chat:edit` to send chat.
 
-The planned config sources are, from highest to lowest priority:
+The implemented config sources are, from highest to lowest priority:
 
-1. CLI flags.
+1. CLI flags for `--config` and `--channel`.
 2. Environment variables.
 3. Config file.
-4. Interactive setup wizard or defaults when available.
+4. Defaults.
+
+The interactive setup wizard is future work.
 
 Suggested environment variables:
 

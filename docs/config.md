@@ -7,23 +7,25 @@ This document describes the configuration model for `twi`. The implemented parse
 - Config loading exists for flat `key = value` files, environment variables, and selected CLI overrides.
 - `twi config show` and `twi config path` exist in the CLI.
 - `twi chat --channel <channel>` uses `TWI_TWITCH_USERNAME` and `TWI_TWITCH_OAUTH_TOKEN` for the current one-channel Twitch IRC read path.
+- Twitch credentials are currently read from environment variables or the flat config file. CLI flags currently override `--config` and `--channel`, not username or OAuth token values.
 - Config output redacts OAuth tokens and client secrets.
 - `twi doctor` reports the effective config file path, credential presence,
   selected feature modes, Twitch IRC reachability, terminal hints, Kitty graphics
   signals, and cache directory writability without printing token or client
   secret values.
-- Nested TOML tables are not implemented yet; keep bootstrap config files flat.
+- Nested TOML tables are not implemented yet; keep config files flat.
 
 ## Precedence
 
 Effective config should be resolved in this order, highest priority first:
 
-1. CLI flags.
+1. CLI flags for `--config` and `--channel`.
 2. Environment variables.
 3. Config file.
-4. Interactive setup wizard or defaults.
+4. Defaults.
 
 This order lets users override local config for one command without editing files.
+The interactive setup wizard is future work.
 
 ## Config Paths
 
@@ -36,7 +38,7 @@ $XDG_CONFIG_HOME/twi/config.toml
 
 Windows should use the platform config directory.
 
-The planned cache directory is the platform cache directory, such as:
+The cache directory is the platform cache directory, such as:
 
 ```text
 $XDG_CACHE_HOME/twi
@@ -47,7 +49,7 @@ Cache contents should include non-secret metadata and downloaded assets only, su
 
 ## Environment Variables
 
-Planned variables from `PLAN.md`:
+Supported variables:
 
 | Variable | Secret | Purpose |
 | --- | --- | --- |
@@ -63,10 +65,11 @@ Planned variables from `PLAN.md`:
 | `TWI_EMOTE_MODE` | No | Twitch emote rendering mode. |
 | `TWI_ANIMATION_MODE` | No | Animation behavior. |
 
-## Planned Modes
+## Mode Values
 
 Image modes:
 
+- `auto`
 - `off`
 - `small`
 - `normal`
@@ -95,11 +98,11 @@ Animation modes:
 - `fast`
 - `expressive`
 
-The MVP may support only a subset. Unsupported values should fail clearly or be ignored only when documented.
+The current parser accepts these values as strings. Animation mode currently supports `off`, `reduced`, and `fast`; unknown animation values are treated as `fast` by the shell. Image, avatar, emoji, emote, and Kitty settings currently drive fallback rendering and diagnostics only because inline image loading/rendering is not implemented.
 
 ## Example Config
 
-This example matches the current flat bootstrap parser. A richer TOML schema can be added later if needed.
+This example matches the current flat parser. A richer TOML schema can be added later if needed.
 
 ```toml
 twitch_username = "my_login"
@@ -119,7 +122,7 @@ Do not paste a real token into shared docs, commits, logs, or support issues.
 
 ## CLI Commands And Flags
 
-Bootstrap CLI commands include:
+Implemented CLI commands include:
 
 ```sh
 twi chat --channel <channel>
@@ -129,7 +132,7 @@ twi config path
 twi doctor
 ```
 
-`twi login` and multi-channel UI behavior are still planned. One-channel Twitch IRC chat is current when username, OAuth token, and channel are configured. Additional flags for auth, image modes, animation modes, and config paths should follow the precedence rules above.
+`twi login` and multi-channel UI behavior are still planned. One-channel Twitch IRC chat is current when username, OAuth token, and channel are configured. Future flags for auth and mode settings should follow the precedence rules above.
 
 ## Redacted Config Output
 
@@ -169,12 +172,12 @@ The current diagnostics include:
 Secrets are never included in doctor details. OAuth tokens and client secrets
 are redacted from validation and probe errors before output is formatted.
 
-## MVP vs Future Behavior
+## Current vs Future Behavior
 
-MVP target:
+Current behavior:
 
-- Load username and OAuth token from env/config/flags.
-- Load one or more channel names.
+- Load username and OAuth token from env/config.
+- Load channel names from `--channel`, `TWI_DEFAULT_CHANNELS`, or config.
 - Load animation mode.
 - Load basic image fallback settings.
 - Redact secrets in all config output.

@@ -58,7 +58,7 @@ The plan calls for interfaces around:
 
 ## Tooling
 
-Expected baseline commands:
+The agent loop has been using these validation commands as the exact Go gate:
 
 ```sh
 go version
@@ -66,19 +66,34 @@ go mod tidy
 go fmt ./...
 go vet ./...
 go test ./...
-```
-
-Use race testing for concurrency, networking, cache, and animation scheduler changes:
-
-```sh
 go test -race ./...
-```
-
-Pinned module tool checks:
-
-```sh
 go tool govulncheck ./...
 go tool staticcheck ./...
+```
+
+Task-specific smoke and metadata checks used by recent iterations:
+
+```sh
+go run ./cmd/twi --help
+go run ./cmd/twi chat --mock --channel example
+go run ./cmd/twi doctor
+go run ./cmd/twi config show
+go run ./cmd/twi chat --channel example
+jq empty .agent-loop/tasks.json
+git diff --check
+```
+
+The live chat smoke command is expected to fail safely in environments without
+Twitch credentials. It should print redacted guidance for
+`TWI_TWITCH_USERNAME`, `TWI_TWITCH_OAUTH_TOKEN`, `--mock`, `chat:read`, and
+`chat:edit`, and it should not attempt networking when credentials are absent.
+
+Focused review searches used by the loop:
+
+```sh
+rg "go-twitch-irc|helix" internal/app
+rg "os\\.Open|http\\.Get|ReadFile|WriteFile" internal/app internal/render
+if rg -n "[ \t]+$" PLAN.md .agent-loop/tasks.json .agent-loop/memory.md README.md docs; then exit 1; else exit 0; fi
 ```
 
 In restricted environments where the default module cache is read-only, use writable caches under `/tmp` and `GOTOOLCHAIN=local` for local verification. `staticcheck` also needs a writable cache, for example `STATICCHECK_CACHE=/tmp/twi-staticcheck-cache`. Normal developer environments should keep `GOTOOLCHAIN=auto`.

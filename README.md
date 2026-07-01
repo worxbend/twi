@@ -12,7 +12,7 @@
 - Support typed-in reveal animation for new messages without corrupting Unicode, styling, or image placeholders.
 - Render usernames, badges, avatars, Twitch emotes, standard emoji, replies, notices, and moderation events clearly.
 - Support inline images in capable terminals while keeping text and initials fallbacks usable everywhere.
-- Keep Twitch credentials secure across flags, environment variables, config files, logs, and diagnostics.
+- Keep Twitch credentials secure across environment variables, config files, logs, and diagnostics.
 
 ## Current Status
 
@@ -21,7 +21,7 @@
 - `twi chat --channel <channel>` starts the same Bubble Tea shell against Twitch IRC when `TWI_TWITCH_USERNAME` and `TWI_TWITCH_OAUTH_TOKEN` are configured. The token must be an IRC OAuth token with `chat:read`; sending from the composer also needs `chat:edit`.
 - The current stable Go version was verified from the official Go downloads page as `go1.26.4` on 2026-07-01.
 - The module uses Go `1.26` semantics, `toolchain go1.26.4`, and module-managed `govulncheck`/`staticcheck` tools.
-- Inline images are not implemented yet.
+- Inline image loading and terminal image drawing are not implemented yet; current rendering uses stable text, initials, Unicode, badge, and emote-token fallbacks.
 
 ## CLI
 
@@ -29,7 +29,7 @@ The binary name is `twi`.
 
 | Command | Status | Purpose |
 | --- | --- | --- |
-| `twi chat --mock` | Current | Start a deterministic non-network Bubble Tea mock chat shell without Twitch credentials. |
+| `twi chat --mock [--channel <channel>]` | Current | Start a deterministic non-network Bubble Tea mock chat shell without Twitch credentials. |
 | `twi chat --channel <channel>` | Current | Start the TUI for one Twitch channel using Twitch IRC when username and OAuth token are configured. |
 | `twi chat --channel <one> --channel <two>` | Future | Start multi-channel mode. |
 | `twi login` | Future | Start an OAuth or setup flow. |
@@ -58,7 +58,15 @@ Later milestones add:
 - Richer reconnect handling and Helix-backed live credential/scope validation.
 - Helix-backed identity and asset lookups for avatars, emotes, and badges.
 - Kitty/Ghostty inline image rendering with fallback text, Unicode, and initials.
-- Multi-channel navigation, unread counts, message selection, inspect panel, mouse support, diagnostics, and richer setup flows.
+- Multi-channel navigation, unread counts, inspect panel, mouse support, and richer setup flows.
+
+## Known Limitations
+
+- Live Twitch chat currently supports one configured channel. Passing multiple live channels returns an actionable error.
+- `twi login` is not implemented. Configure credentials with environment variables or the flat config file.
+- `twi doctor` names the required `chat:read` and `chat:edit` IRC scopes, but real token identity, expiry, and scope validation are not wired to Helix yet.
+- Inline images are fallback-only. The renderer reserves stable cells for avatars, badges, emoji, and emote tokens, but it does not download assets or draw Kitty/Ghostty images.
+- Manual live read/send validation still requires user-owned Twitch credentials and a channel where the account can chat.
 
 ## Development Commands
 

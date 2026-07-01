@@ -1,6 +1,6 @@
 # Terminal Images
 
-`twi` is planned to support inline images for avatars, Twitch emotes, and standard emoji in capable terminals. The current MVP implements stable text, Unicode, initials, and compact badge fallbacks before inline image loading/rendering is added.
+`twi` is planned to support inline images for avatars, Twitch emotes, and standard emoji in capable terminals. The current MVP implements stable text, Unicode, initials, compact badge, and emote-token fallbacks before inline image loading/rendering is added.
 
 ## Current State
 
@@ -10,6 +10,7 @@
 - Kitty-compatible image rendering is the first planned image protocol target.
 - Image loading and rendering must be capability-driven and non-blocking.
 - The chat UI must remain usable when image rendering is disabled, unsupported, still loading, or failed.
+- Known limitation: no Helix asset lookup, image download/cache fill, or Kitty/Ghostty drawing path is implemented yet.
 
 ## Support Tiers
 
