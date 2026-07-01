@@ -13,6 +13,18 @@ import (
 	"github.com/w0rxbend/twi/internal/twitch"
 )
 
+type appFakeClock struct {
+	now time.Time
+}
+
+func (c *appFakeClock) Now() time.Time {
+	return c.now
+}
+
+func (c *appFakeClock) Add(d time.Duration) {
+	c.now = c.now.Add(d)
+}
+
 func TestRunMockRendersInitialShellForNonInteractiveOutput(t *testing.T) {
 	cfg := config.Default()
 	cfg.DefaultChannels = []string{"example"}
@@ -166,6 +178,153 @@ func TestMockShellPageKeysScrollViewport(t *testing.T) {
 	}
 }
 
+func TestMockShellFastModeRevealsIncomingMessage(t *testing.T) {
+	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
+	model := newMockShellModelWithClock("example", config.Default(), clock)
+	message := mockIncomingMessage("example", "animated-fast", "animated text arrives")
+
+	updated, cmd := model.Update(mockIncomingMessageMsg{message: message})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("incoming fast message returned nil command, want reveal tick")
+	}
+	if got, want := model.revealQueue.Len(), 1; got != want {
+		t.Fatalf("reveal queue len = %d, want %d", got, want)
+	}
+	if strings.Contains(model.View(), "animated text arrives") {
+		t.Fatalf("incoming message rendered fully before ticks:\n%s", model.View())
+	}
+
+	initial := model.View()
+	clock.Add(mockRevealDelay)
+	updated, _ = model.Update(mockAnimationTickMsg{})
+	model = updated.(mockShellModel)
+	if got := model.View(); got == initial {
+		t.Fatalf("first animation tick did not change view:\n%s", got)
+	}
+
+	driveRevealToCompletion(t, &model, clock)
+	if got := model.revealQueue.Len(); got != 0 {
+		t.Fatalf("reveal queue len after completion = %d, want 0", got)
+	}
+	if !strings.Contains(model.View(), "animated text arrives") {
+		t.Fatalf("completed reveal missing full message:\n%s", model.View())
+	}
+}
+
+func TestMockShellOffModeRendersIncomingMessageWithoutRevealTick(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
+	model := newMockShellModelWithClock("example", cfg, clock)
+	message := mockIncomingMessage("example", "animated-off", "off mode is immediate")
+
+	updated, cmd := model.Update(mockIncomingMessageMsg{message: message})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("off mode incoming message returned command %#v, want nil reveal tick", cmd)
+	}
+	if got := model.revealQueue.Len(); got != 0 {
+		t.Fatalf("off mode reveal queue len = %d, want 0", got)
+	}
+	if !strings.Contains(model.View(), "off mode is immediate") {
+		t.Fatalf("off mode view missing full message:\n%s", model.View())
+	}
+}
+
+func TestMockShellReducedModeUsesFewerChangedFramesThanFastMode(t *testing.T) {
+	text := "same animated message takes fewer visible frames in reduced mode"
+	fastFrames := changedRevealFrames(t, "fast", text)
+	reducedFrames := changedRevealFrames(t, "reduced", text)
+
+	if reducedFrames >= fastFrames {
+		t.Fatalf("reduced changed frames = %d, want fewer than fast frames %d", reducedFrames, fastFrames)
+	}
+}
+
+func TestMockShellInputAndScrollRemainResponsiveDuringAnimation(t *testing.T) {
+	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
+	model := newMockShellModelWithClock("example", config.Default(), clock)
+	model.messages = numberedMockMessages("example", 12)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 12})
+	model = updated.(mockShellModel)
+
+	updated, _ = model.Update(mockIncomingMessageMsg{
+		message: mockIncomingMessage("example", "active-reveal", "animation keeps running"),
+	})
+	model = updated.(mockShellModel)
+	if got := model.revealQueue.Len(); got != 1 {
+		t.Fatalf("reveal queue len = %d, want 1", got)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	model = updated.(mockShellModel)
+	if model.scrollOffset == 0 {
+		t.Fatal("page up during animation left scrollOffset at 0")
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	model = updated.(mockShellModel)
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o', 'k'}})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("composer input during animation returned command %#v, want nil", cmd)
+	}
+	if got, want := model.composerText, "ok"; got != want {
+		t.Fatalf("composer text during animation = %q, want %q", got, want)
+	}
+	if got := model.revealQueue.Len(); got != 1 {
+		t.Fatalf("reveal queue len after input/scroll = %d, want 1", got)
+	}
+}
+
+func TestMockShellDuplicateIncomingMessageIDsCompleteIndependently(t *testing.T) {
+	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
+	model := newMockShellModelWithClock("example", config.Default(), clock)
+
+	for _, text := range []string{"first duplicate", "second duplicate"} {
+		updated, _ := model.Update(mockIncomingMessageMsg{
+			message: mockIncomingMessage("example", "duplicate-id", text),
+		})
+		model = updated.(mockShellModel)
+	}
+	if got := model.revealQueue.Len(); got != 2 {
+		t.Fatalf("reveal queue len = %d, want 2", got)
+	}
+
+	driveRevealToCompletion(t, &model, clock)
+	view := model.View()
+	for _, want := range []string{"first duplicate", "second duplicate"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("completed duplicate-ID reveal missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestMockShellResizeDuringAnimationStaysWithinBounds(t *testing.T) {
+	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
+	model := newMockShellModelWithClock("example", config.Default(), clock)
+	updated, _ := model.Update(mockIncomingMessageMsg{
+		message: mockIncomingMessage("example", "resize-active", "active reveal survives a narrow resize without overflowing"),
+	})
+	model = updated.(mockShellModel)
+
+	clock.Add(mockRevealDelay)
+	updated, _ = model.Update(mockAnimationTickMsg{})
+	model = updated.(mockShellModel)
+	updated, _ = model.Update(tea.WindowSizeMsg{Width: 24, Height: 8})
+	view := updated.View()
+
+	if got, want := lineCount(view), 8; got != want {
+		t.Fatalf("resized active view line count = %d, want %d:\n%s", got, want, view)
+	}
+	for i, line := range strings.Split(strings.TrimSuffix(view, "\n"), "\n") {
+		if got := lipglossWidth(line); got > 24 {
+			t.Fatalf("line %d width = %d, want <= 24:\n%s", i+1, got, view)
+		}
+	}
+}
+
 func TestMockShellNarrowLayoutStaysWithinBounds(t *testing.T) {
 	model := newMockShellModel("example", config.Default())
 	model.composerText = "hello 😀 表"
@@ -220,6 +379,59 @@ func TestMockShellTinyWidthsDoNotExceedWindowWidth(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func mockIncomingMessage(channel, id, text string) twitch.ChatMessage {
+	return twitch.ChatMessage{
+		ID:          id,
+		Channel:     channel,
+		Timestamp:   time.Date(2026, 7, 2, 20, 0, 10, 0, time.UTC),
+		AuthorLogin: "viewer",
+		DisplayName: "viewer",
+		Text:        text,
+		Type:        twitch.MessageTypeChat,
+	}
+}
+
+func changedRevealFrames(t *testing.T, mode, text string) int {
+	t.Helper()
+
+	cfg := config.Default()
+	cfg.Features.AnimationMode = mode
+	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
+	model := newMockShellModelWithClock("example", cfg, clock)
+	updated, _ := model.Update(mockIncomingMessageMsg{
+		message: mockIncomingMessage("example", "animated-"+mode, text),
+	})
+	model = updated.(mockShellModel)
+
+	changed := 0
+	for model.revealQueue.Len() > 0 {
+		before := model.View()
+		clock.Add(mockRevealDelay)
+		updated, _ = model.Update(mockAnimationTickMsg{})
+		model = updated.(mockShellModel)
+		if after := model.View(); after != before {
+			changed++
+		}
+		if changed > 1000 {
+			t.Fatal("reveal did not complete")
+		}
+	}
+	return changed
+}
+
+func driveRevealToCompletion(t *testing.T, model *mockShellModel, clock *appFakeClock) {
+	t.Helper()
+
+	for i := 0; model.revealQueue.Len() > 0; i++ {
+		if i > 1000 {
+			t.Fatal("reveal did not complete")
+		}
+		clock.Add(mockRevealDelay)
+		updated, _ := model.Update(mockAnimationTickMsg{})
+		*model = updated.(mockShellModel)
 	}
 }
 

@@ -6,7 +6,7 @@ Progress as of the initial swarm pass:
 
 - Done: Phase 0 requirements matrix, risk register, backlog, and six ADRs.
 - Done: Go module bootstrap, CLI shell, config precedence/redaction tests, normalized message model skeleton, Bubble Tea mock chat shell, and module tool directives for `govulncheck`/`staticcheck`.
-- Remaining near-term work: render fragments, deterministic animation scheduler, and real Twitch IRC adapter.
+- Remaining near-term work: rendering/motion checkpoint validation and the real Twitch IRC adapter.
 
 Each task is intended to fit one implementation loop. Agents should keep write scope to
 the listed files where possible and use fakes before network-dependent code.
@@ -78,7 +78,7 @@ Follow-ups: Add layout golden snapshots.
 
 ## Task 6
 
-Task: Add deterministic typed-in animation for mock messages.
+Task: Add deterministic typed-in animation for mock messages. Status: implemented in the current mock shell.
 Owner lane: Motion engineer.
 Goal: Prove incoming rows can reveal without blocking the TUI.
 Context: Animation is core product behavior and must be tick-driven.

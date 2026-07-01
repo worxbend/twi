@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rivo/uniseg"
+	"github.com/w0rxbend/twi/internal/animation"
 	"github.com/w0rxbend/twi/internal/config"
 	"github.com/w0rxbend/twi/internal/render"
 	"github.com/w0rxbend/twi/internal/twitch"
@@ -18,6 +19,8 @@ import (
 const (
 	defaultMockWidth  = 88
 	defaultMockHeight = 22
+	mockIncomingDelay = 650 * time.Millisecond
+	mockRevealDelay   = 20 * time.Millisecond
 )
 
 type fdWriter interface {
@@ -25,17 +28,24 @@ type fdWriter interface {
 }
 
 type mockShellModel struct {
-	channel       string
-	animationMode string
-	imageMode     string
-	status        ConnectionState
-	messages      []twitch.ChatMessage
-	width         int
-	height        int
-	focus         mockFocus
-	helpExpanded  bool
-	composerText  string
-	scrollOffset  int
+	channel             string
+	animationMode       string
+	imageMode           string
+	status              ConnectionState
+	messages            []twitch.ChatMessage
+	incoming            []twitch.ChatMessage
+	nextIncoming        int
+	nextReveal          int
+	revealQueue         *animation.Queue
+	activeOrder         []string
+	activeMessages      map[string]twitch.ChatMessage
+	width               int
+	height              int
+	focus               mockFocus
+	helpExpanded        bool
+	composerText        string
+	scrollOffset        int
+	revealTickScheduled bool
 }
 
 var _ tea.Model = mockShellModel{}
@@ -59,6 +69,14 @@ type mockShellLayout struct {
 	helpHeight            int
 }
 
+type mockIncomingMessageMsg struct {
+	message   twitch.ChatMessage
+	scheduled bool
+	index     int
+}
+
+type mockAnimationTickMsg struct{}
+
 // RunMock starts the deterministic non-network mock chat shell. When stdout is
 // not an interactive terminal, it writes the initial Bubble Tea view and exits
 // so tests and redirected commands do not block waiting for keyboard input.
@@ -80,10 +98,15 @@ func RunMock(w io.Writer, cfg config.Config) error {
 }
 
 func newMockShellModel(channel string, cfg config.Config) mockShellModel {
+	return newMockShellModelWithClock(channel, cfg, nil)
+}
+
+func newMockShellModelWithClock(channel string, cfg config.Config, clock animation.Clock) mockShellModel {
 	connectedAt := time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)
+	animationConfig := mockAnimationConfig(cfg.Features.AnimationMode)
 	return mockShellModel{
 		channel:       channel,
-		animationMode: cfg.Features.AnimationMode,
+		animationMode: string(animationConfig.Mode),
 		imageMode:     cfg.Features.ImageMode,
 		status: ConnectionState{
 			Status:  ConnectionConnected,
@@ -91,10 +114,13 @@ func newMockShellModel(channel string, cfg config.Config) mockShellModel {
 			Detail:  "mock source ready",
 			At:      connectedAt,
 		},
-		messages: seededMockMessages(channel, connectedAt),
-		width:    defaultMockWidth,
-		height:   defaultMockHeight,
-		focus:    mockFocusChat,
+		messages:       seededMockMessages(channel, connectedAt),
+		incoming:       incomingMockMessages(channel, connectedAt),
+		revealQueue:    animation.NewQueue(animationConfig, clock),
+		activeMessages: make(map[string]twitch.ChatMessage),
+		width:          defaultMockWidth,
+		height:         defaultMockHeight,
+		focus:          mockFocusChat,
 	}
 }
 
@@ -133,8 +159,33 @@ func seededMockMessages(channel string, startedAt time.Time) []twitch.ChatMessag
 	}
 }
 
+func incomingMockMessages(channel string, startedAt time.Time) []twitch.ChatMessage {
+	return []twitch.ChatMessage{
+		{
+			ID:          "mock-live-1",
+			Channel:     channel,
+			Timestamp:   startedAt.Add(4 * time.Second),
+			AuthorLogin: "new_viewer",
+			DisplayName: "new_viewer",
+			AuthorColor: "#ffb86c",
+			Text:        "This incoming mock message reveals through animation ticks.",
+			Type:        twitch.MessageTypeChat,
+		},
+		{
+			ID:          "mock-live-2",
+			Channel:     channel,
+			Timestamp:   startedAt.Add(5 * time.Second),
+			AuthorLogin: "vip_guest",
+			DisplayName: "vip_guest",
+			AuthorColor: "#f38ba8",
+			Text:        "Scrolling and the composer stay responsive while frames advance.",
+			Type:        twitch.MessageTypeChat,
+		},
+	}
+}
+
 func (m mockShellModel) Init() tea.Cmd {
-	return nil
+	return m.nextIncomingCommand()
 }
 
 func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -178,6 +229,28 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.clampScroll()
+	case mockIncomingMessageMsg:
+		var cmds []tea.Cmd
+		if msg.scheduled && msg.index == m.nextIncoming {
+			m.nextIncoming++
+			cmds = append(cmds, m.nextIncomingCommand())
+		}
+		if revealCmd := m.enqueueMessage(msg.message); revealCmd != nil {
+			cmds = append(cmds, revealCmd)
+		}
+		m.clampScroll()
+		return m, tea.Batch(cmds...)
+	case mockAnimationTickMsg:
+		m.revealTickScheduled = false
+		result := m.revealQueue.Advance()
+		m.completeReveals(result.Completed)
+		m.clampScroll()
+		if m.revealQueue.Len() > 0 {
+			return m, m.scheduleRevealTick()
+		}
+		if result.Changed {
+			return m, nil
+		}
 	}
 	return m, nil
 }
@@ -262,6 +335,12 @@ func (m mockShellModel) chatRows(layout mockShellLayout) []string {
 	for _, msg := range m.messages {
 		for _, row := range render.PlainRows(msg, rowWidth) {
 			rows = append(rows, fitLine(row, rowWidth))
+		}
+	}
+	frames := m.revealQueue.Frames()
+	for _, id := range m.activeOrder {
+		for _, row := range frames[id] {
+			rows = append(rows, fitLine(row.Plain(), rowWidth))
 		}
 	}
 	return rows
@@ -458,6 +537,102 @@ func (m mockShellModel) maxScrollOffset() int {
 		return 0
 	}
 	return len(rows) - visible
+}
+
+func (m mockShellModel) nextIncomingCommand() tea.Cmd {
+	if m.nextIncoming >= len(m.incoming) {
+		return nil
+	}
+
+	message := m.incoming[m.nextIncoming]
+	index := m.nextIncoming
+	return tea.Tick(mockIncomingDelay, func(time.Time) tea.Msg {
+		return mockIncomingMessageMsg{
+			message:   message,
+			scheduled: true,
+			index:     index,
+		}
+	})
+}
+
+func (m *mockShellModel) enqueueMessage(message twitch.ChatMessage) tea.Cmd {
+	layout := m.layout()
+	rowWidth := layout.width
+	if layout.chatFramed {
+		rowWidth = layout.width - 4
+	}
+	rowWidth = clampMin(rowWidth, 1)
+
+	revealID := m.nextRevealID(message)
+	result := m.revealQueue.Enqueue(revealID, render.Rows(message, render.DefaultOptions(rowWidth)))
+	m.completeReveals(result.Overflow)
+	if result.Complete != nil {
+		m.messages = append(m.messages, message)
+		return nil
+	}
+	if result.Queued {
+		m.activeOrder = append(m.activeOrder, revealID)
+		m.activeMessages[revealID] = message
+		return m.scheduleRevealTick()
+	}
+	return nil
+}
+
+func (m *mockShellModel) nextRevealID(message twitch.ChatMessage) string {
+	m.nextReveal++
+	base := message.ID
+	if base == "" {
+		base = "mock-message"
+	}
+	return fmt.Sprintf("%s/%d", base, m.nextReveal)
+}
+
+func (m *mockShellModel) completeReveals(completed []animation.CompletedReveal) {
+	for _, reveal := range completed {
+		message, ok := m.activeMessages[reveal.ID]
+		if !ok {
+			continue
+		}
+		m.messages = append(m.messages, message)
+		delete(m.activeMessages, reveal.ID)
+		m.removeActiveReveal(reveal.ID)
+	}
+}
+
+func (m *mockShellModel) removeActiveReveal(id string) {
+	for i, activeID := range m.activeOrder {
+		if activeID != id {
+			continue
+		}
+		copy(m.activeOrder[i:], m.activeOrder[i+1:])
+		m.activeOrder = m.activeOrder[:len(m.activeOrder)-1]
+		return
+	}
+}
+
+func (m *mockShellModel) scheduleRevealTick() tea.Cmd {
+	if m.revealTickScheduled || m.revealQueue.Len() == 0 {
+		return nil
+	}
+	m.revealTickScheduled = true
+	return tea.Tick(mockRevealDelay, func(time.Time) tea.Msg {
+		return mockAnimationTickMsg{}
+	})
+}
+
+func mockAnimationConfig(mode string) animation.Config {
+	cfg := animation.DefaultConfig()
+	switch animation.Mode(mode) {
+	case animation.ModeOff:
+		cfg.Mode = animation.ModeOff
+	case animation.ModeReduced:
+		cfg.Mode = animation.ModeReduced
+	case animation.ModeFast:
+		cfg.Mode = animation.ModeFast
+	default:
+		cfg.Mode = animation.ModeFast
+	}
+	return cfg
 }
 
 func (m *mockShellModel) deleteComposerRune() {

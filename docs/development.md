@@ -10,10 +10,10 @@ This document summarizes the development workflow and architecture for `twi`. Th
 - `govulncheck` and `staticcheck` are pinned as Go module tools.
 - Use Go modules only. Do not use GOPATH workflows.
 - A CLI/config foundation exists with a deterministic non-network Bubble Tea mock shell; real Twitch dependencies are still planned.
-- The mock shell handles resize, chat/composer focus via `tab`, expanded help via `?`, page-key viewport scrolling, composer text entry, and reduced narrow-width status/help text.
+- The mock shell handles resize, chat/composer focus via `tab`, expanded help via `?`, page-key viewport scrolling, composer text entry, reduced narrow-width status/help text, and tick-driven reveal animation for scheduled incoming mock messages.
 - `internal/app` owns the UI-facing chat boundary, deterministic fake chat client, and Bubble Tea mock shell; the app layer consumes normalized `internal/twitch` messages instead of concrete Twitch transport types.
 - `internal/render` converts normalized messages into width-bounded rows of semantic fragments for timestamps, badges, usernames, replies, notices, actions, deleted messages, mentions, emoji fallbacks, and Twitch emote-token fallbacks.
-- `internal/animation` turns rendered rows into grapheme-safe reveal units and maintains a deterministic bounded reveal queue for `off`, `reduced`, and `fast` animation modes.
+- `internal/animation` turns rendered rows into grapheme-safe reveal units and maintains a deterministic bounded reveal queue for `off`, `reduced`, and `fast` animation modes. `internal/app` owns the Bubble Tea tick commands that enqueue incoming mock messages and advance active reveals.
 - `internal/theme` owns palette data and contrast correction for user-supplied foreground colors before render fragments are styled.
 
 ## Architecture Lanes
