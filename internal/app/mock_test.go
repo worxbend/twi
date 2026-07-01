@@ -178,6 +178,215 @@ func TestMockShellPageKeysScrollViewport(t *testing.T) {
 	}
 }
 
+func TestLiveShellEnterQueuesComposerSendAndSuccessKeepsComposerCleared(t *testing.T) {
+	client := NewFakeChatClient(1)
+	acceptedAt := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	if err := client.QueueSendResult(SendResult{AcceptedAt: acceptedAt, Detail: "accepted by Twitch"}, nil); err != nil {
+		t.Fatalf("QueueSendResult returned error: %v", err)
+	}
+	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
+	model.focus = mockFocusComposer
+	model.composerText = " hello chat "
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("Enter returned nil command, want send command")
+	}
+	if got := model.composerText; got != "" {
+		t.Fatalf("composerText after queue = %q, want cleared", got)
+	}
+	if model.activeSend == nil || model.activeSend.Channel != "example" || model.activeSend.Text != "hello chat" {
+		t.Fatalf("activeSend = %#v, want queued trimmed send for #example", model.activeSend)
+	}
+	if got, want := model.sendState, composerSendSending; got != want {
+		t.Fatalf("sendState after queue = %q, want %q", got, want)
+	}
+
+	sendMsg := cmd()
+	completed, ok := sendMsg.(composerSendCompletedMsg)
+	if !ok {
+		t.Fatalf("send command returned %T, want composerSendCompletedMsg", sendMsg)
+	}
+	updated, cmd = model.Update(completed)
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("successful single send returned extra command %#v", cmd)
+	}
+	if got := model.composerText; got != "" {
+		t.Fatalf("composerText after success = %q, want cleared", got)
+	}
+	if got, want := model.sendState, composerSendSucceeded; got != want {
+		t.Fatalf("sendState after success = %q, want %q", got, want)
+	}
+	sent := client.SentRequests()
+	if len(sent) != 1 || sent[0].Channel != "example" || sent[0].Text != "hello chat" {
+		t.Fatalf("SentRequests = %#v, want one trimmed send to active channel", sent)
+	}
+	if !strings.Contains(model.View(), "accepted by Twitch") {
+		t.Fatalf("view missing success detail:\n%s", model.View())
+	}
+}
+
+func TestLiveShellEnterIgnoresEmptyComposer(t *testing.T) {
+	client := NewFakeChatClient(1)
+	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
+	model.focus = mockFocusComposer
+	model.composerText = "   "
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("empty composer returned command %#v, want nil", cmd)
+	}
+	if model.activeSend != nil || len(model.sendQueue) != 0 {
+		t.Fatalf("empty composer queued send: active=%#v queue=%#v", model.activeSend, model.sendQueue)
+	}
+	if got := client.SentRequests(); len(got) != 0 {
+		t.Fatalf("SentRequests length = %d, want 0", len(got))
+	}
+}
+
+func TestLiveShellFailedSendShowsReasonAndRestoresComposer(t *testing.T) {
+	client := NewFakeChatClient(1)
+	if err := client.QueueSendResult(SendResult{}, fmt.Errorf("network unavailable")); err != nil {
+		t.Fatalf("QueueSendResult returned error: %v", err)
+	}
+	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
+	model.focus = mockFocusComposer
+	model.composerText = "please send"
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	completed := cmd().(composerSendCompletedMsg)
+	updated, _ = model.Update(completed)
+	model = updated.(mockShellModel)
+
+	if got, want := model.composerText, "please send"; got != want {
+		t.Fatalf("composerText after failed send = %q, want %q", got, want)
+	}
+	if got, want := model.sendState, composerSendFailed; got != want {
+		t.Fatalf("sendState after failure = %q, want %q", got, want)
+	}
+	for _, want := range []string{"failed", "network unavailable"} {
+		if !strings.Contains(model.View(), want) {
+			t.Fatalf("view missing %q after failed send:\n%s", want, model.View())
+		}
+	}
+}
+
+func TestLiveShellSendFailureUsesSendScopeGuidance(t *testing.T) {
+	client := NewFakeChatClient(1)
+	if err := client.QueueSendResult(SendResult{}, fmt.Errorf("missing scope for oauth:secret-token")); err != nil {
+		t.Fatalf("QueueSendResult returned error: %v", err)
+	}
+	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
+	model.focus = mockFocusComposer
+	model.composerText = "please send"
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	completed := cmd().(composerSendCompletedMsg)
+	updated, _ = model.Update(completed)
+	model = updated.(mockShellModel)
+
+	if strings.Contains(model.sendFeedback, "oauth:secret-token") {
+		t.Fatalf("sendFeedback leaked token: %q", model.sendFeedback)
+	}
+	for _, want := range []string{"chat:edit", "send failed"} {
+		if !strings.Contains(model.sendFeedback, want) {
+			t.Fatalf("sendFeedback = %q, want %q", model.sendFeedback, want)
+		}
+	}
+	if strings.Contains(model.sendFeedback, "chat:read") {
+		t.Fatalf("sendFeedback points at read scope instead of edit scope: %q", model.sendFeedback)
+	}
+}
+
+func TestLiveShellFailedSendRestoresQueuedFollowupText(t *testing.T) {
+	client := NewFakeChatClient(2)
+	if err := client.QueueSendResult(SendResult{}, fmt.Errorf("network unavailable")); err != nil {
+		t.Fatalf("QueueSendResult returned error: %v", err)
+	}
+	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
+	model.focus = mockFocusComposer
+	model.composerText = "first message"
+
+	updated, firstCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if firstCmd == nil {
+		t.Fatal("first Enter returned nil command, want send command")
+	}
+
+	model.composerText = "second message"
+	updated, secondCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if secondCmd != nil {
+		t.Fatalf("queued follow-up returned command %#v while first send active, want nil", secondCmd)
+	}
+	if got := model.composerText; got != "" {
+		t.Fatalf("composerText after queued follow-up = %q, want cleared", got)
+	}
+	if got := len(model.sendQueue); got != 1 {
+		t.Fatalf("sendQueue length = %d, want 1 queued follow-up", got)
+	}
+
+	completed := firstCmd().(composerSendCompletedMsg)
+	updated, cmd := model.Update(completed)
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("failed send returned next queued command %#v, want queue stopped", cmd)
+	}
+	if got := len(model.sendQueue); got != 0 {
+		t.Fatalf("sendQueue length after failure = %d, want drained into composer", got)
+	}
+	for _, want := range []string{"first message", "second message"} {
+		if !strings.Contains(model.composerText, want) {
+			t.Fatalf("composerText after failed queued send = %q, want it to contain %q", model.composerText, want)
+		}
+	}
+	if got := len(client.SentRequests()); got != 1 {
+		t.Fatalf("SentRequests length = %d, want only first send attempted", got)
+	}
+	for _, want := range []string{"failed", "network unavailable"} {
+		if !strings.Contains(model.View(), want) {
+			t.Fatalf("view missing %q after queued failure:\n%s", want, model.View())
+		}
+	}
+}
+
+func TestLiveShellRateLimitedSendShowsReasonAndRestoresComposer(t *testing.T) {
+	client := NewFakeChatClient(1)
+	if err := client.QueueSendResult(SendResult{
+		RateLimited: true,
+		RetryAfter:  30 * time.Second,
+		Detail:      "sending messages too quickly",
+	}, nil); err != nil {
+		t.Fatalf("QueueSendResult returned error: %v", err)
+	}
+	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
+	model.focus = mockFocusComposer
+	model.composerText = "slow down?"
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	completed := cmd().(composerSendCompletedMsg)
+	updated, _ = model.Update(completed)
+	model = updated.(mockShellModel)
+
+	if got, want := model.composerText, "slow down?"; got != want {
+		t.Fatalf("composerText after rate limit = %q, want %q", got, want)
+	}
+	if got, want := model.sendState, composerSendRateLimited; got != want {
+		t.Fatalf("sendState after rate limit = %q, want %q", got, want)
+	}
+	for _, want := range []string{"rate limited", "sending messages too quickly"} {
+		if !strings.Contains(model.View(), want) {
+			t.Fatalf("view missing %q after rate limit:\n%s", want, model.View())
+		}
+	}
+}
+
 func TestMockShellFastModeRevealsIncomingMessage(t *testing.T) {
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
 	model := newMockShellModelWithClock("example", config.Default(), clock)

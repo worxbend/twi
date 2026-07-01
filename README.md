@@ -18,10 +18,10 @@ This repository is in bootstrap. `PLAN.md` is the current source of truth for pr
 
 - The repository contains planning docs, a Go module, a `cmd/twi` entrypoint, config loading, secret redaction, a diagnostic skeleton, a deterministic Bubble Tea mock chat shell, and a live Twitch IRC read adapter.
 - The mock shell supports terminal resize, `tab` focus switching between chat and composer, `?` help expansion, page-key chat scrolling, a reduced narrow-width layout, and tick-driven reveal animation for incoming mock messages.
-- `twi chat --channel <channel>` starts the same Bubble Tea shell against Twitch IRC when `TWI_TWITCH_USERNAME` and `TWI_TWITCH_OAUTH_TOKEN` are configured. The token must be an IRC OAuth token with `chat:read`; send support is still a later task.
+- `twi chat --channel <channel>` starts the same Bubble Tea shell against Twitch IRC when `TWI_TWITCH_USERNAME` and `TWI_TWITCH_OAUTH_TOKEN` are configured. The token must be an IRC OAuth token with `chat:read`; sending from the composer also needs `chat:edit`.
 - The current stable Go version was verified from the official Go downloads page as `go1.26.4` on 2026-07-01.
 - The module uses Go `1.26` semantics, `toolchain go1.26.4`, and module-managed `govulncheck`/`staticcheck` tools.
-- Inline images and composer send behavior are not implemented yet.
+- Inline images, reply sends, and `/me` composer actions are not implemented yet.
 
 ## Planned CLI
 
@@ -49,13 +49,13 @@ The first runnable milestone should provide:
 - A fake chat source for development. Current app boundary and deterministic fake exist.
 - `twi chat --mock` with animated mock messages. Current.
 - `twi chat --channel <name>` live IRC read path for one configured channel. Current.
+- Composer sends for the active live channel with visible queued/sent/failed/rate-limited status. Current.
 
 ## Future Scope
 
 Later milestones add:
 
-- Composer send support using Twitch IRC username plus OAuth token.
-- Reply sends, `/me`, send queue status, richer reconnect handling, and rate-limit feedback.
+- Reply sends, `/me`, richer reconnect handling, and live credential/scope validation.
 - Helix-backed identity and asset lookups for avatars, emotes, badges, and token validation.
 - Kitty/Ghostty inline image rendering with fallback text, Unicode, and initials.
 - Multi-channel navigation, unread counts, message selection, inspect panel, mouse support, diagnostics, and richer setup flows.

@@ -5,8 +5,8 @@ Status: First focused agent-loop tasks derived from `PLAN.md`.
 Progress as of the initial swarm pass:
 
 - Done: Phase 0 requirements matrix, risk register, backlog, and six ADRs.
-- Done: Go module bootstrap, CLI shell, config precedence/redaction tests, normalized message model skeleton, Bubble Tea mock chat shell, module tool directives for `govulncheck`/`staticcheck`, and the one-channel Twitch IRC read adapter.
-- Remaining near-term work: composer send queue, richer live-chat validation, and later asset/image fallbacks.
+- Done: Go module bootstrap, CLI shell, config precedence/redaction tests, normalized message model skeleton, Bubble Tea mock chat shell, module tool directives for `govulncheck`/`staticcheck`, the one-channel Twitch IRC read adapter, and the active-channel composer send queue.
+- Remaining near-term work: richer live-chat validation, reply/action sends, and later asset/image fallbacks.
 
 Each task is intended to fit one implementation loop. Agents should keep write scope to
 the listed files where possible and use fakes before network-dependent code.
@@ -117,7 +117,7 @@ Follow-ups: Add room state, notice, moderation, and reconnect edge cases.
 
 ## Task 9
 
-Task: Implement composer send path and send queue.
+Task: Implement composer send path and send queue. Status: implemented for active-channel normal sends.
 Owner lane: Twitch integration engineer.
 Goal: Send messages from the TUI without losing user text on failure.
 Context: MVP needs IRC `Say` for the active channel and visible send status.

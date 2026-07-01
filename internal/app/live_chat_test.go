@@ -172,6 +172,33 @@ func TestLiveChatClientRedactsOAuthPatternInGenericErrors(t *testing.T) {
 	}
 }
 
+func TestLiveChatClientSendRedactsTransportErrors(t *testing.T) {
+	transport := newFakeTwitchTransport(2)
+	transport.sendErr = errors.New("missing scope for oauth:secret-token")
+	client, err := NewLiveChatClient(context.Background(), transport, 2)
+	if err != nil {
+		t.Fatalf("NewLiveChatClient returned error: %v", err)
+	}
+	defer client.Close()
+	<-client.ConnectionStates()
+
+	_, err = client.Send(context.Background(), SendRequest{Channel: "example", Text: "hello"})
+	if err == nil {
+		t.Fatal("Send returned nil error, want transport error")
+	}
+	if strings.Contains(err.Error(), "oauth:secret-token") {
+		t.Fatalf("Send error leaked token: %q", err.Error())
+	}
+	for _, want := range []string{"send failed", "chat:edit"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Send error = %q, want %q", err.Error(), want)
+		}
+	}
+	if strings.Contains(err.Error(), "chat:read") {
+		t.Fatalf("Send error points at read scope instead of edit scope: %q", err.Error())
+	}
+}
+
 func TestLiveShellConsumesClientMessagesAndConnectionStates(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
@@ -220,6 +247,8 @@ type fakeTwitchTransport struct {
 	mu        sync.Mutex
 	connected bool
 	closed    bool
+	sendErr   error
+	sends     []SendRequest
 }
 
 func newFakeTwitchTransport(buffer int) *fakeTwitchTransport {
@@ -233,8 +262,11 @@ func (t *fakeTwitchTransport) Connect(context.Context) (<-chan twitch.Event, err
 	return t.events, nil
 }
 
-func (t *fakeTwitchTransport) Send(context.Context, string, string) error {
-	return nil
+func (t *fakeTwitchTransport) Send(_ context.Context, channel, text string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.sends = append(t.sends, SendRequest{Channel: channel, Text: text})
+	return t.sendErr
 }
 
 func (t *fakeTwitchTransport) Reply(context.Context, string, string, string) error {

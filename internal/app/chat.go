@@ -44,6 +44,9 @@ type SendRequest struct {
 }
 
 type SendResult struct {
-	MessageID  string
-	AcceptedAt time.Time
+	MessageID   string
+	AcceptedAt  time.Time
+	Detail      string
+	RateLimited bool
+	RetryAfter  time.Duration
 }

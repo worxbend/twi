@@ -83,6 +83,40 @@ func TestFakeChatClientSendRecordsRequestsAndReturnsQueuedResults(t *testing.T) 
 	}
 }
 
+func TestFakeChatClientSendHonorsCanceledContext(t *testing.T) {
+	client := NewFakeChatClient(1)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := client.Send(ctx, SendRequest{Channel: "example", Text: "hello"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Send error = %v, want %v", err, context.Canceled)
+	}
+	if got := client.SentRequests(); len(got) != 0 {
+		t.Fatalf("SentRequests length = %d, want 0 for canceled context", len(got))
+	}
+}
+
+func TestFakeChatClientSendReturnsRateLimitLikeResult(t *testing.T) {
+	client := NewFakeChatClient(1)
+	result := SendResult{
+		RateLimited: true,
+		RetryAfter:  30 * time.Second,
+		Detail:      "sending messages too quickly",
+	}
+	if err := client.QueueSendResult(result, nil); err != nil {
+		t.Fatalf("QueueSendResult returned error: %v", err)
+	}
+
+	got, err := client.Send(context.Background(), SendRequest{Channel: "example", Text: "hello"})
+	if err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+	if !got.RateLimited || got.RetryAfter != 30*time.Second || got.Detail != result.Detail {
+		t.Fatalf("Send result = %#v, want rate-limit-like result %#v", got, result)
+	}
+}
+
 func TestFakeChatClientClose(t *testing.T) {
 	client := NewFakeChatClient(1)
 

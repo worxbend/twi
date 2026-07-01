@@ -48,7 +48,7 @@ Planned variables from `PLAN.md`:
 | Variable | Secret | Purpose |
 | --- | --- | --- |
 | `TWI_TWITCH_USERNAME` | No | Twitch login for IRC auth. |
-| `TWI_TWITCH_OAUTH_TOKEN` | Yes | Twitch IRC OAuth token with `chat:read` for live reads; later send support will require `chat:edit`. |
+| `TWI_TWITCH_OAUTH_TOKEN` | Yes | Twitch IRC OAuth token with `chat:read` for live reads and `chat:edit` for composer sends. |
 | `TWI_TWITCH_CLIENT_ID` | Usually no | Twitch app client ID for Helix/API calls. |
 | `TWI_TWITCH_CLIENT_SECRET` | Yes | Client secret if a future OAuth flow needs it. |
 | `TWI_DEFAULT_CHANNELS` | No | Default channel list. |
@@ -125,7 +125,7 @@ twi config path
 twi doctor
 ```
 
-`twi login`, real Twitch chat, and multi-channel UI behavior are still planned. Additional flags for auth, image modes, animation modes, and config paths should follow the precedence rules above.
+`twi login` and multi-channel UI behavior are still planned. One-channel Twitch IRC chat is current when username, OAuth token, and channel are configured. Additional flags for auth, image modes, animation modes, and config paths should follow the precedence rules above.
 
 ## Redacted Config Output
 

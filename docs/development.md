@@ -9,8 +9,8 @@ This document summarizes the development workflow and architecture for `twi`. Th
 - The Go module uses `go 1.26` and `toolchain go1.26.4`.
 - `govulncheck` and `staticcheck` are pinned as Go module tools.
 - Use Go modules only. Do not use GOPATH workflows.
-- A CLI/config foundation exists with a deterministic non-network Bubble Tea mock shell and a one-channel live Twitch IRC read path. Composer send wiring is still planned.
-- The mock shell handles resize, chat/composer focus via `tab`, expanded help via `?`, page-key viewport scrolling, composer text entry, reduced narrow-width status/help text, and tick-driven reveal animation for scheduled incoming mock messages.
+- A CLI/config foundation exists with a deterministic non-network Bubble Tea mock shell, a one-channel live Twitch IRC read path, and active-channel composer sends.
+- The shell handles resize, chat/composer focus via `tab`, expanded help via `?`, page-key viewport scrolling, composer text entry, Enter-to-send for live clients, reduced narrow-width status/help text, send status feedback, and tick-driven reveal animation for scheduled incoming mock messages.
 - `internal/app` owns the UI-facing chat boundary, deterministic fake chat client, live transport adapter, and Bubble Tea shell; the app layer consumes normalized `internal/twitch` messages instead of concrete Twitch transport types.
 - `internal/twitch` owns the `go-twitch-irc` client wrapper and callback normalization for `PRIVMSG`, `NOTICE`, `USERNOTICE`, `ROOMSTATE`, `CLEARCHAT`, `CLEARMSG`, `USERSTATE`, reconnect, connect, disconnect, and TODO-backed raw fallback events. Raw IRC tags are retained only for diagnostics/debug views.
 - `internal/render` converts normalized messages into width-bounded rows of semantic fragments for timestamps, badges, usernames, replies, notices, actions, deleted messages, mentions, emoji fallbacks, and Twitch emote-token fallbacks.
@@ -53,7 +53,7 @@ The plan calls for interfaces around:
 - `ImageRenderer`
 - `AnimationClock`
 
-`internal/app.ChatClient` currently combines the app-facing message stream, connection-state stream, and send contract. Use `internal/app.FakeChatClient` for deterministic UI and send-path tests. Use additional test fakes for network, asset, image, and animation behavior.
+`internal/app.ChatClient` currently combines the app-facing message stream, connection-state stream, and send contract. Send results can carry accepted, failed, or rate-limit-like feedback so the composer can clear accepted sends and restore unsent text on failure. Use `internal/app.FakeChatClient` for deterministic UI and send-path tests. Use additional test fakes for network, asset, image, and animation behavior.
 
 ## Tooling
 
@@ -119,7 +119,7 @@ Unit coverage should include:
 Integration coverage should include:
 
 - Fake Twitch chat client feeding messages into Bubble Tea.
-- Fake send path with success and failure.
+- Fake send path with success, failure, context cancellation, and rate-limit-like responses.
 - Reconnect state transitions.
 
 Golden or snapshot coverage should include:

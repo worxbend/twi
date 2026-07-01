@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -46,6 +47,11 @@ type mockShellModel struct {
 	focus               mockFocus
 	helpExpanded        bool
 	composerText        string
+	nextSend            int
+	activeSend          *queuedComposerSend
+	sendQueue           []queuedComposerSend
+	sendState           composerSendState
+	sendFeedback        string
 	scrollOffset        int
 	revealTickScheduled bool
 }
@@ -58,6 +64,23 @@ const (
 	mockFocusChat mockFocus = iota
 	mockFocusComposer
 )
+
+type composerSendState string
+
+const (
+	composerSendIdle        composerSendState = ""
+	composerSendQueued      composerSendState = "queued"
+	composerSendSending     composerSendState = "sending"
+	composerSendSucceeded   composerSendState = "sent"
+	composerSendFailed      composerSendState = "failed"
+	composerSendRateLimited composerSendState = "rate_limited"
+)
+
+type queuedComposerSend struct {
+	ID      int
+	Channel string
+	Text    string
+}
 
 type mockShellLayout struct {
 	width                 int
@@ -87,6 +110,12 @@ type chatClientMessageMsg struct {
 type chatClientConnectionStateMsg struct {
 	state ConnectionState
 	ok    bool
+}
+
+type composerSendCompletedMsg struct {
+	id     int
+	result SendResult
+	err    error
 }
 
 // RunMock starts the deterministic non-network mock chat shell. When stdout is
@@ -271,6 +300,10 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focus == mockFocusComposer {
 				m.composerText = ""
 			}
+		case tea.KeyEnter:
+			if m.focus == mockFocusComposer {
+				return m.queueComposerSend()
+			}
 		case tea.KeySpace:
 			if m.focus == mockFocusComposer {
 				m.composerText += " "
@@ -337,6 +370,8 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status.Channel = m.channel
 		}
 		return m, m.nextConnectionStateCommand()
+	case composerSendCompletedMsg:
+		return m.completeComposerSend(msg)
 	case mockAnimationTickMsg:
 		m.revealTickScheduled = false
 		result := m.revealQueue.Advance()
@@ -374,7 +409,9 @@ func (m mockShellModel) View() string {
 
 func (m mockShellModel) statusLine(width int) string {
 	left := fmt.Sprintf("#%s %s", m.channel, m.status.Status)
-	if width >= 34 && m.status.Detail != "" {
+	if width >= 50 && m.sendFeedback != "" {
+		left += " | send: " + m.sendFeedback
+	} else if width >= 34 && m.status.Detail != "" {
 		left += " - " + m.status.Detail
 	}
 	right := ""
@@ -447,6 +484,9 @@ func (m mockShellModel) composerView(layout mockShellLayout) string {
 	label := fmt.Sprintf(" Message #%s", m.channel)
 	if m.focus == mockFocusComposer {
 		label += " [focus]"
+	}
+	if m.sendState != composerSendIdle && layout.width >= 36 {
+		label += " - " + string(m.sendState)
 	}
 	if layout.width < 28 {
 		label = " >"
@@ -737,6 +777,109 @@ func (m *mockShellModel) scheduleRevealTick() tea.Cmd {
 	return tea.Tick(mockRevealDelay, func(time.Time) tea.Msg {
 		return mockAnimationTickMsg{}
 	})
+}
+
+func (m *mockShellModel) queueComposerSend() (tea.Model, tea.Cmd) {
+	text := strings.TrimSpace(m.composerText)
+	if text == "" {
+		return *m, nil
+	}
+	if m.client == nil {
+		m.sendState = composerSendFailed
+		m.sendFeedback = "send unavailable for this chat source"
+		return *m, nil
+	}
+
+	m.nextSend++
+	m.sendQueue = append(m.sendQueue, queuedComposerSend{
+		ID:      m.nextSend,
+		Channel: m.channel,
+		Text:    text,
+	})
+	m.composerText = ""
+	m.sendState = composerSendQueued
+	m.sendFeedback = fmt.Sprintf("queued for #%s", m.channel)
+	return *m, m.startNextComposerSend()
+}
+
+func (m *mockShellModel) startNextComposerSend() tea.Cmd {
+	if m.activeSend != nil || len(m.sendQueue) == 0 {
+		return nil
+	}
+	next := m.sendQueue[0]
+	m.sendQueue = m.sendQueue[1:]
+	m.activeSend = &next
+	m.sendState = composerSendSending
+	m.sendFeedback = fmt.Sprintf("sending to #%s", next.Channel)
+	client := m.client
+	req := SendRequest{Channel: next.Channel, Text: next.Text}
+	return func() tea.Msg {
+		result, err := client.Send(context.Background(), req)
+		return composerSendCompletedMsg{id: next.ID, result: result, err: err}
+	}
+}
+
+func (m mockShellModel) completeComposerSend(msg composerSendCompletedMsg) (tea.Model, tea.Cmd) {
+	if m.activeSend == nil || m.activeSend.ID != msg.id {
+		return m, nil
+	}
+
+	sent := *m.activeSend
+	m.activeSend = nil
+	if msg.err != nil {
+		m.sendState = composerSendFailed
+		m.sendFeedback = "failed: " + credentialSafeSendDetail(msg.err)
+		m.restoreComposerText(m.drainUnsentComposerText(sent)...)
+		return m, nil
+	}
+	if msg.result.RateLimited {
+		m.sendState = composerSendRateLimited
+		m.sendFeedback = "rate limited: " + sendResultDetail(msg.result)
+		m.restoreComposerText(m.drainUnsentComposerText(sent)...)
+		return m, nil
+	}
+
+	m.sendState = composerSendSucceeded
+	m.sendFeedback = sendResultDetail(msg.result)
+	return m, m.startNextComposerSend()
+}
+
+func (m *mockShellModel) drainUnsentComposerText(active queuedComposerSend) []string {
+	texts := make([]string, 0, len(m.sendQueue)+1)
+	texts = append(texts, active.Text)
+	for _, queued := range m.sendQueue {
+		texts = append(texts, queued.Text)
+	}
+	m.sendQueue = nil
+	return texts
+}
+
+func (m *mockShellModel) restoreComposerText(texts ...string) {
+	text := strings.TrimSpace(strings.Join(texts, " "))
+	if text == "" {
+		return
+	}
+	if strings.TrimSpace(m.composerText) == "" {
+		m.composerText = text
+		return
+	}
+	m.composerText = text + " " + m.composerText
+}
+
+func sendResultDetail(result SendResult) string {
+	if result.Detail != "" {
+		return result.Detail
+	}
+	if result.RateLimited {
+		if result.RetryAfter > 0 {
+			return "retry in " + result.RetryAfter.String()
+		}
+		return "Twitch is slowing message sends"
+	}
+	if !result.AcceptedAt.IsZero() {
+		return "accepted"
+	}
+	return "accepted"
 }
 
 func mockAnimationConfig(mode string) animation.Config {

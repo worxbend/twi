@@ -90,12 +90,12 @@ func (c *LiveChatClient) Send(ctx context.Context, req SendRequest) (SendResult,
 	}
 	if req.ReplyToMessageID != "" {
 		if err := c.transport.Reply(ctx, req.Channel, req.ReplyToMessageID, text); err != nil {
-			return SendResult{}, err
+			return SendResult{}, errors.New(credentialSafeSendDetail(err))
 		}
 		return SendResult{AcceptedAt: time.Now()}, nil
 	}
 	if err := c.transport.Send(ctx, req.Channel, text); err != nil {
-		return SendResult{}, err
+		return SendResult{}, errors.New(credentialSafeSendDetail(err))
 	}
 	return SendResult{AcceptedAt: time.Now()}, nil
 }
@@ -325,6 +325,17 @@ func credentialSafeDetail(err error) string {
 	lower := strings.ToLower(oauthTokenPattern.ReplaceAllString(err.Error(), ""))
 	if strings.Contains(lower, "auth") || strings.Contains(lower, "login") || strings.Contains(lower, "scope") {
 		return "Twitch IRC authentication failed; verify username, OAuth token, and chat:read scope"
+	}
+	return redactCredentialText(err.Error())
+}
+
+func credentialSafeSendDetail(err error) string {
+	if err == nil {
+		return ""
+	}
+	lower := strings.ToLower(oauthTokenPattern.ReplaceAllString(err.Error(), ""))
+	if strings.Contains(lower, "auth") || strings.Contains(lower, "login") || strings.Contains(lower, "scope") || strings.Contains(lower, "permission") {
+		return "Twitch IRC send failed; verify username, OAuth token, and chat:edit scope"
 	}
 	return redactCredentialText(err.Error())
 }
