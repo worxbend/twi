@@ -2,7 +2,7 @@
 
 `twi` is a planned terminal user interface for Twitch chat. The goal is a polished, keyboard-first chat client that can read live Twitch chat, send messages, animate incoming messages, and render rich chat content with graceful terminal fallbacks.
 
-This repository is in bootstrap. `PLAN.md` is the current source of truth for product direction, architecture, and delivery phases. The first Go module and stdlib-only CLI skeleton exist, while the full Bubble Tea UI and Twitch transport are still upcoming.
+This repository is in bootstrap. `PLAN.md` is the current source of truth for product direction, architecture, and delivery phases. The first Go module, CLI/config foundation, and a non-network Bubble Tea mock shell exist, while the real Twitch transport is still upcoming.
 
 ## Project Goals
 
@@ -16,10 +16,10 @@ This repository is in bootstrap. `PLAN.md` is the current source of truth for pr
 
 ## Current Bootstrap Status
 
-- The repository contains planning docs, a Go module, a `cmd/twi` entrypoint, config loading, secret redaction, a diagnostic skeleton, and deterministic mock chat output.
+- The repository contains planning docs, a Go module, a `cmd/twi` entrypoint, config loading, secret redaction, a diagnostic skeleton, and a deterministic Bubble Tea mock chat shell.
 - The current stable Go version was verified from the official Go downloads page as `go1.26.4` on 2026-07-01.
 - The module uses Go `1.26` semantics, `toolchain go1.26.4`, and module-managed `govulncheck`/`staticcheck` tools.
-- Real Twitch IRC, Bubble Tea rendering, inline images, and typed-in animation are not implemented yet.
+- Real Twitch IRC, inline images, and typed-in animation are not implemented yet.
 
 ## Planned CLI
 
@@ -27,7 +27,7 @@ The expected binary name is `twi`.
 
 | Command | Status | Purpose |
 | --- | --- | --- |
-| `twi chat --mock` | Current bootstrap | Print a deterministic non-network mock chat snapshot without Twitch credentials. |
+| `twi chat --mock` | Current bootstrap | Start a deterministic non-network Bubble Tea mock chat shell without Twitch credentials. |
 | `twi chat --channel <channel>` | MVP target | Start the TUI for one Twitch channel. Currently validates config but real transport is not implemented. |
 | `twi chat --channel <one> --channel <two>` | Future | Start multi-channel mode. |
 | `twi login` | Future | Start an OAuth or setup flow. |
@@ -43,9 +43,9 @@ The first runnable milestone should provide:
 - CLI help. Current.
 - Config loading from flags, environment variables, and a config file. Current bootstrap.
 - Secret redaction utilities. Current bootstrap.
-- A Bubble Tea root model with status bar, chat viewport, composer, compact help, and resize handling.
-- A fake chat source for development.
-- `twi chat --mock` with animated mock messages. Current bootstrap prints a static mock snapshot until Bubble Tea lands.
+- A Bubble Tea root model with status bar, chat viewport, composer, and compact help. Current.
+- A fake chat source for development. Current app boundary and deterministic fake exist.
+- `twi chat --mock` with animated mock messages. Current mock shell is static; animation is still planned.
 - A path toward `twi chat --channel <name>` once Twitch credentials and IRC connectivity are implemented.
 
 ## Future Scope

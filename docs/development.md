@@ -9,8 +9,8 @@ This document summarizes the development workflow and architecture for `twi`. Th
 - The Go module uses `go 1.26` and `toolchain go1.26.4`.
 - `govulncheck` and `staticcheck` are pinned as Go module tools.
 - Use Go modules only. Do not use GOPATH workflows.
-- A stdlib-only CLI/config/mock foundation exists; Bubble Tea and Twitch dependencies are still planned.
-- `internal/app` owns the UI-facing chat boundary and deterministic fake chat client; the app layer consumes normalized `internal/twitch` messages instead of concrete Twitch transport types.
+- A CLI/config foundation exists with a deterministic non-network Bubble Tea mock shell; real Twitch dependencies are still planned.
+- `internal/app` owns the UI-facing chat boundary, deterministic fake chat client, and Bubble Tea mock shell; the app layer consumes normalized `internal/twitch` messages instead of concrete Twitch transport types.
 
 ## Architecture Lanes
 
