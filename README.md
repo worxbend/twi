@@ -1,8 +1,8 @@
 # Twitch Chat TUI
 
-`twi` is a planned terminal user interface for Twitch chat. The goal is a polished, keyboard-first chat client that can read live Twitch chat, send messages, animate incoming messages, and render rich chat content with graceful terminal fallbacks.
+`twi` is a terminal user interface for Twitch chat. The goal is a polished, keyboard-first chat client that can read live Twitch chat, send messages, animate incoming messages, and render rich chat content with graceful terminal fallbacks.
 
-This repository is in bootstrap. `PLAN.md` is the current source of truth for product direction, architecture, and delivery phases. The first Go module, CLI/config foundation, a non-network Bubble Tea mock shell, and a one-channel Twitch IRC read path exist.
+`PLAN.md` is the current source of truth for product direction, architecture, and delivery phases. The Go module, CLI/config foundation, non-network Bubble Tea mock shell, one-channel Twitch IRC read/send path, fallback rendering contracts, and diagnostics are implemented.
 
 ## Project Goals
 
@@ -14,28 +14,28 @@ This repository is in bootstrap. `PLAN.md` is the current source of truth for pr
 - Support inline images in capable terminals while keeping text and initials fallbacks usable everywhere.
 - Keep Twitch credentials secure across flags, environment variables, config files, logs, and diagnostics.
 
-## Current Bootstrap Status
+## Current Status
 
-- The repository contains planning docs, a Go module, a `cmd/twi` entrypoint, config loading, secret redaction, a diagnostic skeleton, a deterministic Bubble Tea mock chat shell, and a live Twitch IRC read adapter.
+- The repository contains planning docs, a Go module, a `cmd/twi` entrypoint, config loading, secret redaction, diagnostics, a deterministic Bubble Tea mock chat shell, and a live Twitch IRC read/send adapter.
 - The mock shell supports terminal resize, `tab` focus switching between chat and composer, `?` help expansion, page-key chat scrolling, selected-message reply mode, `/me` action sends, a reduced narrow-width layout, and tick-driven reveal animation for incoming mock messages.
 - `twi chat --channel <channel>` starts the same Bubble Tea shell against Twitch IRC when `TWI_TWITCH_USERNAME` and `TWI_TWITCH_OAUTH_TOKEN` are configured. The token must be an IRC OAuth token with `chat:read`; sending from the composer also needs `chat:edit`.
 - The current stable Go version was verified from the official Go downloads page as `go1.26.4` on 2026-07-01.
 - The module uses Go `1.26` semantics, `toolchain go1.26.4`, and module-managed `govulncheck`/`staticcheck` tools.
 - Inline images are not implemented yet.
 
-## Planned CLI
+## CLI
 
-The expected binary name is `twi`.
+The binary name is `twi`.
 
 | Command | Status | Purpose |
 | --- | --- | --- |
-| `twi chat --mock` | Current bootstrap | Start a deterministic non-network Bubble Tea mock chat shell without Twitch credentials. |
-| `twi chat --channel <channel>` | Current bootstrap | Start the TUI for one Twitch channel using Twitch IRC when username and OAuth token are configured. |
+| `twi chat --mock` | Current | Start a deterministic non-network Bubble Tea mock chat shell without Twitch credentials. |
+| `twi chat --channel <channel>` | Current | Start the TUI for one Twitch channel using Twitch IRC when username and OAuth token are configured. |
 | `twi chat --channel <one> --channel <two>` | Future | Start multi-channel mode. |
 | `twi login` | Future | Start an OAuth or setup flow. |
-| `twi config show` | Current bootstrap | Print effective configuration with secrets redacted. |
-| `twi config path` | Current bootstrap | Print the config file path. |
-| `twi doctor` | Current bootstrap | Print early local checks. Twitch reachability, token validation, cache access, and image protocol checks are future work. |
+| `twi config show` | Current | Print effective configuration with secrets redacted. |
+| `twi config path` | Current | Print the config file path. |
+| `twi doctor` | Current | Print secret-safe config, credential, token-status, Twitch reachability, terminal, image-signal, cache, and feature-mode diagnostics. |
 
 ## MVP Scope
 
@@ -43,8 +43,8 @@ The first runnable milestone should provide:
 
 - A Go module and `cmd/twi` entrypoint. Current.
 - CLI help. Current.
-- Config loading from flags, environment variables, and a config file. Current bootstrap.
-- Secret redaction utilities. Current bootstrap.
+- Config loading from flags, environment variables, and a config file. Current.
+- Secret redaction utilities. Current.
 - A Bubble Tea root model with status bar, chat viewport, composer input, focus handling, viewport scrolling, compact/expanded help, and narrow-width layout. Current.
 - A fake chat source for development. Current app boundary and deterministic fake exist.
 - `twi chat --mock` with animated mock messages. Current.
@@ -55,14 +55,14 @@ The first runnable milestone should provide:
 
 Later milestones add:
 
-- Richer reconnect handling and live credential/scope validation.
-- Helix-backed identity and asset lookups for avatars, emotes, badges, and token validation.
+- Richer reconnect handling and Helix-backed live credential/scope validation.
+- Helix-backed identity and asset lookups for avatars, emotes, and badges.
 - Kitty/Ghostty inline image rendering with fallback text, Unicode, and initials.
 - Multi-channel navigation, unread counts, message selection, inspect panel, mouse support, diagnostics, and richer setup flows.
 
 ## Development Commands
 
-These are the intended commands once the Go module is initialized:
+These are the standard validation commands:
 
 ```sh
 go version
@@ -93,7 +93,7 @@ GOTOOLCHAIN=local GOCACHE=/tmp/twi-gocache GOMODCACHE=/tmp/twi-gomodcache STATIC
 
 Never commit Twitch OAuth tokens, client secrets, `.env` files, local config files with credentials, logs, terminal recordings, or screenshots that expose secrets.
 
-The planned implementation must not print secrets in:
+The implementation must not print secrets in:
 
 - `twi config show`
 - `twi doctor`

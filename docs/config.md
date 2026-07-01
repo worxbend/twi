@@ -1,11 +1,11 @@
 # Configuration
 
-This document describes the configuration model for `twi`. The repo is still in bootstrap, so the implemented parser is intentionally small and should be expanded deliberately as new commands become real.
+This document describes the configuration model for `twi`. The implemented parser is intentionally small and should be expanded deliberately as new commands become real.
 
 ## Current State
 
 - Config loading exists for flat `key = value` files, environment variables, and selected CLI overrides.
-- `twi config show` and `twi config path` exist in the bootstrap CLI.
+- `twi config show` and `twi config path` exist in the CLI.
 - `twi chat --channel <channel>` uses `TWI_TWITCH_USERNAME` and `TWI_TWITCH_OAUTH_TOKEN` for the current one-channel Twitch IRC read path.
 - Config output redacts OAuth tokens and client secrets.
 - `twi doctor` reports the effective config file path, credential presence,

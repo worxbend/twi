@@ -1,12 +1,12 @@
 # Authentication
 
-This document describes the planned authentication model for `twi`. The repository is still in bootstrap, so this is implementation guidance and user-facing documentation for upcoming milestones rather than a guarantee that auth commands already work.
+This document describes the authentication model for `twi`. It covers the current environment/config-file credential path for Twitch IRC and the future interactive login flow.
 
 ## Current State
 
-- `twi login` is planned, not assumed to be implemented.
-- The MVP should accept Twitch credentials from CLI flags, environment variables, or a local config file.
-- The first real Twitch transport should use Twitch IRC.
+- `twi login` is planned, not implemented.
+- The MVP accepts Twitch credentials from CLI flags, environment variables, or a local config file.
+- The first real Twitch transport uses Twitch IRC.
 - Later milestones may add interactive OAuth and richer EventSub/API chat support.
 
 ## MVP Credential Model

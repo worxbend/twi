@@ -1,6 +1,6 @@
 # Development
 
-This document summarizes the development workflow and architecture for `twi`. The repo is in bootstrap, so some planned packages and runtime behavior may not exist yet.
+This document summarizes the development workflow and architecture for `twi`. It describes the current MVP implementation plus planned extension points.
 
 ## Current State
 

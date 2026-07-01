@@ -1,6 +1,6 @@
 # Terminal Images
 
-`twi` is planned to support inline images for avatars, Twitch emotes, and standard emoji in capable terminals. This feature is not assumed to be implemented during bootstrap.
+`twi` is planned to support inline images for avatars, Twitch emotes, and standard emoji in capable terminals. The current MVP implements stable text, Unicode, initials, and compact badge fallbacks before inline image loading/rendering is added.
 
 ## Current State
 
