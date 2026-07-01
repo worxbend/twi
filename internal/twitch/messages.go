@@ -18,7 +18,9 @@ type ChatMessage struct {
 	Reply       *Reply
 	Type        MessageType
 	Deleted     bool
-	RawTags     map[string]string
+	// RawTags is retained only for diagnostics/debug views. UI and renderer
+	// behavior should use normalized fields above instead of transport tags.
+	RawTags map[string]string
 }
 
 type MessageType string
@@ -61,6 +63,8 @@ type Emote struct {
 
 type Reply struct {
 	ParentMessageID string
+	ParentAuthorID  string
+	ParentLogin     string
 	ParentAuthor    string
 	ParentText      string
 }

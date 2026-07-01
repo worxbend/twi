@@ -12,6 +12,7 @@ tool (
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/gempir/go-twitch-irc/v4 v4.4.1
 	github.com/rivo/uniseg v0.4.7
 	golang.org/x/term v0.44.0
 )
