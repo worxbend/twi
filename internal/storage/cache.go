@@ -52,14 +52,15 @@ type AssetKey struct {
 // renderer by an asynchronous caller. Path may be empty for metadata-only
 // entries or tests.
 type AssetRecord struct {
-	Key         AssetKey
-	Path        string
-	SourceURL   string
-	MediaType   string
-	WidthCells  int
-	HeightCells int
-	FetchedAt   time.Time
-	ExpiresAt   time.Time
+	Key             AssetKey
+	Path            string
+	SourceURL       string
+	PayloadIdentity string
+	MediaType       string
+	WidthCells      int
+	HeightCells     int
+	FetchedAt       time.Time
+	ExpiresAt       time.Time
 }
 
 // AssetCache is the minimal context-aware cache boundary for image assets.
@@ -76,6 +77,9 @@ var (
 	ErrUnsafeAssetPath = errors.New("unsafe asset cache path")
 	// ErrUnsafeAssetSourceURL reports source metadata that may contain a secret.
 	ErrUnsafeAssetSourceURL = errors.New("unsafe asset cache source URL")
+	// ErrUnsafeAssetPayloadIdentity reports payload metadata that may contain a
+	// URL, filesystem path, secret, or unsupported identity shape.
+	ErrUnsafeAssetPayloadIdentity = errors.New("unsafe asset cache payload identity")
 )
 
 // MemoryAssetCache is a deterministic in-memory AssetCache for tests and
@@ -123,6 +127,9 @@ func (c *MemoryAssetCache) PutAsset(ctx context.Context, record AssetRecord) err
 	}
 	if record.SourceURL != "" && containsUnsafeCacheSourceURL(record.SourceURL) {
 		return ErrUnsafeAssetSourceURL
+	}
+	if err := validateAssetPayloadIdentity(record.PayloadIdentity); err != nil {
+		return err
 	}
 	if record.Path != "" && containsUnsafeCacheText(record.Path) {
 		return ErrUnsafeAssetPath
@@ -190,15 +197,19 @@ func (c *DiskAssetCache) GetAsset(ctx context.Context, key AssetKey) (AssetRecor
 	if metadata.SourceURL != "" && containsUnsafeCacheSourceURL(metadata.SourceURL) {
 		return AssetRecord{}, false, nil
 	}
+	if validateAssetPayloadIdentity(metadata.PayloadIdentity) != nil {
+		return AssetRecord{}, false, nil
+	}
 
 	record := AssetRecord{
-		Key:         key,
-		SourceURL:   metadata.SourceURL,
-		MediaType:   metadata.MediaType,
-		WidthCells:  metadata.WidthCells,
-		HeightCells: metadata.HeightCells,
-		FetchedAt:   metadata.FetchedAt,
-		ExpiresAt:   metadata.ExpiresAt,
+		Key:             key,
+		SourceURL:       metadata.SourceURL,
+		PayloadIdentity: metadata.PayloadIdentity,
+		MediaType:       metadata.MediaType,
+		WidthCells:      metadata.WidthCells,
+		HeightCells:     metadata.HeightCells,
+		FetchedAt:       metadata.FetchedAt,
+		ExpiresAt:       metadata.ExpiresAt,
 	}
 	if metadata.HasData {
 		info, err := os.Stat(paths.data)
@@ -230,6 +241,9 @@ func (c *DiskAssetCache) PutAsset(ctx context.Context, record AssetRecord) error
 	if record.SourceURL != "" && containsUnsafeCacheSourceURL(record.SourceURL) {
 		return ErrUnsafeAssetSourceURL
 	}
+	if err := validateAssetPayloadIdentity(record.PayloadIdentity); err != nil {
+		return err
+	}
 	if record.Path != "" && containsUnsafeCacheText(record.Path) {
 		return ErrUnsafeAssetPath
 	}
@@ -252,15 +266,16 @@ func (c *DiskAssetCache) PutAsset(ctx context.Context, record AssetRecord) error
 	}
 
 	metadata := diskAssetMetadata{
-		Version:     diskAssetMetadataVersion,
-		Key:         record.Key,
-		HasData:     hasData,
-		SourceURL:   record.SourceURL,
-		MediaType:   record.MediaType,
-		WidthCells:  record.WidthCells,
-		HeightCells: record.HeightCells,
-		FetchedAt:   record.FetchedAt,
-		ExpiresAt:   record.ExpiresAt,
+		Version:         diskAssetMetadataVersion,
+		Key:             record.Key,
+		HasData:         hasData,
+		SourceURL:       record.SourceURL,
+		PayloadIdentity: record.PayloadIdentity,
+		MediaType:       record.MediaType,
+		WidthCells:      record.WidthCells,
+		HeightCells:     record.HeightCells,
+		FetchedAt:       record.FetchedAt,
+		ExpiresAt:       record.ExpiresAt,
 	}
 	data, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
@@ -390,15 +405,16 @@ type diskCachePaths struct {
 const diskAssetMetadataVersion = 1
 
 type diskAssetMetadata struct {
-	Version     int       `json:"version"`
-	Key         AssetKey  `json:"key"`
-	HasData     bool      `json:"has_data"`
-	SourceURL   string    `json:"source_url,omitempty"`
-	MediaType   string    `json:"media_type,omitempty"`
-	WidthCells  int       `json:"width_cells,omitempty"`
-	HeightCells int       `json:"height_cells,omitempty"`
-	FetchedAt   time.Time `json:"fetched_at,omitempty"`
-	ExpiresAt   time.Time `json:"expires_at,omitempty"`
+	Version         int       `json:"version"`
+	Key             AssetKey  `json:"key"`
+	HasData         bool      `json:"has_data"`
+	SourceURL       string    `json:"source_url,omitempty"`
+	PayloadIdentity string    `json:"payload_identity,omitempty"`
+	MediaType       string    `json:"media_type,omitempty"`
+	WidthCells      int       `json:"width_cells,omitempty"`
+	HeightCells     int       `json:"height_cells,omitempty"`
+	FetchedAt       time.Time `json:"fetched_at,omitempty"`
+	ExpiresAt       time.Time `json:"expires_at,omitempty"`
 }
 
 type pruneEntry struct {
@@ -624,6 +640,34 @@ func containsUnsafeCacheSourceURL(value string) bool {
 	}
 	scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
 	return scheme != "http" && scheme != "https"
+}
+
+func validateAssetPayloadIdentity(value string) error {
+	if value == "" {
+		return nil
+	}
+	if !safeAssetPayloadIdentity(value) {
+		return ErrUnsafeAssetPayloadIdentity
+	}
+	return nil
+}
+
+func safeAssetPayloadIdentity(value string) bool {
+	if strings.TrimSpace(value) != value {
+		return false
+	}
+	const prefix = "sha256:"
+	if !strings.HasPrefix(value, prefix) || len(value) != len(prefix)+64 {
+		return false
+	}
+	for _, r := range value[len(prefix):] {
+		if r < '0' || r > '9' {
+			if r < 'a' || r > 'f' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func containsCredentialCacheMarker(lower string) bool {

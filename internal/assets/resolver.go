@@ -115,12 +115,13 @@ type DownloadRequest struct {
 
 // DownloadResult is the local cached representation produced by Downloader.
 type DownloadResult struct {
-	Path        string
-	MediaType   string
-	WidthCells  int
-	HeightCells int
-	FetchedAt   time.Time
-	ExpiresAt   time.Time
+	Path            string
+	PayloadIdentity string
+	MediaType       string
+	WidthCells      int
+	HeightCells     int
+	FetchedAt       time.Time
+	ExpiresAt       time.Time
 }
 
 // Resolver composes lookup, download, and cache boundaries for one asset.
@@ -317,14 +318,15 @@ func normalizeRequestRef(req Request) twitch.AssetRef {
 
 func recordFromDownload(key storage.AssetKey, metadata Metadata, download DownloadResult, req Request, now time.Time) storage.AssetRecord {
 	record := storage.AssetRecord{
-		Key:         key,
-		Path:        download.Path,
-		SourceURL:   metadata.URL,
-		MediaType:   firstNonEmpty(download.MediaType, metadata.MediaType),
-		WidthCells:  firstPositive(download.WidthCells, metadata.WidthCells, req.WidthCells),
-		HeightCells: firstPositive(download.HeightCells, metadata.HeightCells, req.HeightCells),
-		FetchedAt:   download.FetchedAt,
-		ExpiresAt:   download.ExpiresAt,
+		Key:             key,
+		Path:            download.Path,
+		SourceURL:       metadata.URL,
+		PayloadIdentity: download.PayloadIdentity,
+		MediaType:       firstNonEmpty(download.MediaType, metadata.MediaType),
+		WidthCells:      firstPositive(download.WidthCells, metadata.WidthCells, req.WidthCells),
+		HeightCells:     firstPositive(download.HeightCells, metadata.HeightCells, req.HeightCells),
+		FetchedAt:       download.FetchedAt,
+		ExpiresAt:       download.ExpiresAt,
 	}
 	if record.FetchedAt.IsZero() {
 		record.FetchedAt = now

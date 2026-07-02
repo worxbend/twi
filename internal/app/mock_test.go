@@ -1771,6 +1771,87 @@ func TestLiveShellPermanentAssetFailureRetriesChangedRecordAfterBackoff(t *testi
 	}
 }
 
+func TestLiveShellPermanentAssetFailureRetriesChangedPayloadIdentityAfterBackoff(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmoteMode = "image"
+	fetchedAt := time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)
+	payloadA := "sha256:" + strings.Repeat("a", 64)
+	payloadB := "sha256:" + strings.Repeat("b", 64)
+	resolver := &appFakeAssetResolver{
+		path:            "downloaded.png",
+		sourceURL:       "https://cdn.example/emote.png",
+		payloadIdentity: payloadA,
+		fetchedAt:       fetchedAt,
+	}
+	preparer := &appFakeImagePreparer{err: fmt.Errorf("%w: %w", render.ErrImagePreparationFailed, render.ErrImageCorruptData)}
+	renderer := &appFakeImageRenderer{cells: map[render.ImageCellKey]string{
+		{Kind: assets.KindTwitchEmote, ID: "25"}: "EM25  ",
+	}}
+	model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
+		AssetResolver: resolver,
+		ImagePreparer: preparer,
+		ImageRenderer: renderer,
+	})
+	message := assetEventMessage("changed-payload-retry", "25", "😀")
+	message.Badges = nil
+	model.activeChannelState().messages = []twitch.ChatMessage{message}
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 96, Height: 12})
+	model = updated.(mockShellModel)
+	updated, cmd := model.Update(assetLookupTickMsg{})
+	model = updated.(mockShellModel)
+	failedBatch := cmd().(assetPreparedBatchMsg)
+	failedID := failedBatch.results[0].event.RequestID
+	updated, _ = model.Update(failedBatch)
+	model = updated.(mockShellModel)
+	if got := len(model.assetPermanentFailure); got != 1 {
+		t.Fatalf("permanent failure entries = %d, want 1", got)
+	}
+	failureState := fmt.Sprintf("%#v", model.assetPermanentFailure)
+	if !strings.Contains(failureState, payloadA) {
+		t.Fatalf("permanent failure state missing payload identity %q: %s", payloadA, failureState)
+	}
+	for _, notWant := range []string{"https://", "cdn.example", "downloaded.png", "access_token", "refresh_token", "client_secret", "Authorization", "Cookie"} {
+		if strings.Contains(failureState, notWant) {
+			t.Fatalf("permanent failure state leaked %q: %s", notWant, failureState)
+		}
+	}
+
+	model.assetRetryAfter[failedID] = time.Now().Add(-time.Second)
+	preparer.err = nil
+	updated, cmd = model.Update(assetLookupTickMsg{})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("same-payload retry returned nil command, want resolver command")
+	}
+	updated, _ = model.Update(cmd().(assetPreparedBatchMsg))
+	model = updated.(mockShellModel)
+	if preparer.calls != 1 || renderer.calls != 0 {
+		t.Fatalf("preparer/renderer calls after same-payload retry = %d/%d, want 1/0", preparer.calls, renderer.calls)
+	}
+
+	model.assetRetryAfter[failedID] = time.Now().Add(-time.Second)
+	resolver.payloadIdentity = payloadB
+	updated, cmd = model.Update(assetLookupTickMsg{})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("changed-payload retry returned nil command, want resolver command")
+	}
+	updated, _ = model.Update(cmd().(assetPreparedBatchMsg))
+	model = updated.(mockShellModel)
+
+	if preparer.calls != 2 || renderer.calls != 1 {
+		t.Fatalf("preparer/renderer calls after changed payload = %d/%d, want 2/1", preparer.calls, renderer.calls)
+	}
+	if _, ok := model.assetRetryAfter[failedID]; ok {
+		t.Fatalf("assetRetryAfter still contains %q after successful changed-payload render", failedID)
+	}
+	if view := model.View(); !strings.Contains(view, "EM25") {
+		t.Fatalf("view missing prepared cell after changed-payload retry:\n%s", view)
+	}
+}
+
 func TestAssetPermanentFailureKeyRejectsPathShapedState(t *testing.T) {
 	for _, ref := range []twitch.AssetRef{
 		{Kind: assets.KindTwitchEmote, ID: "/home/user/asset.png"},
@@ -1824,6 +1905,27 @@ func TestAssetPermanentFailureKeyRejectsPathShapedState(t *testing.T) {
 	for _, notWant := range []string{"/home/user", "../cache", `C:\Users`, "asset.png"} {
 		if strings.Contains(failureState, notWant) {
 			t.Fatalf("failure key leaked path-shaped text %q: %s", notWant, failureState)
+		}
+	}
+
+	event.Record.Key = storage.AssetKey{Kind: assets.KindTwitchEmote, ID: "25"}
+	event.Record.PayloadIdentity = "https://cdn.example/asset.png?access_token=secret"
+	key, ok = assetPermanentFailureKeyForEvent(event, render.ImageSpec{
+		Ref:         twitch.AssetRef{Kind: assets.KindTwitchEmote, ID: "25"},
+		WidthCells:  6,
+		HeightCells: 1,
+		Fallback:    "Kappa",
+	})
+	if !ok {
+		t.Fatal("unsafe payload identity event produced no failure key")
+	}
+	if !key.PayloadIdentityUnsafe || key.PayloadIdentity != "" {
+		t.Fatalf("unsafe payload identity stored identity = %#v, want unsafe marker without payload text", key)
+	}
+	failureState = fmt.Sprintf("%#v", key)
+	for _, notWant := range []string{"https://", "cdn.example", "asset.png", "access_token", "secret"} {
+		if strings.Contains(failureState, notWant) {
+			t.Fatalf("failure key leaked payload identity text %q: %s", notWant, failureState)
 		}
 	}
 }
@@ -2731,13 +2833,14 @@ func (f *appFakeAvatarResolver) ResolveAvatars(_ context.Context, requests []ass
 }
 
 type appFakeAssetResolver struct {
-	calls     int
-	last      []assets.Request
-	fail      bool
-	path      string
-	sourceURL string
-	mediaType string
-	fetchedAt time.Time
+	calls           int
+	last            []assets.Request
+	fail            bool
+	path            string
+	sourceURL       string
+	payloadIdentity string
+	mediaType       string
+	fetchedAt       time.Time
 }
 
 func (f *appFakeAssetResolver) Resolve(_ context.Context, request assets.Request) assets.Event {
@@ -2756,13 +2859,14 @@ func (f *appFakeAssetResolver) Resolve(_ context.Context, request assets.Request
 		RequestID: request.ID,
 		Ref:       request.Ref,
 		Record: storage.AssetRecord{
-			Key:         storage.AssetKey{Kind: request.Ref.Kind, ID: request.Ref.ID},
-			Path:        firstNonEmptyString(f.path, "fake.png"),
-			SourceURL:   f.sourceURL,
-			MediaType:   firstNonEmptyString(f.mediaType, "image/png"),
-			WidthCells:  request.WidthCells,
-			HeightCells: request.HeightCells,
-			FetchedAt:   f.fetchedAt,
+			Key:             storage.AssetKey{Kind: request.Ref.Kind, ID: request.Ref.ID},
+			Path:            firstNonEmptyString(f.path, "fake.png"),
+			SourceURL:       f.sourceURL,
+			PayloadIdentity: f.payloadIdentity,
+			MediaType:       firstNonEmptyString(f.mediaType, "image/png"),
+			WidthCells:      request.WidthCells,
+			HeightCells:     request.HeightCells,
+			FetchedAt:       f.fetchedAt,
 		},
 		At: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC),
 	}

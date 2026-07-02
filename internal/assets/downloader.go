@@ -3,6 +3,8 @@ package assets
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -133,9 +135,10 @@ func (d *PublicImageDownloader) Download(ctx context.Context, req DownloadReques
 	}
 
 	return DownloadResult{
-		Path:      path,
-		MediaType: mediaType,
-		FetchedAt: opts.Now(),
+		Path:            path,
+		PayloadIdentity: downloadPayloadIdentity(data),
+		MediaType:       mediaType,
+		FetchedAt:       opts.Now(),
 	}, nil
 }
 
@@ -473,6 +476,11 @@ func downloadedImageMediaType(headerValue, metadataValue string, data []byte) (s
 		return mediaType, nil
 	}
 	return "", ErrAssetDownloadUnsupportedMediaType
+}
+
+func downloadPayloadIdentity(data []byte) string {
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 func sniffBytes(data []byte) []byte {

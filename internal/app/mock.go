@@ -177,18 +177,20 @@ type assetPreparedBatchMsg struct {
 }
 
 type assetPermanentFailureKey struct {
-	AssetKind            string
-	AssetID              string
-	RecordKind           string
-	RecordID             string
-	RecordUnsafe         bool
-	MediaType            string
-	MediaTypeUnsafe      bool
-	RecordWidthCells     int
-	RecordHeightCells    int
-	FetchedAtUnixNano    int64
-	RequestedWidthCells  int
-	RequestedHeightCells int
+	AssetKind             string
+	AssetID               string
+	RecordKind            string
+	RecordID              string
+	RecordUnsafe          bool
+	PayloadIdentity       string
+	PayloadIdentityUnsafe bool
+	MediaType             string
+	MediaTypeUnsafe       bool
+	RecordWidthCells      int
+	RecordHeightCells     int
+	FetchedAtUnixNano     int64
+	RequestedWidthCells   int
+	RequestedHeightCells  int
 }
 
 type chatClientMessageMsg struct {
@@ -1904,6 +1906,10 @@ func assetPermanentFailureKeyForEvent(event assets.Event, spec render.ImageSpec)
 		key.RecordID = id
 		key.RecordUnsafe = unsafe
 	}
+	if identity, unsafe, ok := safePayloadIdentity(event.Record.PayloadIdentity); ok {
+		key.PayloadIdentity = identity
+		key.PayloadIdentityUnsafe = unsafe
+	}
 	if mediaType, ok := safeAssetFailureText(event.Record.MediaType); ok {
 		key.MediaType = mediaType
 	} else {
@@ -1922,6 +1928,32 @@ func safeRecordIdentity(recordKey storage.AssetKey) (kind, id string, unsafe, ok
 		return "", "", true, true
 	}
 	return kind, id, false, true
+}
+
+func safePayloadIdentity(value string) (identity string, unsafe, ok bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", false, false
+	}
+	if !safePayloadDigestIdentity(value) {
+		return "", true, true
+	}
+	return value, false, true
+}
+
+func safePayloadDigestIdentity(value string) bool {
+	const prefix = "sha256:"
+	if !strings.HasPrefix(value, prefix) || len(value) != len(prefix)+64 {
+		return false
+	}
+	for _, r := range value[len(prefix):] {
+		if r < '0' || r > '9' {
+			if r < 'a' || r > 'f' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func safeAssetFailureText(value string) (string, bool) {

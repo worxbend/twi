@@ -148,7 +148,8 @@ func TestResolverDownloadsAndCachesCacheMiss(t *testing.T) {
 	}
 	downloader := &fakeDownloader{
 		result: DownloadResult{
-			Path: "emoji/grinning.png",
+			Path:            "emoji/grinning.png",
+			PayloadIdentity: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
 	}
 	resolver := &Resolver{
@@ -177,6 +178,9 @@ func TestResolverDownloadsAndCachesCacheMiss(t *testing.T) {
 	}
 	if event.Record.Path != "emoji/grinning.png" {
 		t.Fatalf("event.Record.Path = %q, want cached path", event.Record.Path)
+	}
+	if event.Record.PayloadIdentity != downloader.result.PayloadIdentity {
+		t.Fatalf("event.Record.PayloadIdentity = %q, want %q", event.Record.PayloadIdentity, downloader.result.PayloadIdentity)
 	}
 	if event.Record.MediaType != "image/png" {
 		t.Fatalf("event.Record.MediaType = %q, want image/png", event.Record.MediaType)

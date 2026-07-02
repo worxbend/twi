@@ -3,6 +3,8 @@ package assets
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"image"
@@ -47,6 +49,14 @@ func TestPublicImageDownloaderDownloadsSniffedPNGToSafePath(t *testing.T) {
 	}
 	if result.MediaType != "image/png" {
 		t.Fatalf("result.MediaType = %q, want image/png", result.MediaType)
+	}
+	if result.PayloadIdentity != payloadIdentityForTest(body) {
+		t.Fatalf("result.PayloadIdentity = %q, want digest identity", result.PayloadIdentity)
+	}
+	for _, unsafe := range []string{"https://", "cdn.example", result.Path, "access_token", "refresh_token", "client_secret", "Authorization", "Cookie"} {
+		if unsafe != "" && strings.Contains(result.PayloadIdentity, unsafe) {
+			t.Fatalf("payload identity leaked unsafe text %q: %q", unsafe, result.PayloadIdentity)
+		}
 	}
 	if !result.FetchedAt.Equal(now) {
 		t.Fatalf("result.FetchedAt = %s, want %s", result.FetchedAt, now)
@@ -620,6 +630,11 @@ func assertSafeDownloadPath(t *testing.T, path string) {
 		t.Fatal("download path is empty")
 	}
 	assertNoSecretText(t, path, "https://", "http://", "cdn.example", "assets.example", "access_token", "refresh_token", "client_secret", "Authorization", "Cookie", "oauth:")
+}
+
+func payloadIdentityForTest(data []byte) string {
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 func assertNoSecretText(t *testing.T, value string, notWant ...string) {

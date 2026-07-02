@@ -15,12 +15,13 @@ import (
 func TestMemoryAssetCacheStoresRecordsWithoutNetwork(t *testing.T) {
 	cache := NewMemoryAssetCache()
 	record := AssetRecord{
-		Key:         AssetKey{Kind: "twitch_emote", ID: "25"},
-		Path:        "emotes/25.png",
-		MediaType:   "image/png",
-		WidthCells:  6,
-		HeightCells: 1,
-		FetchedAt:   time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC),
+		Key:             AssetKey{Kind: "twitch_emote", ID: "25"},
+		Path:            "emotes/25.png",
+		PayloadIdentity: "sha256:" + strings.Repeat("1", 64),
+		MediaType:       "image/png",
+		WidthCells:      6,
+		HeightCells:     1,
+		FetchedAt:       time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC),
 	}
 
 	if err := cache.PutAsset(context.Background(), record); err != nil {
@@ -77,6 +78,14 @@ func TestMemoryAssetCacheRejectsCredentialBearingKeysAndPaths(t *testing.T) {
 	if !errors.Is(err, ErrUnsafeAssetSourceURL) {
 		t.Fatalf("PutAsset unsafe source URL error = %v, want ErrUnsafeAssetSourceURL", err)
 	}
+
+	err = cache.PutAsset(context.Background(), AssetRecord{
+		Key:             AssetKey{Kind: "emoji", ID: "1f600"},
+		PayloadIdentity: "https://cdn.example/emoji.png?access_token=secret",
+	})
+	if !errors.Is(err, ErrUnsafeAssetPayloadIdentity) {
+		t.Fatalf("PutAsset unsafe payload identity error = %v, want ErrUnsafeAssetPayloadIdentity", err)
+	}
 }
 
 func TestDiskAssetCachePersistsAcrossInstances(t *testing.T) {
@@ -88,14 +97,15 @@ func TestDiskAssetCachePersistsAcrossInstances(t *testing.T) {
 	}
 
 	record := AssetRecord{
-		Key:         AssetKey{Kind: "avatar", ID: "user-1"},
-		Path:        source,
-		SourceURL:   "https://static-cdn.example/avatar/user-1.png",
-		MediaType:   "image/png",
-		WidthCells:  4,
-		HeightCells: 2,
-		FetchedAt:   time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC),
-		ExpiresAt:   time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC),
+		Key:             AssetKey{Kind: "avatar", ID: "user-1"},
+		Path:            source,
+		SourceURL:       "https://static-cdn.example/avatar/user-1.png",
+		PayloadIdentity: "sha256:" + strings.Repeat("a", 64),
+		MediaType:       "image/png",
+		WidthCells:      4,
+		HeightCells:     2,
+		FetchedAt:       time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC),
+		ExpiresAt:       time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC),
 	}
 
 	if err := NewDiskAssetCache(root).PutAsset(context.Background(), record); err != nil {
@@ -114,8 +124,11 @@ func TestDiskAssetCachePersistsAcrossInstances(t *testing.T) {
 	if got.Path == "" || got.Path == source {
 		t.Fatalf("cached path = %q, want cache-owned data path", got.Path)
 	}
-	if got.SourceURL != record.SourceURL || got.MediaType != record.MediaType || got.WidthCells != record.WidthCells || got.HeightCells != record.HeightCells {
+	if got.SourceURL != record.SourceURL || got.PayloadIdentity != record.PayloadIdentity || got.MediaType != record.MediaType || got.WidthCells != record.WidthCells || got.HeightCells != record.HeightCells {
 		t.Fatalf("metadata = %#v, want %#v", got, record)
+	}
+	if strings.Contains(got.Path, record.PayloadIdentity) || strings.Contains(filepath.Dir(got.Path), record.PayloadIdentity) {
+		t.Fatalf("cache path exposed payload identity %q in %q", record.PayloadIdentity, got.Path)
 	}
 	if !got.FetchedAt.Equal(record.FetchedAt) || !got.ExpiresAt.Equal(record.ExpiresAt) {
 		t.Fatalf("times = %s/%s, want %s/%s", got.FetchedAt, got.ExpiresAt, record.FetchedAt, record.ExpiresAt)
@@ -192,6 +205,38 @@ func TestDiskAssetCacheTreatsUnsafeSourceURLMetadataAsMiss(t *testing.T) {
 	}
 	if ok {
 		t.Fatal("GetAsset ok = true, want miss for unsafe source URL")
+	}
+}
+
+func TestDiskAssetCacheTreatsUnsafePayloadIdentityMetadataAsMiss(t *testing.T) {
+	cache := NewDiskAssetCache(t.TempDir())
+	key := AssetKey{Kind: "avatar", ID: "user-1"}
+	paths, err := cache.paths(key)
+	if err != nil {
+		t.Fatalf("paths returned error: %v", err)
+	}
+	if err := os.MkdirAll(paths.dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	metadata := diskAssetMetadata{
+		Version:         diskAssetMetadataVersion,
+		Key:             key,
+		PayloadIdentity: "oauth:secret-token",
+	}
+	data, err := json.Marshal(metadata)
+	if err != nil {
+		t.Fatalf("json.Marshal returned error: %v", err)
+	}
+	if err := os.WriteFile(paths.metadata, data, 0o600); err != nil {
+		t.Fatalf("WriteFile unsafe metadata returned error: %v", err)
+	}
+
+	_, ok, err := cache.GetAsset(context.Background(), key)
+	if err != nil {
+		t.Fatalf("GetAsset returned error: %v", err)
+	}
+	if ok {
+		t.Fatal("GetAsset ok = true, want miss for unsafe payload identity")
 	}
 }
 
@@ -502,7 +547,8 @@ func TestDiskAssetCacheKeepsPathsAndMetadataCredentialSafe(t *testing.T) {
 	key := AssetKey{Kind: "badge", ID: "channel-1/subscriber/12"}
 	cache := NewDiskAssetCache(root)
 
-	if err := cache.PutAsset(context.Background(), AssetRecord{Key: key, Path: source, MediaType: "image/png"}); err != nil {
+	payloadIdentity := "sha256:" + strings.Repeat("b", 64)
+	if err := cache.PutAsset(context.Background(), AssetRecord{Key: key, Path: source, PayloadIdentity: payloadIdentity, MediaType: "image/png"}); err != nil {
 		t.Fatalf("PutAsset returned error: %v", err)
 	}
 	got, ok, err := cache.GetAsset(context.Background(), key)
@@ -513,7 +559,7 @@ func TestDiskAssetCacheKeepsPathsAndMetadataCredentialSafe(t *testing.T) {
 		t.Fatal("GetAsset ok = false, want true")
 	}
 	for _, path := range []string{got.Path, filepath.Dir(got.Path)} {
-		for _, unsafe := range []string{key.ID, "access_token", "client_secret", "oauth:"} {
+		for _, unsafe := range []string{key.ID, payloadIdentity, "access_token", "client_secret", "oauth:"} {
 			if strings.Contains(path, unsafe) {
 				t.Fatalf("cache path %q contains unsafe text %q", path, unsafe)
 			}
@@ -587,6 +633,13 @@ func TestDiskAssetCacheRejectsCredentialBearingKeysAndPaths(t *testing.T) {
 	})
 	if !errors.Is(err, ErrUnsafeAssetSourceURL) {
 		t.Fatalf("PutAsset unsafe source URL error = %v, want ErrUnsafeAssetSourceURL", err)
+	}
+	err = cache.PutAsset(context.Background(), AssetRecord{
+		Key:             AssetKey{Kind: "avatar", ID: "user-1"},
+		PayloadIdentity: "asset.png",
+	})
+	if !errors.Is(err, ErrUnsafeAssetPayloadIdentity) {
+		t.Fatalf("PutAsset unsafe payload identity error = %v, want ErrUnsafeAssetPayloadIdentity", err)
 	}
 	if cacheBytes := readCacheFixtureBytes(t, root); cacheBytes != "" {
 		t.Fatalf("cache wrote files for rejected records: %q", cacheBytes)

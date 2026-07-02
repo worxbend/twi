@@ -8,8 +8,8 @@
 - Renderer asset fallback fragments can reserve stable cell widths before images are available.
 - Chat row generation can attach prepared renderer cells by stable URL-free asset key. Unsupported terminals, image-off mode, missing assets, and render failures keep the same fallback rows and reserved widths.
 - `internal/render.PNGImagePreparer` decodes bounded downloaded PNG, JPEG, and first-frame GIF assets, crops/scales them to the requested terminal cell rectangle, and writes renderer-ready PNG files without exposing source URLs, source paths, or token-like values in errors.
-- `internal/assets.PublicImageDownloader` fetches only validated public HTTP(S) PNG, JPEG, and GIF sources, validates redirects and public hosts, enforces response-size limits, and writes URL-free local files without sending auth or cookie headers.
-- Visible-row asset events remember permanent preparation/render failures by URL-free asset identity, downloaded record identity, and requested cell size so unchanged corrupt, oversized, unsafe, or unsupported assets keep stable fallbacks without repeated decode/render work.
+- `internal/assets.PublicImageDownloader` fetches only validated public HTTP(S) PNG, JPEG, and GIF sources, validates redirects and public hosts, enforces response-size limits, writes URL-free local files without sending auth or cookie headers, and records a URL-free SHA-256 payload identity for the downloaded bytes.
+- Visible-row asset events remember permanent preparation/render failures by URL-free asset identity, safe downloaded record metadata, optional payload identity, and requested cell size so unchanged corrupt, oversized, unsafe, or unsupported assets keep stable fallbacks without repeated decode/render work while changed bytes can retry.
 - `internal/storage.AssetCache` provides context-aware cache methods. The in-memory implementation is intended for deterministic tests, and `internal/storage.DiskAssetCache` persists metadata plus cache-owned bytes under the platform cache directory using deterministic hashed paths.
 - `twi doctor` reports image-related readiness through terminal color hints, Kitty/Ghostty environment signals, cache writability, selected image/avatar/emoji/emote modes, and the resolved image capability state.
 - `internal/render.KittyRenderer` can produce fixed-cell Kitty graphics output for prepared cached PNG assets in supported terminals.
@@ -131,7 +131,7 @@ placeholders before cells are available.
 - Reserve stable layout width for image placeholders so late image loads do not shift chat rows.
 - Keep fallbacks visually intentional, not raw debug labels.
 - Preserve Unicode and emoji text when images are unavailable.
-- Treat unsupported media, corrupt bytes, unsafe image paths/keys, and oversized images as stable fallback states for the same downloaded record; retry transient resolver, downloader, cache, filesystem, and context failures.
+- Treat unsupported media, corrupt bytes, unsafe image paths/keys, and oversized images as stable fallback states for the same downloaded record and payload identity; retry transient resolver, downloader, cache, filesystem, context failures, and changed downloaded bytes.
 - Keep typed-in reveal animation fragment-aware so it does not split grapheme clusters, ANSI styles, emote tokens, emoji, or image placeholders.
 - Degrade to reduced or off animation if rendering falls behind.
 
