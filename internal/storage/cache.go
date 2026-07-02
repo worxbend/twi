@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -128,6 +129,15 @@ type DiskAssetCache struct {
 
 var _ AssetCache = (*DiskAssetCache)(nil)
 
+const (
+	// DefaultAssetCacheMaxAge is the fallback TTL for cache records that do
+	// not carry a provider-specific ExpiresAt value.
+	DefaultAssetCacheMaxAge = 30 * 24 * time.Hour
+	// DefaultAssetCacheMaxBytes is the default on-disk byte budget for cached
+	// asset payloads.
+	DefaultAssetCacheMaxBytes int64 = 512 * 1024 * 1024
+)
+
 // NewDiskAssetCache returns a disk-backed asset cache rooted at root. If root
 // is empty, the platform cache directory is used.
 func NewDiskAssetCache(root string) *DiskAssetCache {
@@ -236,6 +246,117 @@ func (c *DiskAssetCache) PutAsset(ctx context.Context, record AssetRecord) error
 	return writeFileAtomicContext(ctx, paths.metadata, data)
 }
 
+// Prune removes expired records and then removes the oldest remaining records
+// until the cache is within the configured byte budget. Size accounting covers
+// cache-owned asset payload bytes; metadata-only records count as zero bytes.
+func (c *DiskAssetCache) Prune(ctx context.Context, opts PruneOptions) (PruneReport, error) {
+	if err := ctx.Err(); err != nil {
+		return PruneReport{}, err
+	}
+	if c == nil {
+		return PruneReport{}, nil
+	}
+	opts = opts.normalized()
+	root, err := c.root()
+	report := PruneReport{Root: root}
+	if err != nil {
+		return report, err
+	}
+
+	info, err := os.Stat(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return report, nil
+	}
+	if err != nil {
+		return report, err
+	}
+	if !info.IsDir() {
+		return report, fmt.Errorf("%s: cache root is not a directory", root)
+	}
+
+	entries, err := c.pruneEntries(ctx, root)
+	if err != nil {
+		return report, err
+	}
+	report.EntriesScanned = len(entries)
+	for _, entry := range entries {
+		report.BytesBefore += entry.dataBytes
+	}
+
+	prune := make(map[string]pruneReason)
+	bytesAfterExpiration := report.BytesBefore
+	for _, entry := range entries {
+		if entry.expired(opts) {
+			prune[entry.dir] = pruneExpired
+			bytesAfterExpiration -= entry.dataBytes
+		}
+	}
+
+	if opts.MaxBytes >= 0 && bytesAfterExpiration > opts.MaxBytes {
+		remaining := make([]pruneEntry, 0, len(entries))
+		for _, entry := range entries {
+			if _, ok := prune[entry.dir]; !ok {
+				remaining = append(remaining, entry)
+			}
+		}
+		slices.SortFunc(remaining, func(a, b pruneEntry) int {
+			if cmp := a.fetchedAt.Compare(b.fetchedAt); cmp != 0 {
+				return cmp
+			}
+			return strings.Compare(a.dir, b.dir)
+		})
+		for _, entry := range remaining {
+			if bytesAfterExpiration <= opts.MaxBytes {
+				break
+			}
+			prune[entry.dir] = pruneSize
+			bytesAfterExpiration -= entry.dataBytes
+		}
+	}
+
+	for _, entry := range entries {
+		reason, ok := prune[entry.dir]
+		if !ok {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			report.BytesAfter = report.BytesBefore - report.BytesPruned
+			return report, err
+		}
+		if err := os.RemoveAll(entry.dir); err != nil {
+			report.BytesAfter = report.BytesBefore - report.BytesPruned
+			return report, fmt.Errorf("remove cached asset: %w", err)
+		}
+		report.EntriesPruned++
+		report.BytesPruned += entry.dataBytes
+		switch reason {
+		case pruneExpired:
+			report.ExpiredPruned++
+		case pruneSize:
+			report.SizePruned++
+		}
+	}
+	report.BytesAfter = report.BytesBefore - report.BytesPruned
+	return report, nil
+}
+
+type PruneOptions struct {
+	Now      time.Time
+	MaxAge   time.Duration
+	MaxBytes int64
+}
+
+type PruneReport struct {
+	Root           string
+	EntriesScanned int
+	EntriesPruned  int
+	ExpiredPruned  int
+	SizePruned     int
+	BytesBefore    int64
+	BytesPruned    int64
+	BytesAfter     int64
+}
+
 type diskCachePaths struct {
 	dir      string
 	metadata string
@@ -253,6 +374,145 @@ type diskAssetMetadata struct {
 	HeightCells int       `json:"height_cells,omitempty"`
 	FetchedAt   time.Time `json:"fetched_at,omitempty"`
 	ExpiresAt   time.Time `json:"expires_at,omitempty"`
+}
+
+type pruneEntry struct {
+	dir           string
+	dataBytes     int64
+	fetchedAt     time.Time
+	expiresAt     time.Time
+	metadataValid bool
+}
+
+type pruneReason int
+
+const (
+	pruneExpired pruneReason = iota + 1
+	pruneSize
+)
+
+func (o PruneOptions) normalized() PruneOptions {
+	if o.Now.IsZero() {
+		o.Now = time.Now()
+	}
+	if o.MaxAge == 0 {
+		o.MaxAge = DefaultAssetCacheMaxAge
+	}
+	if o.MaxBytes == 0 {
+		o.MaxBytes = DefaultAssetCacheMaxBytes
+	}
+	return o
+}
+
+func (c *DiskAssetCache) pruneEntries(ctx context.Context, root string) ([]pruneEntry, error) {
+	entriesByDir := make(map[string]pruneEntry)
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		switch filepath.Base(path) {
+		case "metadata.json":
+			metadataEntry, ok, err := c.pruneEntryFromMetadata(ctx, path)
+			if err != nil {
+				return err
+			}
+			if ok {
+				entriesByDir[metadataEntry.dir] = metadataEntry
+				return nil
+			}
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			addOrphanPruneEntry(entriesByDir, filepath.Dir(path), 0, info.ModTime())
+		case "asset.bin":
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			addOrphanPruneEntry(entriesByDir, filepath.Dir(path), info.Size(), info.ModTime())
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	entries := make([]pruneEntry, 0, len(entriesByDir))
+	for _, entry := range entriesByDir {
+		entries = append(entries, entry)
+	}
+	return entries, ctx.Err()
+}
+
+func (c *DiskAssetCache) pruneEntryFromMetadata(ctx context.Context, path string) (pruneEntry, bool, error) {
+	data, err := readFileContext(ctx, path)
+	if err != nil {
+		return pruneEntry{}, false, err
+	}
+	var metadata diskAssetMetadata
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return pruneEntry{}, false, nil
+	}
+	if metadata.Version != diskAssetMetadataVersion {
+		return pruneEntry{}, false, nil
+	}
+	paths, err := c.paths(metadata.Key)
+	if err != nil {
+		return pruneEntry{}, false, nil
+	}
+	if filepath.Clean(paths.metadata) != filepath.Clean(path) {
+		return pruneEntry{}, false, nil
+	}
+
+	var dataBytes int64
+	if metadata.HasData {
+		info, err := os.Stat(paths.data)
+		if errors.Is(err, os.ErrNotExist) {
+			dataBytes = 0
+		} else if err != nil {
+			return pruneEntry{}, false, err
+		} else if !info.IsDir() {
+			dataBytes = info.Size()
+		}
+	}
+	return pruneEntry{
+		dir:           paths.dir,
+		dataBytes:     dataBytes,
+		fetchedAt:     metadata.FetchedAt,
+		expiresAt:     metadata.ExpiresAt,
+		metadataValid: true,
+	}, true, nil
+}
+
+func addOrphanPruneEntry(entries map[string]pruneEntry, dir string, dataBytes int64, modTime time.Time) {
+	entry := entries[dir]
+	if entry.dir == "" {
+		entry.dir = dir
+	}
+	if dataBytes > entry.dataBytes {
+		entry.dataBytes = dataBytes
+	}
+	if !entry.metadataValid && (entry.fetchedAt.IsZero() || modTime.Before(entry.fetchedAt)) {
+		entry.fetchedAt = modTime
+	}
+	entries[dir] = entry
+}
+
+func (e pruneEntry) expired(opts PruneOptions) bool {
+	if !e.expiresAt.IsZero() {
+		return !e.expiresAt.After(opts.Now)
+	}
+	if opts.MaxAge > 0 && !e.fetchedAt.IsZero() && e.fetchedAt.Add(opts.MaxAge).Before(opts.Now) {
+		return true
+	}
+	return false
 }
 
 func (c *DiskAssetCache) paths(key AssetKey) (diskCachePaths, error) {

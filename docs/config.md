@@ -177,7 +177,8 @@ The current diagnostics include:
   variables.
 - Kitty/Ghostty graphics signals and the active image fallback state.
 - Cache directory writability using a single fixed-content probe file that is
-  removed immediately.
+  removed immediately, plus asset-cache pruning status for expired entries and
+  the default size budget.
 - Selected image, avatar, emoji, emote, Kitty, and animation modes.
 
 Secrets are never included in doctor details. OAuth tokens and client secrets
@@ -201,5 +202,4 @@ Future target:
 - Secure token storage.
 - Full terminal image mode controls.
 - Cache sizing and pruning configuration.
-- Token identity, expiry, and scope validation through a Twitch API client.
 - Persisting refreshed tokens safely after OAuth refresh succeeds.

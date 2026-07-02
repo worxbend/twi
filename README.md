@@ -95,7 +95,7 @@ Do not paste real tokens into commits, screenshots, issue comments, terminal rec
 | Mock chat | Ready | `twi chat --mock [--channel demo]` runs without Twitch credentials or network access. |
 | One-channel live IRC read/send | Partial | `twi chat --channel <channel>` can read, send, reply, and send `/me` actions for one channel when env/config credentials are present; broader live manual evidence remains future work. |
 | Config commands | Ready | `twi config show` prints effective flat config with secrets redacted; `twi config path` shows the default config path. |
-| Diagnostics | Partial | `twi doctor` checks config path, credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, username mismatch, Twitch IRC reachability, terminal hints, Kitty/Ghostty signals, cache writability, and feature modes. |
+| Diagnostics | Partial | `twi doctor` checks config path, credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, username mismatch, Twitch IRC reachability, terminal hints, Kitty/Ghostty signals, cache writability/pruning, and feature modes. |
 | Login/setup | Planned | `twi login` is advertised but exits as planned/not implemented. |
 | Multi-channel live chat | Planned | Current live mode intentionally accepts only one channel. |
 | Inline terminal images | Planned | Current rendering uses stable text, initials, Unicode, badge, and emote-token fallbacks only. |

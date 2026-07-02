@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -23,7 +24,7 @@ const (
 
 var oauthPattern = regexp.MustCompile(`(?i)oauth:[^\s]+`)
 var bearerPattern = regexp.MustCompile(`(?i)(bearer\s+)[^\s"'&?]+`)
-var credentialPairPattern = regexp.MustCompile(`(?i)((?:client[_-]secret|refresh_token|authorization_code|code)(?:["']?\s*[:=]\s*["']?))[^"'\s&?]+`)
+var credentialPairPattern = regexp.MustCompile(`(?i)((?:access[_-]token|oauth[_-]token|refresh[_-]token|client[_-]secret|authorization_code|code)(?:["']?\s*[:=]\s*["']?))[^"'\s&?]+`)
 
 type DoctorStatus string
 
@@ -77,6 +78,7 @@ func DoctorWithOptions(ctx context.Context, cfg config.Config, opts DoctorOption
 		mouseCheck(opts.Environ),
 		kittyGraphicsCheck(cfg, opts.Environ),
 		cacheCheck(opts.CacheDir),
+		cachePruningCheck(ctx, opts.CacheDir),
 		featureModesCheck(cfg.Features),
 	}
 
@@ -297,6 +299,41 @@ func cacheCheck(cacheDir string) DoctorCheck {
 		return warnCheck("cache directory", fmt.Sprintf("%s not writable: %v", cacheDir, err))
 	}
 	return okCheck("cache directory", cacheDir+" writable")
+}
+
+func cachePruningCheck(ctx context.Context, cacheDir string) DoctorCheck {
+	assetDir, err := assetCacheDir(cacheDir)
+	if err != nil {
+		return warnCheck("asset cache pruning", fmt.Sprintf("path unavailable: %v", err))
+	}
+
+	pruneCtx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
+	defer cancel()
+
+	report, err := storage.NewDiskAssetCache(assetDir).Prune(pruneCtx, storage.PruneOptions{})
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return warnCheck("asset cache pruning", fmt.Sprintf("%s cleanup timed out: %v; chat can still start with image fallbacks", assetDir, err))
+		}
+		return warnCheck("asset cache pruning", fmt.Sprintf("%s cleanup failed: %v; fix cache directory permissions or remove stale cache files", assetDir, err))
+	}
+	return okCheck("asset cache pruning", fmt.Sprintf(
+		"%s checked; scanned=%d pruned=%d expired=%d size=%d bytes=%d/%d",
+		report.Root,
+		report.EntriesScanned,
+		report.EntriesPruned,
+		report.ExpiredPruned,
+		report.SizePruned,
+		report.BytesAfter,
+		storage.DefaultAssetCacheMaxBytes,
+	))
+}
+
+func assetCacheDir(cacheDir string) (string, error) {
+	if strings.TrimSpace(cacheDir) != "" {
+		return filepath.Join(cacheDir, "assets"), nil
+	}
+	return storage.DefaultAssetCacheDir()
 }
 
 func featureModesCheck(features config.FeatureConfig) DoctorCheck {

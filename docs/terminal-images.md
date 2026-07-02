@@ -119,8 +119,10 @@ $XDG_CACHE_HOME/twi
 
 Cache behavior should:
 
-- Bound size and age.
-- Use TTLs.
+- Prune expired entries and fall back to a default 30-day max age when a
+  provider-specific expiry is unavailable.
+- Prune oldest payloads first when the asset cache exceeds its default
+  512 MiB size budget.
 - Use ETag or Last-Modified where practical.
 - Avoid refetching avatars for every message from the same user.
 - Batch Twitch user lookups to avoid API limits.
@@ -135,6 +137,8 @@ Cache behavior should:
 - Kitty graphics unavailable or unknown, with text fallbacks active.
 - Image mode disabled by config.
 - Cache directory writable or not writable.
+- Asset cache pruning complete, timed out, or failed because cleanup needs
+  permission/path attention.
 
 Future diagnostics should also distinguish:
 

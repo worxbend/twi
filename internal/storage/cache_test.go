@@ -212,6 +212,226 @@ func TestDiskAssetCacheHonorsCancellationBeforePublishingMetadata(t *testing.T) 
 	}
 }
 
+func TestDiskAssetCachePrunesExpiredRecordsDeterministically(t *testing.T) {
+	root := t.TempDir()
+	cache := NewDiskAssetCache(root)
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	expired := AssetKey{Kind: "avatar", ID: "expired"}
+	fresh := AssetKey{Kind: "avatar", ID: "fresh"}
+	providerFresh := AssetKey{Kind: "avatar", ID: "provider-fresh"}
+
+	putDiskCacheFixture(t, cache, AssetRecord{
+		Key:       expired,
+		Path:      writeAssetFixture(t, "expired"),
+		FetchedAt: now.Add(-2 * time.Hour),
+		ExpiresAt: now.Add(-time.Second),
+	})
+	putDiskCacheFixture(t, cache, AssetRecord{
+		Key:       fresh,
+		Path:      writeAssetFixture(t, "fresh"),
+		FetchedAt: now.Add(-2 * time.Hour),
+		ExpiresAt: now.Add(time.Hour),
+	})
+	putDiskCacheFixture(t, cache, AssetRecord{
+		Key:       providerFresh,
+		Path:      writeAssetFixture(t, "provider-fresh"),
+		FetchedAt: now.Add(-90 * 24 * time.Hour),
+		ExpiresAt: now.Add(time.Hour),
+	})
+
+	report, err := cache.Prune(context.Background(), PruneOptions{
+		Now:      now,
+		MaxAge:   -1,
+		MaxBytes: -1,
+	})
+	if err != nil {
+		t.Fatalf("Prune returned error: %v", err)
+	}
+	if report.EntriesScanned != 3 || report.EntriesPruned != 1 || report.ExpiredPruned != 1 || report.SizePruned != 0 {
+		t.Fatalf("prune report = %#v, want one expired prune", report)
+	}
+	if _, ok, err := cache.GetAsset(context.Background(), expired); err != nil || ok {
+		t.Fatalf("expired GetAsset ok=%v err=%v, want miss nil", ok, err)
+	}
+	if _, ok, err := cache.GetAsset(context.Background(), fresh); err != nil || !ok {
+		t.Fatalf("fresh GetAsset ok=%v err=%v, want hit nil", ok, err)
+	}
+	if _, ok, err := cache.GetAsset(context.Background(), providerFresh); err != nil || !ok {
+		t.Fatalf("providerFresh GetAsset ok=%v err=%v, want hit nil", ok, err)
+	}
+}
+
+func TestDiskAssetCachePrunesOldRecordsByMaxAge(t *testing.T) {
+	root := t.TempDir()
+	cache := NewDiskAssetCache(root)
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	old := AssetKey{Kind: "emoji", ID: "old"}
+	recent := AssetKey{Kind: "emoji", ID: "recent"}
+
+	putDiskCacheFixture(t, cache, AssetRecord{
+		Key:       old,
+		Path:      writeAssetFixture(t, "old"),
+		FetchedAt: now.Add(-49 * time.Hour),
+	})
+	putDiskCacheFixture(t, cache, AssetRecord{
+		Key:       recent,
+		Path:      writeAssetFixture(t, "recent"),
+		FetchedAt: now.Add(-47 * time.Hour),
+	})
+
+	report, err := cache.Prune(context.Background(), PruneOptions{
+		Now:      now,
+		MaxAge:   48 * time.Hour,
+		MaxBytes: -1,
+	})
+	if err != nil {
+		t.Fatalf("Prune returned error: %v", err)
+	}
+	if report.EntriesPruned != 1 || report.ExpiredPruned != 1 {
+		t.Fatalf("prune report = %#v, want one max-age prune", report)
+	}
+	if _, ok, err := cache.GetAsset(context.Background(), old); err != nil || ok {
+		t.Fatalf("old GetAsset ok=%v err=%v, want miss nil", ok, err)
+	}
+	if _, ok, err := cache.GetAsset(context.Background(), recent); err != nil || !ok {
+		t.Fatalf("recent GetAsset ok=%v err=%v, want hit nil", ok, err)
+	}
+}
+
+func TestDiskAssetCachePrunesOldestRecordsBySize(t *testing.T) {
+	root := t.TempDir()
+	cache := NewDiskAssetCache(root)
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	oldest := AssetKey{Kind: "badge", ID: "oldest"}
+	middle := AssetKey{Kind: "badge", ID: "middle"}
+	newest := AssetKey{Kind: "badge", ID: "newest"}
+
+	putDiskCacheFixture(t, cache, AssetRecord{Key: oldest, Path: writeAssetFixture(t, "aaaa"), FetchedAt: now.Add(-3 * time.Hour)})
+	putDiskCacheFixture(t, cache, AssetRecord{Key: middle, Path: writeAssetFixture(t, "bbbb"), FetchedAt: now.Add(-2 * time.Hour)})
+	putDiskCacheFixture(t, cache, AssetRecord{Key: newest, Path: writeAssetFixture(t, "cccc"), FetchedAt: now.Add(-1 * time.Hour)})
+
+	report, err := cache.Prune(context.Background(), PruneOptions{
+		Now:      now,
+		MaxAge:   -1,
+		MaxBytes: 8,
+	})
+	if err != nil {
+		t.Fatalf("Prune returned error: %v", err)
+	}
+	if report.BytesBefore != 12 || report.BytesAfter != 8 || report.SizePruned != 1 || report.EntriesPruned != 1 {
+		t.Fatalf("prune report = %#v, want one size prune from 12 to 8 bytes", report)
+	}
+	if _, ok, err := cache.GetAsset(context.Background(), oldest); err != nil || ok {
+		t.Fatalf("oldest GetAsset ok=%v err=%v, want miss nil", ok, err)
+	}
+	for _, key := range []AssetKey{middle, newest} {
+		if _, ok, err := cache.GetAsset(context.Background(), key); err != nil || !ok {
+			t.Fatalf("%#v GetAsset ok=%v err=%v, want hit nil", key, ok, err)
+		}
+	}
+}
+
+func TestDiskAssetCacheCountsCorruptPayloadsDuringSizePruning(t *testing.T) {
+	root := t.TempDir()
+	cache := NewDiskAssetCache(root)
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	corruptKey := AssetKey{Kind: "avatar", ID: "corrupt"}
+	freshKey := AssetKey{Kind: "avatar", ID: "fresh"}
+
+	corruptPaths, err := cache.paths(corruptKey)
+	if err != nil {
+		t.Fatalf("paths returned error: %v", err)
+	}
+	if err := os.MkdirAll(corruptPaths.dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll corrupt fixture returned error: %v", err)
+	}
+	if err := os.WriteFile(corruptPaths.metadata, []byte("{not json\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile corrupt metadata returned error: %v", err)
+	}
+	if err := os.WriteFile(corruptPaths.data, []byte("xxxx"), 0o600); err != nil {
+		t.Fatalf("WriteFile corrupt payload returned error: %v", err)
+	}
+	old := now.Add(-2 * time.Hour)
+	if err := os.Chtimes(corruptPaths.metadata, old, old); err != nil {
+		t.Fatalf("Chtimes corrupt metadata returned error: %v", err)
+	}
+	if err := os.Chtimes(corruptPaths.data, old, old); err != nil {
+		t.Fatalf("Chtimes corrupt payload returned error: %v", err)
+	}
+	putDiskCacheFixture(t, cache, AssetRecord{
+		Key:       freshKey,
+		Path:      writeAssetFixture(t, "yyyy"),
+		FetchedAt: now.Add(-time.Hour),
+	})
+
+	report, err := cache.Prune(context.Background(), PruneOptions{
+		Now:      now,
+		MaxAge:   -1,
+		MaxBytes: 4,
+	})
+	if err != nil {
+		t.Fatalf("Prune returned error: %v", err)
+	}
+	if report.BytesBefore != 8 || report.BytesAfter != 4 || report.SizePruned != 1 {
+		t.Fatalf("prune report = %#v, want corrupt payload counted and pruned by size", report)
+	}
+	if _, err := os.Stat(corruptPaths.dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("corrupt cache dir stat error = %v, want os.ErrNotExist", err)
+	}
+	if _, ok, err := cache.GetAsset(context.Background(), freshKey); err != nil || !ok {
+		t.Fatalf("fresh GetAsset ok=%v err=%v, want hit nil", ok, err)
+	}
+}
+
+func TestDiskAssetCachePruneHonorsContextCancellation(t *testing.T) {
+	cache := NewDiskAssetCache(t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := cache.Prune(ctx, PruneOptions{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Prune error = %v, want context.Canceled", err)
+	}
+}
+
+func TestDiskAssetCachePruneReportsCleanupFailures(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod cleanup denial is not portable on Windows")
+	}
+	root := t.TempDir()
+	cache := NewDiskAssetCache(root)
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	key := AssetKey{Kind: "avatar", ID: "permission-check"}
+	putDiskCacheFixture(t, cache, AssetRecord{
+		Key:       key,
+		Path:      writeAssetFixture(t, "data"),
+		FetchedAt: now.Add(-time.Hour),
+		ExpiresAt: now.Add(-time.Second),
+	})
+	paths, err := cache.paths(key)
+	if err != nil {
+		t.Fatalf("paths returned error: %v", err)
+	}
+	parent := filepath.Dir(paths.dir)
+	if err := os.Chmod(parent, 0o500); err != nil {
+		t.Fatalf("Chmod fixture returned error: %v", err)
+	}
+	defer func() {
+		_ = os.Chmod(parent, 0o700)
+	}()
+
+	_, err = cache.Prune(context.Background(), PruneOptions{
+		Now:      now,
+		MaxAge:   -1,
+		MaxBytes: -1,
+	})
+	if err == nil {
+		t.Skip("cache entry remained removable; cleanup failure not observable")
+	}
+	if strings.Contains(err.Error(), key.ID) {
+		t.Fatalf("cleanup error leaked cache key %q in %q", key.ID, err)
+	}
+}
+
 func TestDiskAssetCacheKeepsPathsAndMetadataCredentialSafe(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(t.TempDir(), "asset.bin")
@@ -361,6 +581,22 @@ func readCacheFixtureBytes(t *testing.T, root string) string {
 		t.Fatalf("WalkDir returned error: %v", err)
 	}
 	return b.String()
+}
+
+func putDiskCacheFixture(t *testing.T, cache *DiskAssetCache, record AssetRecord) {
+	t.Helper()
+	if err := cache.PutAsset(context.Background(), record); err != nil {
+		t.Fatalf("PutAsset fixture returned error: %v", err)
+	}
+}
+
+func writeAssetFixture(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "asset.bin")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("WriteFile fixture returned error: %v", err)
+	}
+	return path
 }
 
 type cancelAfterErrContext struct {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/w0rxbend/twi/internal/config"
+	"github.com/w0rxbend/twi/internal/storage"
 	"github.com/w0rxbend/twi/internal/twitch"
 )
 
@@ -35,12 +36,15 @@ func TestDoctorRunsWithoutCredentialsAndUsesWarnings(t *testing.T) {
 	if check := doctorCheck(t, report, "cache directory"); check.Status != DoctorStatusOK {
 		t.Fatalf("cache status = %q, want ok; detail=%q", check.Status, check.Detail)
 	}
+	if check := doctorCheck(t, report, "asset cache pruning"); check.Status != DoctorStatusOK {
+		t.Fatalf("cache pruning status = %q, want ok; detail=%q", check.Status, check.Detail)
+	}
 	entries, err := os.ReadDir(cacheDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(entries) != 0 {
-		t.Fatalf("cache probe left files behind: %#v", entries)
+		t.Fatalf("cache diagnostics left entries behind: %#v", entries)
 	}
 }
 
@@ -268,6 +272,67 @@ func TestDoctorContinuesWhenValidationCanceled(t *testing.T) {
 	}
 }
 
+func TestDoctorReportsAssetCachePruning(t *testing.T) {
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	assetCache := storage.NewDiskAssetCache(filepath.Join(cacheDir, "assets"))
+	expired := storage.AssetRecord{
+		Key:       storage.AssetKey{Kind: "avatar", ID: "expired"},
+		Path:      writeDoctorAssetFixture(t, "old"),
+		FetchedAt: time.Now().Add(-2 * storage.DefaultAssetCacheMaxAge),
+	}
+	if err := assetCache.PutAsset(context.Background(), expired); err != nil {
+		t.Fatalf("PutAsset fixture returned error: %v", err)
+	}
+
+	cfg := config.Default()
+	cfg.Path = filepath.Join(t.TempDir(), "missing.toml")
+	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+		Environ:           []string{"TERM=xterm-256color"},
+		CacheDir:          cacheDir,
+		ReachabilityProbe: func(context.Context) error { return nil },
+	})
+
+	check := doctorCheck(t, report, "asset cache pruning")
+	if check.Status != DoctorStatusOK {
+		t.Fatalf("asset cache pruning status = %q, want ok; detail=%q", check.Status, check.Detail)
+	}
+	if !strings.Contains(check.Detail, "pruned=1") || !strings.Contains(check.Detail, "expired=1") {
+		t.Fatalf("asset cache pruning detail = %q, want expired prune counts", check.Detail)
+	}
+	if _, ok, err := assetCache.GetAsset(context.Background(), expired.Key); err != nil || ok {
+		t.Fatalf("expired asset after doctor ok=%v err=%v, want miss nil", ok, err)
+	}
+}
+
+func TestDoctorReportsAssetCachePruningWarningsWithoutSecrets(t *testing.T) {
+	cacheDir := filepath.Join(t.TempDir(), "access_token=secret-token")
+	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll fixture returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheDir, "assets"), []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("WriteFile fixture returned error: %v", err)
+	}
+
+	cfg := config.Default()
+	cfg.Path = filepath.Join(t.TempDir(), "missing.toml")
+	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+		Environ:           []string{"TERM=xterm-256color"},
+		CacheDir:          cacheDir,
+		ReachabilityProbe: func(context.Context) error { return nil },
+	})
+
+	check := doctorCheck(t, report, "asset cache pruning")
+	if check.Status != DoctorStatusWarn {
+		t.Fatalf("asset cache pruning status = %q, want warn; detail=%q", check.Status, check.Detail)
+	}
+	for _, want := range []string{"cleanup failed", "fix cache directory permissions", "[redacted]"} {
+		if !strings.Contains(check.Detail, want) {
+			t.Fatalf("asset cache pruning detail = %q, want it to contain %q", check.Detail, want)
+		}
+	}
+	assertDoctorDoesNotLeak(t, report, "access_token=secret-token", "secret-token")
+}
+
 func doctorCheck(t *testing.T, report DoctorReport, name string) DoctorCheck {
 	t.Helper()
 	for _, check := range report.Checks {
@@ -288,4 +353,13 @@ func assertDoctorDoesNotLeak(t *testing.T, report DoctorReport, secrets ...strin
 			}
 		}
 	}
+}
+
+func writeDoctorAssetFixture(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "asset.bin")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("WriteFile fixture returned error: %v", err)
+	}
+	return path
 }
