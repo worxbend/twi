@@ -128,6 +128,78 @@ func TestShellImageCapabilityStateIsDeterministic(t *testing.T) {
 	}
 }
 
+func TestShellImageFallbackRowsStayStableByCapabilityState(t *testing.T) {
+	message := twitch.ChatMessage{
+		Timestamp:   time.Date(2026, 7, 2, 20, 0, 0, 0, time.Local),
+		AuthorID:    "user-1",
+		AuthorLogin: "viewer_fan",
+		DisplayName: "viewer_fan",
+		Badges:      []twitch.Badge{{SetID: "moderator", ID: "1"}},
+		Type:        twitch.MessageTypeChat,
+		Fragments: []twitch.MessageFragment{
+			{Type: twitch.FragmentEmote, Text: "Kappa", Ref: twitch.AssetRef{Kind: "twitch_emote", ID: "25"}},
+			{Type: twitch.FragmentText, Text: " "},
+			{Type: twitch.FragmentEmoji, Text: "😀"},
+		},
+	}
+	imageFeatures := config.Default().Features
+	imageFeatures.AvatarMode = "image"
+	imageFeatures.EmojiMode = "image"
+	imageFeatures.EmoteMode = "image"
+
+	tests := []struct {
+		name       string
+		features   config.FeatureConfig
+		wantRows   []string
+		wantEmoteW int
+	}{
+		{
+			name:       "auto unsupported keeps text tokens",
+			features:   imageFeatures,
+			wantRows:   []string{"[VF] 20:00 [moderator] view...: Kappa 😀"},
+			wantEmoteW: 5,
+		},
+		{
+			name: "image off keeps text tokens",
+			features: func() config.FeatureConfig {
+				features := imageFeatures
+				features.ImageMode = "off"
+				return features
+			}(),
+			wantRows:   []string{"[VF] 20:00 [moderator] view...: Kappa 😀"},
+			wantEmoteW: 5,
+		},
+		{
+			name: "enabled mode reserves placeholders",
+			features: func() config.FeatureConfig {
+				features := imageFeatures
+				features.ImageMode = "normal"
+				return features
+			}(),
+			wantRows:   []string{"[VF] 20:00 [mod] viewer_fan: Kappa  😀"},
+			wantEmoteW: 6,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Features = tt.features
+			model := newMockShellModel("example", cfg)
+			rows := render.Rows(message, model.renderOptions(80))
+			if got := renderRowsToPlain(rows); !reflect.DeepEqual(got, tt.wantRows) {
+				t.Fatalf("rows mismatch\n got: %#v\nwant: %#v", got, tt.wantRows)
+			}
+			emote, ok := firstRenderKind(rows, render.FragmentEmoteFallback)
+			if !ok {
+				t.Fatalf("missing emote fallback fragment: %#v", rows)
+			}
+			if got := emote.Width(); got != tt.wantEmoteW {
+				t.Fatalf("emote width = %d, want %d: %#v", got, tt.wantEmoteW, emote)
+			}
+		})
+	}
+}
+
 func TestMockShellQuitsOnQAndCtrlC(t *testing.T) {
 	model := newMockShellModel("example", config.Default())
 

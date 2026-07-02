@@ -55,6 +55,8 @@ type Fragment struct {
 	Style      FragmentStyle
 	Ref        twitch.AssetRef
 	WidthCells int
+	ImageCell  ImageCell
+	ImageReady bool
 }
 
 // Width returns the terminal cell width reserved by the fragment.
@@ -74,7 +76,7 @@ type Row struct {
 func (r Row) Plain() string {
 	var builder strings.Builder
 	for _, fragment := range r.Fragments {
-		builder.WriteString(fragmentDisplayText(fragment))
+		builder.WriteString(fragmentFallbackText(fragment))
 	}
 	return builder.String()
 }
@@ -88,9 +90,24 @@ func (r Row) String() string {
 	return builder.String()
 }
 
+// TerminalString returns the row with prepared image cells substituted for
+// matching image fragments. Fragments without prepared cells use styled text
+// fallbacks so callers can render stable rows before assets are ready.
+func (r Row) TerminalString() string {
+	var builder strings.Builder
+	for _, fragment := range r.Fragments {
+		if fragment.ImageReady {
+			builder.WriteString(fragment.ImageCell.Text)
+			continue
+		}
+		builder.WriteString(renderFragment(fragment))
+	}
+	return builder.String()
+}
+
 // Width returns the terminal cell width reserved by the row.
 func (r Row) Width() int {
-	return textWidth(r.Plain())
+	return fragmentsWidth(r.Fragments)
 }
 
 // Options controls message rendering and wrapping.
@@ -131,6 +148,22 @@ type ImageRenderer interface {
 	RenderImage(ctx context.Context, asset storage.AssetRecord, spec ImageSpec) (ImageCell, error)
 }
 
+// ImageCellKey identifies a prepared terminal image cell by stable asset
+// identity. URLs are intentionally excluded so credential-bearing request data
+// cannot become part of chat row state.
+type ImageCellKey struct {
+	Kind string
+	ID   string
+}
+
+// ImageCellKeyForRef returns the row-generation key for an asset ref.
+func ImageCellKeyForRef(ref twitch.AssetRef) (ImageCellKey, bool) {
+	if ref.Kind == "" || ref.ID == "" {
+		return ImageCellKey{}, false
+	}
+	return ImageCellKey{Kind: ref.Kind, ID: ref.ID}, true
+}
+
 // AssetOptions controls no-image fallbacks and fixed placeholder widths.
 type AssetOptions struct {
 	ShowAvatars      bool
@@ -138,6 +171,7 @@ type AssetOptions struct {
 	BadgeWidthCells  int
 	EmoteWidthCells  int
 	EmojiWidthCells  int
+	ImageCells       map[ImageCellKey]ImageCell
 }
 
 // FallbackAssetOptions returns visually intentional text fallbacks that
@@ -184,6 +218,8 @@ func Rows(msg twitch.ChatMessage, opts Options) []Row {
 
 	prefix := messagePrefix(msg, opts)
 	content := messageContent(msg, opts)
+	prefix = attachPreparedImageCells(prefix, opts.Assets)
+	content = attachPreparedImageCells(content, opts.Assets)
 	rows := wrap(prefix, content, opts.Width)
 	if len(rows) == 0 {
 		return []Row{{Fragments: prefix}}
@@ -227,6 +263,7 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 	authorColor := usernameColor(msg, opts.Palette)
 
 	author := displayAuthor(msg)
+	avatarAuthor := author
 	includeTimestamp := opts.Width >= 16
 	includeBadges := opts.Width >= 28 && len(msg.Badges) > 0
 	includeAvatar := opts.Assets.ShowAvatars && opts.Width >= 24
@@ -267,7 +304,7 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 
 	var fragments []Fragment
 	if includeAvatar {
-		fragments = append(fragments, avatarFallbackFragment(msg, opts, author))
+		fragments = append(fragments, avatarFallbackFragment(msg, opts, avatarAuthor))
 	}
 	if includeTimestamp {
 		fragments = append(fragments, Fragment{
@@ -685,7 +722,28 @@ func renderFragment(fragment Fragment) string {
 	if fragment.Style.Strikethrough {
 		style = style.Strikethrough(true)
 	}
-	return style.Render(fragmentDisplayText(fragment))
+	return style.Render(fragmentFallbackText(fragment))
+}
+
+func attachPreparedImageCells(fragments []Fragment, opts AssetOptions) []Fragment {
+	if len(fragments) == 0 || len(opts.ImageCells) == 0 {
+		return fragments
+	}
+	out := make([]Fragment, len(fragments))
+	copy(out, fragments)
+	for i := range out {
+		key, ok := ImageCellKeyForRef(out[i].Ref)
+		if !ok {
+			continue
+		}
+		cell, ok := opts.ImageCells[key]
+		if !ok || cell.Text == "" || cell.WidthCells != out[i].Width() {
+			continue
+		}
+		out[i].ImageCell = cell
+		out[i].ImageReady = true
+	}
+	return out
 }
 
 func usernameColor(msg twitch.ChatMessage, palette theme.Palette) string {
@@ -880,7 +938,7 @@ func emojiAssetRef(text string, ref twitch.AssetRef) twitch.AssetRef {
 	return ref
 }
 
-func fragmentDisplayText(fragment Fragment) string {
+func fragmentFallbackText(fragment Fragment) string {
 	if fragment.WidthCells <= 0 {
 		return fragment.Text
 	}
@@ -927,7 +985,17 @@ func fitFragments(fragments []Fragment, width int) []Fragment {
 			break
 		}
 		next := fragment
-		next.Text = truncateCells(fragment.Text, remaining)
+		fragmentWidth := fragment.Width()
+		if fragment.WidthCells > 0 && fragmentWidth <= remaining {
+			next.Text = fragment.Text
+			used += fragmentWidth
+		} else {
+			next.Text = truncateCells(fragment.Text, remaining)
+			next.WidthCells = 0
+			next.ImageCell = ImageCell{}
+			next.ImageReady = false
+			used += textWidth(next.Text)
+		}
 		if next.Text == "" {
 			continue
 		}
@@ -936,7 +1004,6 @@ func fitFragments(fragments []Fragment, width int) []Fragment {
 		} else {
 			out = append(out, next)
 		}
-		used += textWidth(next.Text)
 	}
 	return out
 }

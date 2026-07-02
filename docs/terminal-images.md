@@ -1,17 +1,18 @@
 # Terminal Images
 
-`twi` is planned to support inline images for avatars, Twitch emotes, and standard emoji in capable terminals. The Kitty-compatible renderer core exists behind the internal image renderer boundary, but chat row integration is still planned. The current MVP implements ready text, Unicode, initials, compact badge, and emote-token fallbacks; live avatar URL metadata can be batched and cached before inline image loading/rendering is connected to the app.
+`twi` is planned to support inline images for avatars, Twitch emotes, and standard emoji in capable terminals. The Kitty-compatible renderer core exists behind the internal image renderer boundary, and chat rows can now reserve image placeholders and substitute prepared image cells without changing fallback text. The current MVP implements ready text, Unicode, initials, compact badge, and emote-token fallbacks; live avatar URL metadata can be batched and cached before image download/event wiring is connected to the app.
 
 ## Current State
 
 - Text, Unicode, initials, and compact badge fallbacks are implemented for chat rows.
 - Renderer asset fallback fragments can reserve stable cell widths before images are available.
+- Chat row generation can attach prepared renderer cells by stable URL-free asset key. Unsupported terminals, image-off mode, missing assets, and render failures keep the same fallback rows and reserved widths.
 - `internal/storage.AssetCache` provides context-aware cache methods. The in-memory implementation is intended for deterministic tests, and `internal/storage.DiskAssetCache` persists metadata plus cache-owned bytes under the platform cache directory using deterministic hashed paths.
 - `twi doctor` reports image-related readiness through terminal color hints, Kitty/Ghostty environment signals, cache writability, selected image/avatar/emoji/emote modes, and the resolved image capability state.
 - `internal/render.KittyRenderer` can produce fixed-cell Kitty graphics output for prepared cached PNG assets in supported terminals.
 - Image loading and rendering must be capability-driven and non-blocking.
 - The chat UI must remain usable when image rendering is disabled, unsupported, still loading, or failed.
-- Known limitation: image renderer output is not wired into chat rows yet, and image download/cache fill events are still pending app integration.
+- Known limitation: image download/cache fill events are still pending app integration, so the live chat UI does not yet schedule asset rendering events end to end.
 
 ## Support Tiers
 
@@ -81,8 +82,8 @@ Resolved states:
 - `degraded`: explicit image mode or a supported terminal has missing true-color
   or writable-cache signals; fallbacks remain available.
 
-Inline image drawing has a renderer core, but app-visible chat row integration
-is still planned.
+Inline image drawing has a renderer core and row-level substitution point, but
+app-visible asset download/render events are still planned.
 
 ## Configuration
 
@@ -103,10 +104,10 @@ Recognized mode strings:
 - Emoji: `unicode`, `image`
 - Emote: `text`, `image`
 
-The current chat UI still uses fallbacks only. Mode strings are loaded, reported
-by diagnostics, and resolved into deterministic app capability state;
-image-backed modes become visually effective once renderer output is integrated
-into chat rows.
+The current chat UI still uses fallbacks until asset events provide prepared
+cells. Mode strings are loaded, reported by diagnostics, and resolved into
+deterministic app capability state; image-backed modes reserve stable
+placeholders before cells are available.
 
 ## Rendering Rules
 
