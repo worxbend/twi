@@ -495,11 +495,18 @@ Files likely touched: `internal/app`, `internal/render`, `internal/twitch`,
 `docs/development.md`.
 Implementation notes: Redact any credential-like values before showing raw
 metadata. Keep the main chat uncluttered.
+Current implementation: T027 adds the selected-message inspect panel. Press
+`i` from chat focus to open or close it, and `esc` closes it before clearing
+the reply selection. The panel shows normalized message, author, badge, and
+raw tag diagnostics with credential-shaped values redacted before display.
+Composer text, selected reply context, and scroll offset are preserved while
+the panel opens and closes.
 Acceptance criteria: Palette can trigger common actions; inspect panel shows
 safe metadata for selected messages.
 Verification: Redaction tests; key-binding tests; snapshot tests.
 Risks: Debug views can accidentally expose sensitive data if not filtered.
-Follow-ups: Add copy/export only after a security pass.
+Follow-ups: T028 owns the command palette. Add copy/export only after a
+security pass.
 
 ### Phase 5: Login, Setup, And Secure Storage
 

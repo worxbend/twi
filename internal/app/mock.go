@@ -69,6 +69,7 @@ type mockShellModel struct {
 	height                int
 	focus                 mockFocus
 	helpExpanded          bool
+	inspectOpen           bool
 	nextSend              int
 	revealTickScheduled   bool
 	avatarLookupScheduled bool
@@ -125,6 +126,9 @@ type mockShellLayout struct {
 	chatWidth             int
 	sidebarWidth          int
 	sidebarContentHeight  int
+	inspectHeight         int
+	inspectContentHeight  int
+	inspectFramed         bool
 	composerHeight        int
 	composerContentHeight int
 	composerFramed        bool
@@ -414,6 +418,11 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.deleteComposerRune()
 			}
 		case tea.KeyEsc:
+			if m.inspectOpen {
+				m.inspectOpen = false
+				m.clampScroll()
+				return m, nil
+			}
 			m.activeChannelState().replyTo = nil
 		case tea.KeyUp:
 			if m.focus == mockFocusChat {
@@ -460,6 +469,11 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.focus == mockFocusChat && len(msg.Runes) == 1 && msg.Runes[0] == 'r' {
 				m.startReplyMode()
+				return m, nil
+			}
+			if m.focus == mockFocusChat && len(msg.Runes) == 1 && msg.Runes[0] == 'i' {
+				m.inspectOpen = !m.inspectOpen
+				m.clampScroll()
 				return m, nil
 			}
 			if m.focus == mockFocusComposer {
@@ -578,6 +592,9 @@ func (m mockShellModel) View() string {
 			chat = lipgloss.JoinHorizontal(lipgloss.Top, m.sidebarView(layout), chat)
 		}
 		regions = append(regions, chat)
+	}
+	if layout.inspectHeight > 0 {
+		regions = append(regions, m.inspectView(layout))
 	}
 	if layout.composerHeight > 0 {
 		regions = append(regions, m.composerView(layout))
@@ -902,6 +919,25 @@ func (m mockShellModel) layout() mockShellLayout {
 		remaining = height - layout.statusHeight - layout.composerHeight
 	}
 
+	if m.inspectOpen && remaining >= 4 {
+		layout.inspectHeight = 5
+		if height >= 18 {
+			layout.inspectHeight = 7
+		}
+		if layout.inspectHeight > remaining-1 {
+			layout.inspectHeight = remaining - 1
+		}
+		if layout.inspectHeight < 3 {
+			layout.inspectHeight = 0
+		}
+		layout.inspectFramed = layout.inspectHeight >= 3 && width >= 5
+		layout.inspectContentHeight = layout.inspectHeight
+		if layout.inspectFramed {
+			layout.inspectContentHeight = layout.inspectHeight - 2
+		}
+		remaining -= layout.inspectHeight
+	}
+
 	layout.chatHeight = clampMin(remaining, 0)
 	layout.sidebarWidth = m.sidebarWidth(width, layout.chatHeight)
 	layout.chatWidth = clampMin(width-layout.sidebarWidth, 1)
@@ -918,7 +954,7 @@ func (m mockShellModel) layout() mockShellLayout {
 		layout.chatContentHeight = 0
 	}
 
-	used := layout.statusHeight + layout.chatHeight + layout.composerHeight + layout.helpHeight
+	used := layout.statusHeight + layout.chatHeight + layout.inspectHeight + layout.composerHeight + layout.helpHeight
 	if used < height {
 		layout.chatHeight += height - used
 		if layout.chatFramed {
@@ -2040,9 +2076,9 @@ func (m mockShellModel) replyContextLine(width int) string {
 	if reply == nil {
 		return ""
 	}
-	line := " Replying to " + replyAuthor(reply)
+	line := " Replying to " + redactDiagnosticText(replyAuthor(reply))
 	if reply.Text != "" {
-		line += ": " + reply.Text
+		line += ": " + redactDiagnosticText(reply.Text)
 	}
 	return fitLine(line, clampMin(width, 1))
 }
@@ -2066,7 +2102,7 @@ func (m mockShellModel) helpLines(width, height int) []string {
 		if width < 38 {
 			return []string{" tab focus | ? help"}
 		}
-		line := " tab focus | [] chan | ? help | pg scroll | r reply | esc cancel | q quit | ctrl+c quit"
+		line := " tab | [] | ? | pg | r reply | i inspect | esc close | q quit | ctrl+c quit"
 		if width >= 112 {
 			line += " | " + source
 		}
@@ -2075,7 +2111,7 @@ func (m mockShellModel) helpLines(width, height int) []string {
 
 	lines := []string{
 		" tab focus: chat/composer",
-		" [/]: switch channel | up/down: select reply | r: reply | esc: cancel reply",
+		" [/]: switch channel | up/down: select message | r: reply | i: inspect | esc: close/cancel",
 		" pgup/pgdn: scroll chat | ?: compact help | q: quit | ctrl+c: quit | " + source,
 	}
 	if width < 38 {

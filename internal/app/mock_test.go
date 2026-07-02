@@ -449,6 +449,129 @@ func TestMockShellMouseEventsIgnoredWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestInspectPanelShowsSelectedMessageMetadataAndRedactsDiagnostics(t *testing.T) {
+	model := newMockShellModel("example", config.Default())
+	secretToken := "oauth" + ":" + "secret-token"
+	clientSecretKey := strings.Join([]string{"client", "secret"}, "_")
+	clientSecretValue := "client" + "SecretValue"
+	bearerSecret := "bearer" + "SecretValue"
+	querySecret := "query" + "SecretValue"
+	message := twitch.ChatMessage{
+		ID:          "inspect-1",
+		Channel:     "example",
+		Timestamp:   time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC),
+		AuthorLogin: "viewer_login",
+		AuthorID:    "user-123",
+		DisplayName: "Viewer",
+		AuthorColor: "#00d1ff",
+		Badges: []twitch.Badge{
+			{SetID: "moderator", ID: "1", Info: "primary", Ref: twitch.AssetRef{Kind: "badge", ID: "moderator/1", URL: "https://cdn.example.invalid/badge.png"}},
+		},
+		Text: "please do not show " + secretToken,
+		Fragments: []twitch.MessageFragment{
+			{Type: twitch.FragmentText, Text: "hello"},
+			{Type: twitch.FragmentEmote, Text: "Kappa", Ref: twitch.AssetRef{Kind: "twitch_emote", ID: "25", URL: "https://cdn.example.invalid/emote.png"}},
+		},
+		Emotes: []twitch.Emote{{ID: "25", Name: "Kappa", Start: 0, End: 4, Ref: twitch.AssetRef{Kind: "twitch_emote", ID: "25"}}},
+		Type:   twitch.MessageTypeChat,
+		RawTags: map[string]string{
+			"id":             "inspect-1",
+			clientSecretKey:  clientSecretValue,
+			"notice":         "Bearer " + bearerSecret,
+			"redirect-query": "https://example.invalid/callback?access_token=" + querySecret,
+		},
+	}
+	model.activeChannelState().messages = []twitch.ChatMessage{message}
+	model.activeChannelState().replyTo = replyContextFromMessage(message)
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("inspect toggle returned command %#v, want nil", cmd)
+	}
+	if !model.inspectOpen {
+		t.Fatal("inspectOpen = false, want true")
+	}
+
+	view := model.View()
+	for _, want := range []string{
+		"Inspect: selected message",
+		"id=inspect-1",
+		"author:",
+		"display=Viewer",
+		"badges: moderator/1(primary) ref=badge:moderator/1",
+		"raw tags:",
+		clientSecretKey + "=[redacted]",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("inspect view missing %q:\n%s", want, view)
+		}
+	}
+	for _, secret := range []string{secretToken, clientSecretValue, bearerSecret, querySecret} {
+		if strings.Contains(view, secret) {
+			t.Fatalf("inspect view leaked %q:\n%s", secret, view)
+		}
+	}
+	if strings.Contains(view, "https://cdn.example.invalid") {
+		t.Fatalf("inspect view exposed asset URL:\n%s", view)
+	}
+	if !strings.Contains(view, "[redacted]") {
+		t.Fatalf("inspect view missing redaction marker:\n%s", view)
+	}
+}
+
+func TestInspectPanelOpenClosePreservesComposerSelectionReplyAndScroll(t *testing.T) {
+	model := newMockShellModel("example", config.Default())
+	model.activeChannelState().messages = numberedMockMessages("example", 18)
+	model.width = 88
+	model.height = 18
+	state := model.activeChannelState()
+	state.composerText = "draft text"
+	state.replyTo = replyContextFromMessage(state.messages[12])
+	state.scrollOffset = 3
+	model.focus = mockFocusChat
+
+	beforeReply := *state.replyTo
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("open inspect returned command %#v, want nil", cmd)
+	}
+	if !model.inspectOpen {
+		t.Fatal("inspectOpen after open = false, want true")
+	}
+	if got, want := model.activeChannelState().composerText, "draft text"; got != want {
+		t.Fatalf("composerText after open = %q, want %q", got, want)
+	}
+	if got, want := model.activeChannelState().scrollOffset, 3; got != want {
+		t.Fatalf("scrollOffset after open = %d, want %d", got, want)
+	}
+	if model.activeChannelState().replyTo == nil || *model.activeChannelState().replyTo != beforeReply {
+		t.Fatalf("replyTo after open = %#v, want %#v", model.activeChannelState().replyTo, beforeReply)
+	}
+
+	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("close inspect returned command %#v, want nil", cmd)
+	}
+	if model.inspectOpen {
+		t.Fatal("inspectOpen after esc = true, want false")
+	}
+	if got, want := model.activeChannelState().composerText, "draft text"; got != want {
+		t.Fatalf("composerText after close = %q, want %q", got, want)
+	}
+	if got, want := model.activeChannelState().scrollOffset, 3; got != want {
+		t.Fatalf("scrollOffset after close = %d, want %d", got, want)
+	}
+	if model.activeChannelState().replyTo == nil || *model.activeChannelState().replyTo != beforeReply {
+		t.Fatalf("replyTo after close = %#v, want %#v", model.activeChannelState().replyTo, beforeReply)
+	}
+	if got, want := model.focus, mockFocusChat; got != want {
+		t.Fatalf("focus after close = %v, want %v", got, want)
+	}
+}
+
 func TestLiveShellEnterQueuesComposerSendAndSuccessKeepsComposerCleared(t *testing.T) {
 	client := NewFakeChatClient(1)
 	acceptedAt := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
