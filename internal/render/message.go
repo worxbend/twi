@@ -148,6 +148,12 @@ type ImageRenderer interface {
 	RenderImage(ctx context.Context, asset storage.AssetRecord, spec ImageSpec) (ImageCell, error)
 }
 
+// ImagePreparer normalizes a downloaded image asset into a renderer-ready
+// local record. It must be called from asynchronous paths, not View methods.
+type ImagePreparer interface {
+	PrepareImage(ctx context.Context, asset storage.AssetRecord, spec ImageSpec) (storage.AssetRecord, error)
+}
+
 // ImageCellKey identifies a prepared terminal image cell by stable asset
 // identity. URLs are intentionally excluded so credential-bearing request data
 // cannot become part of chat row state.
@@ -158,10 +164,39 @@ type ImageCellKey struct {
 
 // ImageCellKeyForRef returns the row-generation key for an asset ref.
 func ImageCellKeyForRef(ref twitch.AssetRef) (ImageCellKey, bool) {
-	if ref.Kind == "" || ref.ID == "" {
+	kind := strings.TrimSpace(ref.Kind)
+	id := strings.TrimSpace(ref.ID)
+	if kind == "" || id == "" {
 		return ImageCellKey{}, false
 	}
-	return ImageCellKey{Kind: ref.Kind, ID: ref.ID}, true
+	if containsUnsafeImageIdentity(kind) || containsUnsafeImageIdentity(id) {
+		return ImageCellKey{}, false
+	}
+	return ImageCellKey{Kind: kind, ID: id}, true
+}
+
+func containsUnsafeImageIdentity(value string) bool {
+	lower := strings.ToLower(value)
+	if strings.Contains(lower, "://") {
+		return true
+	}
+	markers := []string{
+		"oauth:",
+		"oauth_token=",
+		"access_token=",
+		"refresh_token=",
+		"client_secret=",
+		"client-secret=",
+		"authorization=",
+		"authorization: bearer",
+		"bearer ",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // AssetOptions controls no-image fallbacks and fixed placeholder widths.

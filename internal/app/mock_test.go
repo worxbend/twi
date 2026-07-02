@@ -1534,6 +1534,360 @@ func TestLiveShellAssetEventsRefreshVisibleRows(t *testing.T) {
 	}
 }
 
+func TestLiveShellAssetEventsPrepareDownloadedRecordBeforeRendering(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmoteMode = "image"
+	resolver := &appFakeAssetResolver{path: "downloaded.jpg", mediaType: "image/jpeg"}
+	preparer := &appFakeImagePreparer{}
+	renderer := &appFakeImageRenderer{cells: map[render.ImageCellKey]string{
+		{Kind: assets.KindTwitchEmote, ID: "25"}: "EM25  ",
+	}}
+	model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
+		AssetResolver: resolver,
+		ImagePreparer: preparer,
+		ImageRenderer: renderer,
+	})
+	message := assetEventMessage("prepared-emote", "25", "😀")
+	message.Badges = nil
+	model.activeChannelState().messages = []twitch.ChatMessage{message}
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 96, Height: 12})
+	model = updated.(mockShellModel)
+	updated, cmd := model.Update(assetLookupTickMsg{})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("assetLookupTick returned nil command, want resolver command")
+	}
+	batch := cmd().(assetPreparedBatchMsg)
+	if len(batch.results) != 1 {
+		t.Fatalf("prepared batch results = %d, want 1: %#v", len(batch.results), batch.results)
+	}
+	if batch.results[0].err != nil {
+		t.Fatalf("prepared batch error = %v, want nil", batch.results[0].err)
+	}
+	if preparer.calls != 1 || renderer.calls != 1 {
+		t.Fatalf("preparer/renderer calls = %d/%d, want 1/1", preparer.calls, renderer.calls)
+	}
+	if got := preparer.records[0].MediaType; got != "image/jpeg" {
+		t.Fatalf("preparer input media type = %q, want image/jpeg", got)
+	}
+	if got := renderer.records[0].MediaType; got != "image/png" {
+		t.Fatalf("renderer input media type = %q, want prepared image/png", got)
+	}
+	if got := renderer.records[0].Path; got != "prepared.png" {
+		t.Fatalf("renderer input path = %q, want prepared.png", got)
+	}
+	if got := preparer.specs[0].WidthCells; got != 6 {
+		t.Fatalf("preparer spec width = %d, want emote fallback width 6", got)
+	}
+
+	updated, _ = model.Update(batch)
+	model = updated.(mockShellModel)
+	if view := model.View(); !strings.Contains(view, "EM25") {
+		t.Fatalf("view missing prepared emote cell after preparation:\n%s", view)
+	}
+}
+
+func TestLiveShellAssetPreparationFailureKeepsFallbackAndRetries(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmoteMode = "image"
+	resolver := &appFakeAssetResolver{}
+	preparer := &appFakeImagePreparer{err: render.ErrImagePreparationFailed}
+	renderer := &appFakeImageRenderer{cells: map[render.ImageCellKey]string{
+		{Kind: assets.KindTwitchEmote, ID: "25"}: "EM25  ",
+	}}
+	model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
+		AssetResolver: resolver,
+		ImagePreparer: preparer,
+		ImageRenderer: renderer,
+	})
+	message := assetEventMessage("prepare-failure", "25", "😀")
+	message.Badges = nil
+	model.activeChannelState().messages = []twitch.ChatMessage{message}
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 96, Height: 12})
+	model = updated.(mockShellModel)
+	before := model.View()
+	updated, cmd := model.Update(assetLookupTickMsg{})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("assetLookupTick returned nil command, want resolver command")
+	}
+	failedBatch := cmd().(assetPreparedBatchMsg)
+	if len(failedBatch.results) != 1 || failedBatch.results[0].err == nil {
+		t.Fatalf("failed batch = %#v, want one preparation error", failedBatch.results)
+	}
+	if renderer.calls != 0 {
+		t.Fatalf("renderer calls = %d, want 0 after preparation failure", renderer.calls)
+	}
+	failedID := failedBatch.results[0].event.RequestID
+
+	updated, cmd = model.Update(failedBatch)
+	model = updated.(mockShellModel)
+	if model.assetRequested[failedID] {
+		t.Fatalf("failed preparation request %q remained permanently marked requested", failedID)
+	}
+	if cmd == nil || !model.assetLookupScheduled {
+		t.Fatalf("failed visible preparation did not schedule retry; scheduled=%v cmd=%#v", model.assetLookupScheduled, cmd)
+	}
+	after := model.View()
+	if !strings.Contains(after, "Kappa") || strings.Contains(after, "EM25") {
+		t.Fatalf("fallback not preserved after preparation failure:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+func TestLiveShellPermanentAssetPreparationFailureBacksOffWithoutSecretState(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmoteMode = "image"
+	resolver := &appFakeAssetResolver{
+		path:      "oauth:fixture-token.png",
+		sourceURL: "https://cdn.example/emote.png?access_token=secret",
+		fetchedAt: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC),
+	}
+	preparer := &appFakeImagePreparer{err: fmt.Errorf("%w: %w", render.ErrImagePreparationFailed, render.ErrImageUnsafeAsset)}
+	renderer := &appFakeImageRenderer{cells: map[render.ImageCellKey]string{
+		{Kind: assets.KindTwitchEmote, ID: "25"}: "EM25  ",
+	}}
+	model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
+		AssetResolver: resolver,
+		ImagePreparer: preparer,
+		ImageRenderer: renderer,
+	})
+	message := assetEventMessage("permanent-prepare-failure", "25", "😀")
+	message.Badges = nil
+	model.activeChannelState().messages = []twitch.ChatMessage{message}
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 96, Height: 12})
+	model = updated.(mockShellModel)
+	before := model.View()
+	updated, cmd := model.Update(assetLookupTickMsg{})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("assetLookupTick returned nil command, want resolver command")
+	}
+	failedBatch := cmd().(assetPreparedBatchMsg)
+	failedID := failedBatch.results[0].event.RequestID
+
+	updated, cmd = model.Update(failedBatch)
+	model = updated.(mockShellModel)
+	if cmd == nil || !model.assetRetryScheduled {
+		t.Fatalf("permanent failure did not schedule backoff retry; scheduled=%v cmd=%#v", model.assetRetryScheduled, cmd)
+	}
+	if !model.assetRequested[failedID] {
+		t.Fatalf("permanent failure request %q was not kept requested during backoff", failedID)
+	}
+	if got := len(model.assetPermanentFailure); got != 1 {
+		t.Fatalf("permanent failure entries = %d, want 1", got)
+	}
+	failureState := fmt.Sprintf("%#v %#v", model.assetPermanentFailure, model.assetRetryAfter)
+	for _, notWant := range []string{"https://", "access_token", "oauth:fixture-token", "refresh_token", "client_secret"} {
+		if strings.Contains(failureState, notWant) {
+			t.Fatalf("permanent failure state leaked %q: %s", notWant, failureState)
+		}
+	}
+
+	updated, cmd = model.Update(assetLookupTickMsg{})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("immediate retry command = %#v, want nil during backoff", cmd)
+	}
+	if preparer.calls != 1 || renderer.calls != 0 {
+		t.Fatalf("preparer/renderer calls after immediate retry = %d/%d, want 1/0", preparer.calls, renderer.calls)
+	}
+	after := model.View()
+	if before != after || !strings.Contains(after, "Kappa") || strings.Contains(after, "EM25") {
+		t.Fatalf("fallback changed after permanent failure:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+func TestLiveShellPermanentAssetFailureRetriesChangedRecordAfterBackoff(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmoteMode = "image"
+	initialFetchedAt := time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)
+	resolver := &appFakeAssetResolver{fetchedAt: initialFetchedAt}
+	preparer := &appFakeImagePreparer{err: fmt.Errorf("%w: %w", render.ErrImagePreparationFailed, render.ErrImageCorruptData)}
+	renderer := &appFakeImageRenderer{cells: map[render.ImageCellKey]string{
+		{Kind: assets.KindTwitchEmote, ID: "25"}: "EM25  ",
+	}}
+	model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
+		AssetResolver: resolver,
+		ImagePreparer: preparer,
+		ImageRenderer: renderer,
+	})
+	message := assetEventMessage("changed-record-retry", "25", "😀")
+	message.Badges = nil
+	model.activeChannelState().messages = []twitch.ChatMessage{message}
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 96, Height: 12})
+	model = updated.(mockShellModel)
+	updated, cmd := model.Update(assetLookupTickMsg{})
+	model = updated.(mockShellModel)
+	failedBatch := cmd().(assetPreparedBatchMsg)
+	failedID := failedBatch.results[0].event.RequestID
+	updated, _ = model.Update(failedBatch)
+	model = updated.(mockShellModel)
+	if got := len(model.assetPermanentFailure); got != 1 {
+		t.Fatalf("permanent failure entries = %d, want 1", got)
+	}
+
+	model.assetRetryAfter[failedID] = time.Now().Add(-time.Second)
+	preparer.err = nil
+	updated, cmd = model.Update(assetLookupTickMsg{})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("same-record retry returned nil command, want resolver command")
+	}
+	updated, _ = model.Update(cmd().(assetPreparedBatchMsg))
+	model = updated.(mockShellModel)
+	if preparer.calls != 1 || renderer.calls != 0 {
+		t.Fatalf("preparer/renderer calls after same-record retry = %d/%d, want 1/0", preparer.calls, renderer.calls)
+	}
+	if view := model.View(); strings.Contains(view, "EM25") {
+		t.Fatalf("same-record retry rendered permanent failure cell unexpectedly:\n%s", view)
+	}
+
+	model.assetRetryAfter[failedID] = time.Now().Add(-time.Second)
+	resolver.fetchedAt = initialFetchedAt.Add(time.Hour)
+	updated, cmd = model.Update(assetLookupTickMsg{})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("changed-record retry returned nil command, want resolver command")
+	}
+	updated, _ = model.Update(cmd().(assetPreparedBatchMsg))
+	model = updated.(mockShellModel)
+
+	if preparer.calls != 2 || renderer.calls != 1 {
+		t.Fatalf("preparer/renderer calls after changed record = %d/%d, want 2/1", preparer.calls, renderer.calls)
+	}
+	if _, ok := model.assetRetryAfter[failedID]; ok {
+		t.Fatalf("assetRetryAfter still contains %q after successful changed-record render", failedID)
+	}
+	if view := model.View(); !strings.Contains(view, "EM25") {
+		t.Fatalf("view missing prepared cell after changed-record retry:\n%s", view)
+	}
+}
+
+func TestAssetPermanentFailureKeyRejectsPathShapedState(t *testing.T) {
+	for _, ref := range []twitch.AssetRef{
+		{Kind: assets.KindTwitchEmote, ID: "/home/user/asset.png"},
+		{Kind: assets.KindTwitchEmote, ID: "../cache/asset.png"},
+		{Kind: assets.KindTwitchEmote, ID: `C:\Users\me\asset.png`},
+	} {
+		event := assets.Event{
+			Kind: assets.EventDownloaded,
+			Ref:  ref,
+			Record: storage.AssetRecord{
+				Key:        storage.AssetKey{Kind: ref.Kind, ID: ref.ID},
+				MediaType:  "image/png",
+				WidthCells: 6,
+			},
+		}
+		if key, ok := assetPermanentFailureKeyForEvent(event, render.ImageSpec{Ref: ref, WidthCells: 6, HeightCells: 1, Fallback: "Kappa"}); ok {
+			t.Fatalf("path-shaped asset ref %#v produced failure key %#v, want rejected", ref, key)
+		}
+		if id := assetRequestID(ref, "example"); id != "" {
+			t.Fatalf("path-shaped asset ref %#v produced request ID %q, want empty", ref, id)
+		}
+	}
+
+	safeBadge := twitch.AssetRef{Kind: assets.KindBadge, ID: "moderator/1"}
+	if id := assetRequestID(safeBadge, "example"); id == "" {
+		t.Fatalf("safe badge ref %#v produced empty request ID", safeBadge)
+	}
+
+	event := assets.Event{
+		Kind: assets.EventDownloaded,
+		Ref:  twitch.AssetRef{Kind: assets.KindTwitchEmote, ID: "25"},
+		Record: storage.AssetRecord{
+			Key:        storage.AssetKey{Kind: assets.KindTwitchEmote, ID: "../cache/asset.png"},
+			MediaType:  "image/png",
+			WidthCells: 6,
+		},
+	}
+	key, ok := assetPermanentFailureKeyForEvent(event, render.ImageSpec{
+		Ref:         twitch.AssetRef{Kind: assets.KindTwitchEmote, ID: "25"},
+		WidthCells:  6,
+		HeightCells: 1,
+		Fallback:    "Kappa",
+	})
+	if !ok {
+		t.Fatal("safe asset ref with unsafe record key produced no failure key")
+	}
+	if !key.RecordUnsafe || key.RecordID != "" || key.RecordKind != "" {
+		t.Fatalf("unsafe record key stored identity = %#v, want unsafe marker without record text", key)
+	}
+	failureState := fmt.Sprintf("%#v", key)
+	for _, notWant := range []string{"/home/user", "../cache", `C:\Users`, "asset.png"} {
+		if strings.Contains(failureState, notWant) {
+			t.Fatalf("failure key leaked path-shaped text %q: %s", notWant, failureState)
+		}
+	}
+}
+
+func TestLiveShellPermanentAssetRenderFailureBacksOff(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmoteMode = "image"
+	resolver := &appFakeAssetResolver{fetchedAt: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
+	renderer := &appFakeImageRenderer{
+		cells: map[render.ImageCellKey]string{
+			{Kind: assets.KindTwitchEmote, ID: "25"}: "EM25  ",
+		},
+		err: fmt.Errorf("%w: %w", render.ErrImageRenderFailed, render.ErrImageUnsupportedMediaType),
+	}
+	model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
+		AssetResolver: resolver,
+		ImageRenderer: renderer,
+	})
+	message := assetEventMessage("permanent-render-failure", "25", "😀")
+	message.Badges = nil
+	model.activeChannelState().messages = []twitch.ChatMessage{message}
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 96, Height: 12})
+	model = updated.(mockShellModel)
+	updated, cmd := model.Update(assetLookupTickMsg{})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("assetLookupTick returned nil command, want resolver command")
+	}
+	failedBatch := cmd().(assetPreparedBatchMsg)
+	updated, _ = model.Update(failedBatch)
+	model = updated.(mockShellModel)
+
+	updated, cmd = model.Update(assetLookupTickMsg{})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("immediate renderer retry command = %#v, want nil during backoff", cmd)
+	}
+	if renderer.calls != 1 {
+		t.Fatalf("renderer calls after immediate retry = %d, want 1", renderer.calls)
+	}
+	if view := model.View(); !strings.Contains(view, "Kappa") || strings.Contains(view, "EM25") {
+		t.Fatalf("fallback not preserved after render failure:\n%s", view)
+	}
+}
+
+func TestImageCellKeyFromAssetEventRejectsUnsafeRecordKeyFallback(t *testing.T) {
+	event := assets.Event{
+		Record: storage.AssetRecord{
+			Key: storage.AssetKey{Kind: assets.KindAvatar, ID: "https://cdn.example/avatar.png?access_token=secret"},
+		},
+	}
+	if key, ok := imageCellKeyFromAssetEvent(event); ok {
+		t.Fatalf("unsafe record key fallback = %#v, true; want false", key)
+	}
+
+	event.Record.Key = storage.AssetKey{Kind: assets.KindTwitchEmote, ID: "25"}
+	key, ok := imageCellKeyFromAssetEvent(event)
+	if !ok || key != (render.ImageCellKey{Kind: assets.KindTwitchEmote, ID: "25"}) {
+		t.Fatalf("safe record key fallback = %#v ok=%v, want twitch emote key", key, ok)
+	}
+}
+
 func TestLiveShellDisabledOrUnsupportedEmojiImagesDoNotScheduleAssetWork(t *testing.T) {
 	for _, tt := range []struct {
 		name     string
@@ -2377,9 +2731,13 @@ func (f *appFakeAvatarResolver) ResolveAvatars(_ context.Context, requests []ass
 }
 
 type appFakeAssetResolver struct {
-	calls int
-	last  []assets.Request
-	fail  bool
+	calls     int
+	last      []assets.Request
+	fail      bool
+	path      string
+	sourceURL string
+	mediaType string
+	fetchedAt time.Time
 }
 
 func (f *appFakeAssetResolver) Resolve(_ context.Context, request assets.Request) assets.Event {
@@ -2399,22 +2757,30 @@ func (f *appFakeAssetResolver) Resolve(_ context.Context, request assets.Request
 		Ref:       request.Ref,
 		Record: storage.AssetRecord{
 			Key:         storage.AssetKey{Kind: request.Ref.Kind, ID: request.Ref.ID},
-			Path:        "fake.png",
-			MediaType:   "image/png",
+			Path:        firstNonEmptyString(f.path, "fake.png"),
+			SourceURL:   f.sourceURL,
+			MediaType:   firstNonEmptyString(f.mediaType, "image/png"),
 			WidthCells:  request.WidthCells,
 			HeightCells: request.HeightCells,
+			FetchedAt:   f.fetchedAt,
 		},
 		At: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC),
 	}
 }
 
 type appFakeImageRenderer struct {
-	calls int
-	cells map[render.ImageCellKey]string
+	calls   int
+	cells   map[render.ImageCellKey]string
+	records []storage.AssetRecord
+	err     error
 }
 
-func (f *appFakeImageRenderer) RenderImage(_ context.Context, _ storage.AssetRecord, spec render.ImageSpec) (render.ImageCell, error) {
+func (f *appFakeImageRenderer) RenderImage(_ context.Context, asset storage.AssetRecord, spec render.ImageSpec) (render.ImageCell, error) {
 	f.calls++
+	f.records = append(f.records, asset)
+	if f.err != nil {
+		return render.ImageCell{}, f.err
+	}
 	key, _ := render.ImageCellKeyForRef(spec.Ref)
 	text := f.cells[key]
 	if text == "" {
@@ -2428,6 +2794,27 @@ func (f *appFakeImageRenderer) RenderImage(_ context.Context, _ storage.AssetRec
 		Text:       fitLine(text, width),
 		WidthCells: width,
 	}, nil
+}
+
+type appFakeImagePreparer struct {
+	calls   int
+	records []storage.AssetRecord
+	specs   []render.ImageSpec
+	err     error
+}
+
+func (f *appFakeImagePreparer) PrepareImage(_ context.Context, asset storage.AssetRecord, spec render.ImageSpec) (storage.AssetRecord, error) {
+	f.calls++
+	f.records = append(f.records, asset)
+	f.specs = append(f.specs, spec)
+	if f.err != nil {
+		return storage.AssetRecord{}, f.err
+	}
+	asset.Path = "prepared.png"
+	asset.MediaType = "image/png"
+	asset.WidthCells = spec.WidthCells
+	asset.HeightCells = spec.HeightCells
+	return asset, nil
 }
 
 func preparedAssetForTest(ref twitch.AssetRef, text string, width int) assetPreparedMsg {

@@ -276,16 +276,28 @@ func RequestCacheKey(req Request) storage.AssetKey {
 
 func cacheKey(ref twitch.AssetRef, channelID string) storage.AssetKey {
 	ref = normalizeRef(ref)
-	id := ref.ID
-	if ref.Kind == KindEmoji {
+	kind := strings.TrimSpace(ref.Kind)
+	id := strings.TrimSpace(ref.ID)
+	if kind == KindEmoji {
 		if emojiID, ok := NormalizeEmojiAssetID(id); ok {
 			id = emojiID
 		}
 	}
-	if ref.Kind == KindBadge && channelID != "" && id != "" {
+	if unsafeAssetKeyPart(kind) || unsafeAssetKeyPart(id) || unsafeAssetKeyPart(channelID) {
+		return storage.AssetKey{}
+	}
+	if kind == KindBadge && channelID != "" && id != "" {
 		id = channelID + "/" + id
 	}
-	return storage.AssetKey{Kind: ref.Kind, ID: id}
+	return storage.AssetKey{Kind: kind, ID: id}
+}
+
+func unsafeAssetKeyPart(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	return strings.Contains(strings.ToLower(value), "://") || containsCredentialMarker(value)
 }
 
 func normalizeRef(ref twitch.AssetRef) twitch.AssetRef {

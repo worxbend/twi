@@ -259,6 +259,27 @@ func TestCacheKeyDoesNotUseURLAsIdentifier(t *testing.T) {
 	}
 }
 
+func TestCacheKeyRejectsCredentialBearingIdentifiers(t *testing.T) {
+	unsafeRefs := []twitch.AssetRef{
+		{Kind: KindAvatar, ID: "https://cdn.example/avatar.png?access_token=secret"},
+		{Kind: "oauth:secret", ID: "user-1"},
+		{Kind: KindEmoji, ID: "client_secret=secret"},
+	}
+	for _, ref := range unsafeRefs {
+		if key := CacheKey(ref); key != (storage.AssetKey{}) {
+			t.Fatalf("CacheKey(%#v) = %#v, want zero key", ref, key)
+		}
+	}
+
+	req := Request{
+		Ref:       twitch.AssetRef{Kind: KindBadge, ID: "subscriber/12"},
+		ChannelID: "https://cdn.example/channel?access_token=secret",
+	}
+	if key := RequestCacheKey(req); key != (storage.AssetKey{}) {
+		t.Fatalf("RequestCacheKey(%#v) = %#v, want zero key", req, key)
+	}
+}
+
 func TestResolverReportsDownloadFailure(t *testing.T) {
 	cache := storage.NewMemoryAssetCache()
 	ref := twitch.AssetRef{Kind: KindBadge, ID: "moderator/1"}

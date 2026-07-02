@@ -138,6 +138,20 @@ func TestTwitchMetadataResolverUsesCacheHitWithoutProviderLookup(t *testing.T) {
 	}
 }
 
+func TestTwitchMetadataResolverRejectsUnsafeEmoteCacheKey(t *testing.T) {
+	resolver := &TwitchMetadataResolver{Cache: storage.NewMemoryAssetCache()}
+
+	metadata, err := resolver.LookupMetadata(context.Background(), MetadataRequest{
+		Ref: twitch.AssetRef{Kind: KindTwitchEmote, ID: "https://cdn.example/emote.png?access_token=secret"},
+	})
+	if err != nil {
+		t.Fatalf("LookupMetadata returned error: %v", err)
+	}
+	if metadata.URL != "" {
+		t.Fatalf("metadata.URL = %q, want fallback without source URL", metadata.URL)
+	}
+}
+
 func TestTwitchMetadataResolverCacheFailures(t *testing.T) {
 	errCacheGet := errors.New("cache get failed")
 	errCachePut := errors.New("cache put failed")

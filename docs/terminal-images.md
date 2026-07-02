@@ -7,12 +7,14 @@
 - Text, Unicode, initials, and compact badge fallbacks are implemented for chat rows.
 - Renderer asset fallback fragments can reserve stable cell widths before images are available.
 - Chat row generation can attach prepared renderer cells by stable URL-free asset key. Unsupported terminals, image-off mode, missing assets, and render failures keep the same fallback rows and reserved widths.
+- `internal/render.PNGImagePreparer` decodes bounded downloaded PNG, JPEG, and first-frame GIF assets, crops/scales them to the requested terminal cell rectangle, and writes renderer-ready PNG files without exposing source URLs, source paths, or token-like values in errors.
+- Visible-row asset events remember permanent preparation/render failures by URL-free asset identity, downloaded record identity, and requested cell size so unchanged corrupt, oversized, unsafe, or unsupported assets keep stable fallbacks without repeated decode/render work.
 - `internal/storage.AssetCache` provides context-aware cache methods. The in-memory implementation is intended for deterministic tests, and `internal/storage.DiskAssetCache` persists metadata plus cache-owned bytes under the platform cache directory using deterministic hashed paths.
 - `twi doctor` reports image-related readiness through terminal color hints, Kitty/Ghostty environment signals, cache writability, selected image/avatar/emoji/emote modes, and the resolved image capability state.
 - `internal/render.KittyRenderer` can produce fixed-cell Kitty graphics output for prepared cached PNG assets in supported terminals.
 - Image loading and rendering must be capability-driven and non-blocking.
 - The chat UI must remain usable when image rendering is disabled, unsupported, still loading, or failed.
-- Known limitation: default live startup does not yet install a concrete asset resolver/downloader/renderer stack, and Kitty/Ghostty inline drawing still needs manual terminal validation in a compatible terminal.
+- Known limitation: default live startup does not yet install a concrete asset resolver/downloader/preparer/renderer stack, and Kitty/Ghostty inline drawing still needs manual terminal validation in a compatible terminal.
 
 ## Support Tiers
 
@@ -34,37 +36,42 @@ Tier 3:
 
 ## Image Feature Status
 
-Overall status: partial. The renderer, cache boundary, fixed-width prepared
-cell substitution, capability decisions, and visible-row asset event path are
-implemented. Default live resolver/downloader/renderer wiring and manual
-Kitty/Ghostty validation are still planned.
+Overall status: partial. The renderer, cache boundary, bounded image
+decode/cell preparation, fixed-width prepared cell substitution, capability
+decisions, and visible-row asset event path are implemented. Default live
+resolver/downloader/preparer/renderer wiring and manual Kitty/Ghostty validation are
+still planned.
 
 Avatars:
 
 - Current: resolve Twitch user `profile_image_url` metadata through Helix Get Users for visible live-chat authors when `avatar_mode = "image"` and Twitch API credentials are configured.
 - Current: cache profile metadata by user ID and login and keep initials/user-chip fallbacks stable.
-- Partial: app asset events can substitute prepared fixed-width cells when an asset resolver and renderer are installed.
-- Planned: default live startup wiring, image decode/cell preparation, and manual Kitty/Ghostty validation.
+- Current: downloaded PNG/JPEG/GIF avatar assets can be normalized to fixed-width PNG cells through the async image preparation/render boundaries.
+- Partial: app asset events can substitute prepared fixed-width cells when an asset resolver, preparer, and renderer are installed.
+- Planned: default live startup wiring and manual Kitty/Ghostty validation.
 
 Twitch emotes:
 
 - Current: parse emote positions from Twitch IRC tags and preserve compact fallback tokens.
 - Current: resolve Twitch emote metadata and CDN template URLs into cached public image refs.
+- Current: downloaded PNG/JPEG/GIF emote assets can be normalized to fixed-width PNG cells through the async image preparation/render boundaries.
 - Partial: prepared cells can replace fallback tokens where supported and available.
-- Planned: default live startup wiring, image decode/cell preparation, and manual Kitty/Ghostty validation.
+- Planned: default live startup wiring and manual Kitty/Ghostty validation.
 
 Standard emoji:
 
 - Current: preserve emoji grapheme clusters as native Unicode fallback text.
 - Current: map emoji grapheme clusters to provider-neutral, URL-free asset keys.
 - Current: resolve standard emoji asset keys to public provider metadata with URL-free cache keys.
-- Planned: image decode/cell preparation, default live startup wiring, and manual Kitty/Ghostty validation.
+- Current: downloaded PNG/JPEG/GIF emoji assets can be normalized to fixed-width PNG cells through the async image preparation/render boundaries.
+- Planned: default live startup wiring and manual Kitty/Ghostty validation.
 
 Badges:
 
 - Current: resolve/cache Twitch badge metadata into public image refs and compact labels.
+- Current: downloaded PNG/JPEG/GIF badge assets can be normalized to fixed-width PNG cells through the async image preparation/render boundaries.
 - Partial: prepared cells can replace compact labels where supported and available.
-- Planned: default live startup wiring, image decode/cell preparation, and manual Kitty/Ghostty validation.
+- Planned: default live startup wiring and manual Kitty/Ghostty validation.
 
 ## Capability Decisions
 
@@ -85,9 +92,10 @@ Resolved states:
 - `degraded`: explicit image mode or a supported terminal has missing true-color
   or writable-cache signals; fallbacks remain available.
 
-Inline image drawing has a renderer core, row-level substitution point, and
-Bubble Tea asset-event path for visible rows. Default live resolver wiring and
-manual Kitty/Ghostty validation are still planned.
+Inline image drawing has a bounded decode/preparation step, renderer core,
+row-level substitution point, and Bubble Tea asset-event path for visible rows.
+Default live resolver wiring and manual Kitty/Ghostty validation are still
+planned.
 
 ## Configuration
 
@@ -122,6 +130,7 @@ placeholders before cells are available.
 - Reserve stable layout width for image placeholders so late image loads do not shift chat rows.
 - Keep fallbacks visually intentional, not raw debug labels.
 - Preserve Unicode and emoji text when images are unavailable.
+- Treat unsupported media, corrupt bytes, unsafe image paths/keys, and oversized images as stable fallback states for the same downloaded record; retry transient resolver, downloader, cache, filesystem, and context failures.
 - Keep typed-in reveal animation fragment-aware so it does not split grapheme clusters, ANSI styles, emote tokens, emoji, or image placeholders.
 - Degrade to reduced or off animation if rendering falls behind.
 

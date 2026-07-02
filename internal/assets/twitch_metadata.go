@@ -120,7 +120,7 @@ func (r *TwitchMetadataResolver) ResolveMessageRefs(ctx context.Context, msg twi
 }
 
 func (r *TwitchMetadataResolver) lookupEmote(ctx context.Context, ref twitch.AssetRef, channelID string) (Metadata, error) {
-	key := storage.AssetKey{Kind: KindTwitchEmote, ID: strings.TrimSpace(ref.ID)}
+	key := CacheKey(ref)
 	if key.ID == "" {
 		return Metadata{Ref: ref}, nil
 	}

@@ -15,7 +15,7 @@ This document describes the configuration model for `twi`. The implemented parse
   signals, and cache directory writability without printing token or client
   secret values.
 - Multi-channel UX is partially shipped: per-channel history, unread counts, scroll, drafts, replies, sends, keyboard sidebar, command palette, optional mouse interactions, and selected-message inspect are current behavior.
-- Inline terminal image support is partially shipped: renderer cells, stable fallback rows, cache boundaries, standard emoji provider metadata, capability diagnostics, and visible-row asset event scheduling exist; default live resolver/downloader/renderer wiring and manual Kitty/Ghostty validation remain planned.
+- Inline terminal image support is partially shipped: bounded image decode/cell preparation, renderer cells, stable fallback rows, cache boundaries, standard emoji provider metadata, capability diagnostics, and visible-row asset event scheduling exist; default live resolver/downloader/preparer/renderer wiring and manual Kitty/Ghostty validation remain planned.
 - `twi login`, setup wizard, and secure credential storage are planned.
 - Nested TOML tables are not implemented yet; keep config files flat.
 

@@ -98,6 +98,9 @@ func (c *MemoryAssetCache) GetAsset(ctx context.Context, key AssetKey) (AssetRec
 	if c == nil {
 		return AssetRecord{}, false, nil
 	}
+	if err := validateAssetKey(key); err != nil {
+		return AssetRecord{}, false, err
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -111,6 +114,12 @@ func (c *MemoryAssetCache) PutAsset(ctx context.Context, record AssetRecord) err
 	}
 	if c == nil {
 		return nil
+	}
+	if err := validateAssetKey(record.Key); err != nil {
+		return err
+	}
+	if record.Path != "" && containsUnsafeCacheText(record.Path) {
+		return ErrUnsafeAssetPath
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()

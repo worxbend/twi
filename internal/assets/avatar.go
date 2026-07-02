@@ -195,13 +195,21 @@ func (r *AvatarBatchResolver) ttl() time.Duration {
 // AvatarCacheKey returns the URL-free cache key for avatar metadata.
 func AvatarCacheKey(req AvatarRequest) storage.AssetKey {
 	if id := strings.TrimSpace(req.UserID); id != "" {
-		return storage.AssetKey{Kind: KindAvatar, ID: id}
+		if !unsafeAssetKeyPart(id) {
+			return storage.AssetKey{Kind: KindAvatar, ID: id}
+		}
 	}
 	if login := canonicalLogin(req.UserLogin); login != "" {
-		return storage.AssetKey{Kind: KindAvatar, ID: "login/" + login}
+		id := "login/" + login
+		if !unsafeAssetKeyPart(id) {
+			return storage.AssetKey{Kind: KindAvatar, ID: id}
+		}
 	}
 	if name := canonicalLogin(req.DisplayName); name != "" {
-		return storage.AssetKey{Kind: KindAvatar, ID: "login/" + name}
+		id := "login/" + name
+		if !unsafeAssetKeyPart(id) {
+			return storage.AssetKey{Kind: KindAvatar, ID: id}
+		}
 	}
 	return storage.AssetKey{Kind: KindAvatar}
 }

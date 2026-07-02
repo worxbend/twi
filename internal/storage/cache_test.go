@@ -51,6 +51,25 @@ func TestMemoryAssetCacheHonorsContextCancellation(t *testing.T) {
 	}
 }
 
+func TestMemoryAssetCacheRejectsCredentialBearingKeysAndPaths(t *testing.T) {
+	cache := NewMemoryAssetCache()
+	unsafeKey := AssetKey{Kind: "avatar", ID: "https://cdn.example/avatar.png?access_token=secret"}
+	if err := cache.PutAsset(context.Background(), AssetRecord{Key: unsafeKey}); !errors.Is(err, ErrUnsafeAssetKey) {
+		t.Fatalf("PutAsset unsafe key error = %v, want ErrUnsafeAssetKey", err)
+	}
+	if _, _, err := cache.GetAsset(context.Background(), unsafeKey); !errors.Is(err, ErrUnsafeAssetKey) {
+		t.Fatalf("GetAsset unsafe key error = %v, want ErrUnsafeAssetKey", err)
+	}
+
+	err := cache.PutAsset(context.Background(), AssetRecord{
+		Key:  AssetKey{Kind: "emoji", ID: "1f600"},
+		Path: filepath.Join(t.TempDir(), "asset-client_secret=secret.png"),
+	})
+	if !errors.Is(err, ErrUnsafeAssetPath) {
+		t.Fatalf("PutAsset unsafe path error = %v, want ErrUnsafeAssetPath", err)
+	}
+}
+
 func TestDiskAssetCachePersistsAcrossInstances(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "cache")
 	source := filepath.Join(t.TempDir(), "avatar.png")

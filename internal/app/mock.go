@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -27,6 +28,7 @@ const (
 	mockRevealDelay   = 20 * time.Millisecond
 	avatarLookupDelay = 50 * time.Millisecond
 	assetLookupDelay  = 35 * time.Millisecond
+	assetFailureRetry = 5 * time.Minute
 	sidebarMinWidth   = 72
 	sidebarNormalSize = 18
 	sidebarWideSize   = 24
@@ -41,6 +43,7 @@ type AvatarResolver interface {
 type ClientOptions struct {
 	AvatarResolver AvatarResolver
 	AssetResolver  assets.EventResolver
+	ImagePreparer  render.ImagePreparer
 	ImageRenderer  render.ImageRenderer
 }
 
@@ -61,6 +64,7 @@ type mockShellModel struct {
 	client                ChatClient
 	avatarResolver        AvatarResolver
 	assetResolver         assets.EventResolver
+	imagePreparer         render.ImagePreparer
 	imageRenderer         render.ImageRenderer
 	incoming              []twitch.ChatMessage
 	nextIncoming          int
@@ -78,7 +82,10 @@ type mockShellModel struct {
 	avatarRequested       map[string]bool
 	assetLookupScheduled  bool
 	assetLookupInFlight   bool
+	assetRetryScheduled   bool
 	assetRequested        map[string]bool
+	assetRetryAfter       map[string]time.Time
+	assetPermanentFailure map[assetPermanentFailureKey]struct{}
 	imageCells            map[render.ImageCellKey]render.ImageCell
 }
 
@@ -157,13 +164,31 @@ type avatarLookupResolvedMsg struct {
 type assetLookupTickMsg struct{}
 
 type assetPreparedMsg struct {
-	event assets.Event
-	cell  render.ImageCell
-	err   error
+	event      assets.Event
+	spec       render.ImageSpec
+	cell       render.ImageCell
+	err        error
+	permanent  bool
+	failureKey assetPermanentFailureKey
 }
 
 type assetPreparedBatchMsg struct {
 	results []assetPreparedMsg
+}
+
+type assetPermanentFailureKey struct {
+	AssetKind            string
+	AssetID              string
+	RecordKind           string
+	RecordID             string
+	RecordUnsafe         bool
+	MediaType            string
+	MediaTypeUnsafe      bool
+	RecordWidthCells     int
+	RecordHeightCells    int
+	FetchedAtUnixNano    int64
+	RequestedWidthCells  int
+	RequestedHeightCells int
 }
 
 type chatClientMessageMsg struct {
@@ -311,25 +336,28 @@ func newLiveShellModelWithClockOptionsAndCapability(channel string, cfg config.C
 		At:      time.Now(),
 	}
 	return mockShellModel{
-		channels:        channels,
-		animationMode:   string(animationConfig.Mode),
-		mouseEnabled:    cfg.Features.EnableMouse,
-		imageMode:       capability.Mode,
-		avatarMode:      capability.Avatar.Mode,
-		emojiMode:       capability.Emoji.Mode,
-		emoteMode:       capability.Emote.Mode,
-		imageCapability: capability,
-		sourceDetail:    "live IRC",
-		client:          client,
-		avatarResolver:  opts.AvatarResolver,
-		assetResolver:   opts.AssetResolver,
-		imageRenderer:   opts.ImageRenderer,
-		avatarRequested: make(map[string]bool),
-		assetRequested:  make(map[string]bool),
-		imageCells:      make(map[render.ImageCellKey]render.ImageCell),
-		width:           defaultMockWidth,
-		height:          defaultMockHeight,
-		focus:           mockFocusChat,
+		channels:              channels,
+		animationMode:         string(animationConfig.Mode),
+		mouseEnabled:          cfg.Features.EnableMouse,
+		imageMode:             capability.Mode,
+		avatarMode:            capability.Avatar.Mode,
+		emojiMode:             capability.Emoji.Mode,
+		emoteMode:             capability.Emote.Mode,
+		imageCapability:       capability,
+		sourceDetail:          "live IRC",
+		client:                client,
+		avatarResolver:        opts.AvatarResolver,
+		assetResolver:         opts.AssetResolver,
+		imagePreparer:         opts.ImagePreparer,
+		imageRenderer:         opts.ImageRenderer,
+		avatarRequested:       make(map[string]bool),
+		assetRequested:        make(map[string]bool),
+		assetRetryAfter:       make(map[string]time.Time),
+		assetPermanentFailure: make(map[assetPermanentFailureKey]struct{}),
+		imageCells:            make(map[render.ImageCellKey]render.ImageCell),
+		width:                 defaultMockWidth,
+		height:                defaultMockHeight,
+		focus:                 mockFocusChat,
 	}
 }
 
@@ -588,6 +616,7 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.withAsyncAssetCommands(nil)
 	case assetLookupTickMsg:
 		m.assetLookupScheduled = false
+		m.assetRetryScheduled = false
 		requests := m.pendingAssetRequests()
 		if len(requests) == 0 || m.assetResolver == nil || m.imageRenderer == nil {
 			return m, nil
@@ -1585,7 +1614,18 @@ func (m *mockShellModel) scheduleAssetLookup() tea.Cmd {
 	if m.assetResolver == nil || m.imageRenderer == nil || m.assetLookupScheduled || m.assetLookupInFlight {
 		return nil
 	}
-	if len(m.pendingAssetRequests()) == 0 {
+	requests, retryAt := m.pendingAssetRequestsAt(time.Now())
+	if len(requests) == 0 {
+		if !retryAt.IsZero() && !m.assetRetryScheduled {
+			delay := time.Until(retryAt)
+			if delay < assetLookupDelay {
+				delay = assetLookupDelay
+			}
+			m.assetRetryScheduled = true
+			return tea.Tick(delay, func(time.Time) tea.Msg {
+				return assetLookupTickMsg{}
+			})
+		}
 		return nil
 	}
 	m.assetLookupScheduled = true
@@ -1596,14 +1636,36 @@ func (m *mockShellModel) scheduleAssetLookup() tea.Cmd {
 
 func (m mockShellModel) resolveAssetsCommand(requests []assets.Request) tea.Cmd {
 	resolver := m.assetResolver
+	preparer := m.imagePreparer
 	renderer := m.imageRenderer
+	permanentFailures := cloneAssetPermanentFailures(m.assetPermanentFailure)
 	return func() tea.Msg {
 		results := make([]assetPreparedMsg, 0, len(requests))
 		for _, request := range requests {
-			event := resolver.Resolve(context.Background(), request)
-			result := assetPreparedMsg{event: event}
+			ctx := context.Background()
+			event := resolver.Resolve(ctx, request)
+			spec := imageSpecFromAssetRequest(request, event)
+			result := assetPreparedMsg{event: event, spec: spec}
 			if event.Kind == assets.EventCacheHit || event.Kind == assets.EventDownloaded {
-				cell, err := renderer.RenderImage(context.Background(), event.Record, imageSpecFromAssetRequest(request, event))
+				if key, ok := assetPermanentFailureKeyForEvent(event, spec); ok {
+					if _, failed := permanentFailures[key]; failed {
+						result.permanent = true
+						result.failureKey = key
+						results = append(results, result)
+						continue
+					}
+				}
+				record := event.Record
+				if preparer != nil {
+					prepared, err := preparer.PrepareImage(ctx, record, spec)
+					if err != nil {
+						result.err = err
+						results = append(results, result)
+						continue
+					}
+					record = prepared
+				}
+				cell, err := renderer.RenderImage(ctx, record, spec)
 				result.cell = cell
 				result.err = err
 			}
@@ -1642,30 +1704,45 @@ func (m *mockShellModel) markAssetRequests(requests []assets.Request) {
 }
 
 func (m mockShellModel) pendingAssetRequests() []assets.Request {
+	requests, _ := m.pendingAssetRequestsAt(time.Now())
+	return requests
+}
+
+func (m mockShellModel) pendingAssetRequestsAt(now time.Time) ([]assets.Request, time.Time) {
 	if m.assetResolver == nil || m.imageRenderer == nil || !m.imageCapabilityHasActiveAssets() {
-		return nil
+		return nil, time.Time{}
 	}
 	layout := m.layout()
 	if layout.chatContentHeight <= 0 {
-		return nil
+		return nil, time.Time{}
 	}
 	rowWidth := m.chatRowWidth(layout)
 
 	seen := make(map[string]bool)
 	requests := []assets.Request{}
+	var nextRetry time.Time
 	for _, message := range m.visibleAssetMessages() {
 		for _, row := range render.Rows(message, m.renderOptions(rowWidth)) {
 			for _, fragment := range row.Fragments {
 				request, ok := m.assetRequestForFragment(message, fragment)
-				if !ok || seen[request.ID] || m.assetRequested[request.ID] {
+				if !ok || seen[request.ID] {
 					continue
+				}
+				if m.assetRequested[request.ID] {
+					retryAt, hasRetry := m.assetRetryAfter[request.ID]
+					if !hasRetry || now.Before(retryAt) {
+						if hasRetry {
+							nextRetry = earliestNonZeroTime(nextRetry, retryAt)
+						}
+						continue
+					}
 				}
 				seen[request.ID] = true
 				requests = append(requests, request)
 			}
 		}
 	}
-	return requests
+	return requests, nextRetry
 }
 
 func (m mockShellModel) assetRequestForFragment(message twitch.ChatMessage, fragment render.Fragment) (assets.Request, bool) {
@@ -1727,7 +1804,13 @@ func assetRequestID(ref twitch.AssetRef, channel string) string {
 	if !ok {
 		return ""
 	}
+	if unsafeAssetStateIdentity(key.Kind) || unsafeAssetStateIdentity(key.ID) {
+		return ""
+	}
 	if key.Kind == assets.KindBadge && strings.TrimSpace(channel) != "" {
+		if unsafeAssetStateIdentity(channel) {
+			return ""
+		}
 		return key.Kind + "\x00" + channel + "\x00" + key.ID
 	}
 	return key.Kind + "\x00" + key.ID
@@ -1741,7 +1824,10 @@ func (m *mockShellModel) applyAssetResults(results []assetPreparedMsg) {
 		m.imageCells = make(map[render.ImageCellKey]render.ImageCell)
 	}
 	for _, result := range results {
-		if result.err != nil || (result.event.Kind != assets.EventCacheHit && result.event.Kind != assets.EventDownloaded) {
+		if result.permanent || result.err != nil || (result.event.Kind != assets.EventCacheHit && result.event.Kind != assets.EventDownloaded) {
+			if m.recordPermanentAssetFailure(result) {
+				continue
+			}
 			m.forgetAssetRequest(result.event.RequestID)
 			continue
 		}
@@ -1753,7 +1839,207 @@ func (m *mockShellModel) applyAssetResults(results []assetPreparedMsg) {
 			continue
 		}
 		m.imageCells[key] = result.cell
+		m.clearAssetRequestRetry(result.event.RequestID)
 	}
+}
+
+func (m *mockShellModel) recordPermanentAssetFailure(result assetPreparedMsg) bool {
+	if !result.permanent && !isPermanentAssetFailure(result) {
+		return false
+	}
+	key := result.failureKey
+	if key == (assetPermanentFailureKey{}) {
+		var ok bool
+		key, ok = assetPermanentFailureKeyForEvent(result.event, result.spec)
+		if !ok {
+			return false
+		}
+	}
+	if m.assetPermanentFailure == nil {
+		m.assetPermanentFailure = make(map[assetPermanentFailureKey]struct{})
+	}
+	m.assetPermanentFailure[key] = struct{}{}
+	if result.event.RequestID != "" {
+		if m.assetRetryAfter == nil {
+			m.assetRetryAfter = make(map[string]time.Time)
+		}
+		m.assetRetryAfter[result.event.RequestID] = time.Now().Add(assetFailureRetry)
+	}
+	return true
+}
+
+func isPermanentAssetFailure(result assetPreparedMsg) bool {
+	err := result.err
+	if err == nil {
+		err = result.event.Err
+	}
+	return render.IsPermanentImageFailure(err) ||
+		errors.Is(err, storage.ErrUnsafeAssetKey) ||
+		errors.Is(err, storage.ErrUnsafeAssetPath)
+}
+
+func assetPermanentFailureKeyForEvent(event assets.Event, spec render.ImageSpec) (assetPermanentFailureKey, bool) {
+	assetKey, ok := render.ImageCellKeyForRef(spec.Ref)
+	if !ok {
+		assetKey, ok = imageCellKeyFromAssetEvent(event)
+	}
+	if !ok {
+		return assetPermanentFailureKey{}, false
+	}
+	if unsafeAssetStateIdentity(assetKey.Kind) || unsafeAssetStateIdentity(assetKey.ID) {
+		return assetPermanentFailureKey{}, false
+	}
+
+	key := assetPermanentFailureKey{
+		AssetKind:            assetKey.Kind,
+		AssetID:              assetKey.ID,
+		RecordWidthCells:     event.Record.WidthCells,
+		RecordHeightCells:    event.Record.HeightCells,
+		FetchedAtUnixNano:    unixNanoOrZero(event.Record.FetchedAt),
+		RequestedWidthCells:  firstPositiveInt(spec.WidthCells, event.Record.WidthCells, 1),
+		RequestedHeightCells: firstPositiveInt(spec.HeightCells, event.Record.HeightCells, 1),
+	}
+	if kind, id, unsafe, ok := safeRecordIdentity(event.Record.Key); ok {
+		key.RecordKind = kind
+		key.RecordID = id
+		key.RecordUnsafe = unsafe
+	}
+	if mediaType, ok := safeAssetFailureText(event.Record.MediaType); ok {
+		key.MediaType = mediaType
+	} else {
+		key.MediaTypeUnsafe = true
+	}
+	return key, true
+}
+
+func safeRecordIdentity(recordKey storage.AssetKey) (kind, id string, unsafe, ok bool) {
+	kind = strings.TrimSpace(recordKey.Kind)
+	id = strings.TrimSpace(recordKey.ID)
+	if kind == "" && id == "" {
+		return "", "", false, false
+	}
+	if unsafeAssetStateIdentity(kind) || unsafeAssetStateIdentity(id) {
+		return "", "", true, true
+	}
+	return kind, id, false, true
+}
+
+func safeAssetFailureText(value string) (string, bool) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return "", true
+	}
+	if semicolon := strings.IndexByte(value, ';'); semicolon >= 0 {
+		value = strings.TrimSpace(value[:semicolon])
+	}
+	if containsUnsafeAssetStateText(value) {
+		return "", false
+	}
+	return value, true
+}
+
+func unsafeAssetStateIdentity(value string) bool {
+	return containsUnsafeAssetStateText(value) || looksLikeLocalPath(value)
+}
+
+func containsUnsafeAssetStateText(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	if lower == "" {
+		return false
+	}
+	if strings.Contains(lower, "://") {
+		return true
+	}
+	markers := []string{
+		"oauth:",
+		"oauth_token=",
+		"access_token=",
+		"refresh_token=",
+		"client_secret=",
+		"client-secret=",
+		"authorization=",
+		"authorization: bearer",
+		"bearer ",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeLocalPath(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	lower := strings.ToLower(value)
+	if strings.HasPrefix(value, "/") || strings.HasPrefix(value, "~/") || strings.HasPrefix(value, "./") || value == "." || value == ".." {
+		return true
+	}
+	if strings.Contains(value, "\\") {
+		return true
+	}
+	if len(value) >= 3 && value[1] == ':' && ((value[2] == '/') || (value[2] == '\\')) && ((value[0] >= 'A' && value[0] <= 'Z') || (value[0] >= 'a' && value[0] <= 'z')) {
+		return true
+	}
+	if strings.HasPrefix(value, "../") || strings.Contains(value, "/../") || strings.HasSuffix(value, "/..") {
+		return true
+	}
+	if strings.Contains(value, "/") {
+		last := value[strings.LastIndex(value, "/")+1:]
+		for _, suffix := range []string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".bin", ".tmp"} {
+			if strings.HasSuffix(lower, suffix) || strings.HasSuffix(strings.ToLower(last), suffix) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func cloneAssetPermanentFailures(src map[assetPermanentFailureKey]struct{}) map[assetPermanentFailureKey]struct{} {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[assetPermanentFailureKey]struct{}, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
+}
+
+func (m *mockShellModel) clearAssetRequestRetry(id string) {
+	if id == "" || m.assetRetryAfter == nil {
+		return
+	}
+	delete(m.assetRetryAfter, id)
+}
+
+func earliestNonZeroTime(current, candidate time.Time) time.Time {
+	if candidate.IsZero() {
+		return current
+	}
+	if current.IsZero() || candidate.Before(current) {
+		return candidate
+	}
+	return current
+}
+
+func unixNanoOrZero(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.UnixNano()
+}
+
+func firstPositiveInt(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func (m *mockShellModel) forgetAssetRequest(id string) {
@@ -1761,6 +2047,7 @@ func (m *mockShellModel) forgetAssetRequest(id string) {
 		return
 	}
 	delete(m.assetRequested, id)
+	m.clearAssetRequestRetry(id)
 }
 
 func imageCellKeyFromAssetEvent(event assets.Event) (render.ImageCellKey, bool) {
@@ -1768,7 +2055,7 @@ func imageCellKeyFromAssetEvent(event assets.Event) (render.ImageCellKey, bool) 
 		return key, true
 	}
 	if event.Record.Key.Kind != "" && event.Record.Key.ID != "" {
-		return render.ImageCellKey{Kind: event.Record.Key.Kind, ID: event.Record.Key.ID}, true
+		return render.ImageCellKeyForRef(twitch.AssetRef{Kind: event.Record.Key.Kind, ID: event.Record.Key.ID})
 	}
 	return render.ImageCellKey{}, false
 }

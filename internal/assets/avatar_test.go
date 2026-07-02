@@ -11,6 +11,22 @@ import (
 	"github.com/w0rxbend/twi/internal/twitch"
 )
 
+func TestAvatarCacheKeyRejectsCredentialBearingIdentifiers(t *testing.T) {
+	if key := AvatarCacheKey(AvatarRequest{UserID: "https://cdn.example/avatar.png?access_token=secret"}); key.ID != "" {
+		t.Fatalf("unsafe user ID key = %#v, want empty ID", key)
+	}
+	if key := AvatarCacheKey(AvatarRequest{UserLogin: "client_secret=secret"}); key.ID != "" {
+		t.Fatalf("unsafe user login key = %#v, want empty ID", key)
+	}
+	key := AvatarCacheKey(AvatarRequest{
+		UserID:    "https://cdn.example/avatar.png?access_token=secret",
+		UserLogin: "Viewer",
+	})
+	if got, want := key, (storage.AssetKey{Kind: KindAvatar, ID: "login/viewer"}); got != want {
+		t.Fatalf("safe fallback login key = %#v, want %#v", got, want)
+	}
+}
+
 func TestAvatarBatchResolverBatchesUniqueAuthorsAndCachesMetadata(t *testing.T) {
 	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
 	cache := storage.NewMemoryAssetCache()
