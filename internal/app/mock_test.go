@@ -15,6 +15,7 @@ import (
 	"github.com/w0rxbend/twi/internal/assets"
 	"github.com/w0rxbend/twi/internal/config"
 	"github.com/w0rxbend/twi/internal/render"
+	"github.com/w0rxbend/twi/internal/storage"
 	"github.com/w0rxbend/twi/internal/twitch"
 )
 
@@ -1015,6 +1016,222 @@ func TestLiveShellAvatarResolutionKeepsFallbackRowsStable(t *testing.T) {
 	}
 }
 
+func TestLiveShellAssetEventsRefreshVisibleRows(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.ImageMode = "normal"
+	cfg.Features.AvatarMode = "image"
+	cfg.Features.EmojiMode = "image"
+	cfg.Features.EmoteMode = "image"
+	resolver := &appFakeAssetResolver{}
+	renderer := &appFakeImageRenderer{cells: map[render.ImageCellKey]string{
+		{Kind: assets.KindAvatar, ID: "42"}:         "[A42]",
+		{Kind: assets.KindBadge, ID: "moderator/1"}: "BMOD  ",
+		{Kind: assets.KindTwitchEmote, ID: "25"}:    "EM25  ",
+		{Kind: assets.KindEmoji, ID: "1f600"}:       ":)",
+	}}
+	model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
+		AssetResolver: resolver,
+		ImageRenderer: renderer,
+	})
+	model.messages = []twitch.ChatMessage{assetEventMessage("visible-assets", "25", "😀")}
+
+	before := model.View()
+	for _, notWant := range []string{"[A42]", "BMOD", "EM25", ":)"} {
+		if strings.Contains(before, notWant) {
+			t.Fatalf("view already contains prepared cell %q before asset events:\n%s", notWant, before)
+		}
+	}
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 96, Height: 12})
+	model = updated.(mockShellModel)
+	updated, cmd := model.Update(assetLookupTickMsg{})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("assetLookupTick returned nil command, want resolver command")
+	}
+	batch, ok := cmd().(assetPreparedBatchMsg)
+	if !ok {
+		t.Fatalf("asset resolver command returned %T, want assetPreparedBatchMsg", cmd())
+	}
+	if got, want := requestKinds(resolver.last), []string{assets.KindAvatar, assets.KindBadge, assets.KindTwitchEmote, assets.KindEmoji}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("asset request kinds = %#v, want %#v; requests=%#v", got, want, resolver.last)
+	}
+	if renderer.calls != 4 {
+		t.Fatalf("image renderer calls = %d, want 4", renderer.calls)
+	}
+
+	updated, _ = model.Update(batch)
+	model = updated.(mockShellModel)
+	after := model.View()
+	for _, want := range []string{"[A42]", "BMOD", "EM25", ":)"} {
+		if !strings.Contains(after, want) {
+			t.Fatalf("view missing prepared asset cell %q after event:\n%s", want, after)
+		}
+	}
+}
+
+func TestLiveShellAssetEventsPreserveViewportReplyAndComposer(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.ImageMode = "normal"
+	cfg.Features.AvatarMode = "image"
+	cfg.Features.EmojiMode = "image"
+	cfg.Features.EmoteMode = "image"
+	model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
+		AssetResolver: &appFakeAssetResolver{},
+		ImageRenderer: &appFakeImageRenderer{},
+	})
+	model.messages = numberedMockMessages("example", 40)
+	model.messages = append(model.messages, assetEventMessage("asset-target", "25", "😀"))
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 12})
+	model = updated.(mockShellModel)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	model = updated.(mockShellModel)
+	model.focus = mockFocusComposer
+	model.composerText = "draft reply"
+	model.replyTo = &composerReplyContext{MessageID: "mock-35", Author: "viewer", Text: "message-35"}
+	beforeOffset := model.scrollOffset
+	beforeReply := *model.replyTo
+	beforeView := model.View()
+
+	updated, _ = model.Update(assetPreparedBatchMsg{results: []assetPreparedMsg{
+		preparedAssetForTest(twitch.AssetRef{Kind: assets.KindTwitchEmote, ID: "25"}, "EM25  ", 6),
+		preparedAssetForTest(twitch.AssetRef{Kind: assets.KindEmoji, ID: "1f600"}, ":)", 2),
+	}})
+	model = updated.(mockShellModel)
+
+	if got := model.scrollOffset; got != beforeOffset {
+		t.Fatalf("scrollOffset after asset update = %d, want %d", got, beforeOffset)
+	}
+	if got, want := model.focus, mockFocusComposer; got != want {
+		t.Fatalf("focus after asset update = %v, want %v", got, want)
+	}
+	if got, want := model.composerText, "draft reply"; got != want {
+		t.Fatalf("composerText after asset update = %q, want %q", got, want)
+	}
+	if model.replyTo == nil || *model.replyTo != beforeReply {
+		t.Fatalf("replyTo after asset update = %#v, want %#v", model.replyTo, beforeReply)
+	}
+	if after := model.View(); after != beforeView {
+		t.Fatalf("off-screen asset update changed scrolled viewport:\nbefore:\n%s\nafter:\n%s", beforeView, after)
+	}
+}
+
+func TestLiveShellAssetResolverOnlyRequestsVisibleHistory(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmoteMode = "image"
+	resolver := &appFakeAssetResolver{}
+	model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
+		AssetResolver: resolver,
+		ImageRenderer: &appFakeImageRenderer{},
+	})
+	for i := 0; i < 80; i++ {
+		model.messages = append(model.messages, assetEventMessage(fmt.Sprintf("hidden-%02d", i), fmt.Sprintf("hidden-%02d", i), "😀"))
+	}
+	for i := 0; i < 20; i++ {
+		model.messages = append(model.messages, assetEventMessage(fmt.Sprintf("visible-%02d", i), fmt.Sprintf("visible-%02d", i), "😀"))
+	}
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 96, Height: 12})
+	model = updated.(mockShellModel)
+	_, cmd := model.Update(assetLookupTickMsg{})
+	if cmd == nil {
+		t.Fatal("assetLookupTick returned nil command, want resolver command")
+	}
+	_ = cmd()
+	if len(resolver.last) == 0 {
+		t.Fatal("resolver received no visible asset requests")
+	}
+	for _, request := range resolver.last {
+		if request.Ref.Kind != assets.KindTwitchEmote {
+			continue
+		}
+		if strings.HasPrefix(request.Ref.ID, "hidden-") {
+			t.Fatalf("resolver requested hidden history asset %q; requests=%#v", request.Ref.ID, resolver.last)
+		}
+	}
+}
+
+func TestLiveShellAssetFailureCanRetryVisibleRequest(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmoteMode = "image"
+	resolver := &appFakeAssetResolver{fail: true}
+	renderer := &appFakeImageRenderer{cells: map[render.ImageCellKey]string{
+		{Kind: assets.KindTwitchEmote, ID: "25"}: "EM25  ",
+	}}
+	model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
+		AssetResolver: resolver,
+		ImageRenderer: renderer,
+	})
+	model.messages = []twitch.ChatMessage{assetEventMessage("retry-assets", "25", "😀")}
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 96, Height: 12})
+	model = updated.(mockShellModel)
+	updated, cmd := model.Update(assetLookupTickMsg{})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("first assetLookupTick returned nil command, want failing resolver command")
+	}
+	failedBatch := cmd().(assetPreparedBatchMsg)
+	if len(failedBatch.results) == 0 {
+		t.Fatal("failing resolver produced no batch results")
+	}
+	failedID := failedBatch.results[0].event.RequestID
+	updated, cmd = model.Update(failedBatch)
+	model = updated.(mockShellModel)
+	if model.assetRequested[failedID] {
+		t.Fatalf("failed asset request %q remained permanently marked requested", failedID)
+	}
+	if cmd == nil || !model.assetLookupScheduled {
+		t.Fatalf("failed visible asset did not schedule retry; scheduled=%v cmd=%#v", model.assetLookupScheduled, cmd)
+	}
+
+	resolver.fail = false
+	updated, cmd = model.Update(assetLookupTickMsg{})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("retry assetLookupTick returned nil command, want resolver command")
+	}
+	updated, _ = model.Update(cmd().(assetPreparedBatchMsg))
+	model = updated.(mockShellModel)
+	if view := model.View(); !strings.Contains(view, "EM25") {
+		t.Fatalf("view missing prepared cell after retry:\n%s", view)
+	}
+}
+
+func TestMockShellAssetEventRefreshesActiveRevealRows(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmoteMode = "image"
+	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
+	model := newMockShellModelWithClock("example", cfg, clock)
+	model.messages = nil
+
+	updated, _ := model.Update(mockIncomingMessageMsg{message: activeAssetEventMessage()})
+	model = updated.(mockShellModel)
+	for i := 0; i < 100 && !strings.Contains(model.View(), "Kappa"); i++ {
+		clock.Add(mockRevealDelay)
+		updated, _ = model.Update(mockAnimationTickMsg{})
+		model = updated.(mockShellModel)
+	}
+	if got := model.revealQueue.Len(); got == 0 {
+		t.Fatal("active reveal completed before asset refresh test could run")
+	}
+	if view := model.View(); !strings.Contains(view, "Kappa") {
+		t.Fatalf("test setup did not reveal Kappa before asset event:\n%s", view)
+	}
+
+	updated, _ = model.Update(assetPreparedBatchMsg{results: []assetPreparedMsg{
+		preparedAssetForTest(twitch.AssetRef{Kind: assets.KindTwitchEmote, ID: "25"}, "EM25  ", 6),
+	}})
+	model = updated.(mockShellModel)
+	if view := model.View(); !strings.Contains(view, "EM25") {
+		t.Fatalf("active reveal view missing prepared emote cell after asset event:\n%s", view)
+	}
+}
+
 func TestMockShellScrolledBurstRendersStaticallyWithoutRevealBacklog(t *testing.T) {
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
 	model := newMockShellModelWithClock("example", config.Default(), clock)
@@ -1215,6 +1432,40 @@ func mockIncomingMessage(channel, id, text string) twitch.ChatMessage {
 	}
 }
 
+func assetEventMessage(id, emoteID, emojiText string) twitch.ChatMessage {
+	return twitch.ChatMessage{
+		ID:          id,
+		Channel:     "example",
+		Timestamp:   time.Date(2026, 7, 2, 20, 0, 10, 0, time.UTC),
+		AuthorID:    "42",
+		AuthorLogin: "viewer",
+		DisplayName: "viewer",
+		Badges:      []twitch.Badge{{SetID: "moderator", ID: "1"}},
+		Type:        twitch.MessageTypeChat,
+		Fragments: []twitch.MessageFragment{
+			{Type: twitch.FragmentText, Text: "asset "},
+			{Type: twitch.FragmentEmote, Text: "Kappa", Ref: twitch.AssetRef{Kind: assets.KindTwitchEmote, ID: emoteID}},
+			{Type: twitch.FragmentText, Text: " "},
+			{Type: twitch.FragmentEmoji, Text: emojiText},
+		},
+	}
+}
+
+func activeAssetEventMessage() twitch.ChatMessage {
+	return twitch.ChatMessage{
+		ID:          "active-asset",
+		Channel:     "example",
+		Timestamp:   time.Date(2026, 7, 2, 20, 0, 10, 0, time.UTC),
+		AuthorLogin: "viewer",
+		DisplayName: "viewer",
+		Type:        twitch.MessageTypeChat,
+		Fragments: []twitch.MessageFragment{
+			{Type: twitch.FragmentEmote, Text: "Kappa", Ref: twitch.AssetRef{Kind: assets.KindTwitchEmote, ID: "25"}},
+			{Type: twitch.FragmentText, Text: strings.Repeat(" trailing text", 20)},
+		},
+	}
+}
+
 func changedRevealFrames(t *testing.T, mode, text string) int {
 	t.Helper()
 
@@ -1320,6 +1571,88 @@ func (f *appFakeAvatarResolver) ResolveAvatars(_ context.Context, requests []ass
 	f.calls++
 	f.last = append([]assets.AvatarRequest(nil), requests...)
 	return f.results, f.err
+}
+
+type appFakeAssetResolver struct {
+	calls int
+	last  []assets.Request
+	fail  bool
+}
+
+func (f *appFakeAssetResolver) Resolve(_ context.Context, request assets.Request) assets.Event {
+	f.calls++
+	f.last = append(f.last, request)
+	if f.fail {
+		return assets.Event{
+			Kind:      assets.EventFailed,
+			RequestID: request.ID,
+			Ref:       request.Ref,
+			At:        time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC),
+		}
+	}
+	return assets.Event{
+		Kind:      assets.EventDownloaded,
+		RequestID: request.ID,
+		Ref:       request.Ref,
+		Record: storage.AssetRecord{
+			Key:         storage.AssetKey{Kind: request.Ref.Kind, ID: request.Ref.ID},
+			Path:        "fake.png",
+			MediaType:   "image/png",
+			WidthCells:  request.WidthCells,
+			HeightCells: request.HeightCells,
+		},
+		At: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC),
+	}
+}
+
+type appFakeImageRenderer struct {
+	calls int
+	cells map[render.ImageCellKey]string
+}
+
+func (f *appFakeImageRenderer) RenderImage(_ context.Context, _ storage.AssetRecord, spec render.ImageSpec) (render.ImageCell, error) {
+	f.calls++
+	key, _ := render.ImageCellKeyForRef(spec.Ref)
+	text := f.cells[key]
+	if text == "" {
+		text = spec.Fallback
+	}
+	width := spec.WidthCells
+	if width <= 0 {
+		width = lipglossWidth(spec.Fallback)
+	}
+	return render.ImageCell{
+		Text:       fitLine(text, width),
+		WidthCells: width,
+	}, nil
+}
+
+func preparedAssetForTest(ref twitch.AssetRef, text string, width int) assetPreparedMsg {
+	return assetPreparedMsg{
+		event: assets.Event{
+			Kind: assets.EventDownloaded,
+			Ref:  ref,
+			Record: storage.AssetRecord{
+				Key:        storage.AssetKey{Kind: ref.Kind, ID: ref.ID},
+				MediaType:  "image/png",
+				WidthCells: width,
+			},
+		},
+		cell: render.ImageCell{Text: fitLine(text, width), WidthCells: width},
+	}
+}
+
+func requestKinds(requests []assets.Request) []string {
+	seen := make(map[string]bool)
+	kinds := make([]string, 0, len(requests))
+	for _, request := range requests {
+		if seen[request.Ref.Kind] {
+			continue
+		}
+		seen[request.Ref.Kind] = true
+		kinds = append(kinds, request.Ref.Kind)
+	}
+	return kinds
 }
 
 func lipglossWidth(value string) int {

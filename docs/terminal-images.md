@@ -1,6 +1,6 @@
 # Terminal Images
 
-`twi` is planned to support inline images for avatars, Twitch emotes, and standard emoji in capable terminals. The Kitty-compatible renderer core exists behind the internal image renderer boundary, and chat rows can now reserve image placeholders and substitute prepared image cells without changing fallback text. The current MVP implements ready text, Unicode, initials, compact badge, and emote-token fallbacks; live avatar URL metadata can be batched and cached before image download/event wiring is connected to the app.
+`twi` is planned to support inline images for avatars, Twitch emotes, and standard emoji in capable terminals. The Kitty-compatible renderer core exists behind the internal image renderer boundary, and chat rows can now reserve image placeholders and substitute prepared image cells without changing fallback text. The current MVP implements ready text, Unicode, initials, compact badge, and emote-token fallbacks; live avatar URL metadata can be batched and cached, and visible-row asset events can prepare fixed-width image cells without blocking input.
 
 ## Current State
 
@@ -12,7 +12,7 @@
 - `internal/render.KittyRenderer` can produce fixed-cell Kitty graphics output for prepared cached PNG assets in supported terminals.
 - Image loading and rendering must be capability-driven and non-blocking.
 - The chat UI must remain usable when image rendering is disabled, unsupported, still loading, or failed.
-- Known limitation: image download/cache fill events are still pending app integration, so the live chat UI does not yet schedule asset rendering events end to end.
+- Known limitation: default live startup does not yet install a concrete asset resolver/downloader/renderer stack, and Kitty/Ghostty inline drawing still needs manual terminal validation.
 
 ## Support Tiers
 
@@ -82,8 +82,9 @@ Resolved states:
 - `degraded`: explicit image mode or a supported terminal has missing true-color
   or writable-cache signals; fallbacks remain available.
 
-Inline image drawing has a renderer core and row-level substitution point, but
-app-visible asset download/render events are still planned.
+Inline image drawing has a renderer core, row-level substitution point, and
+Bubble Tea asset-event path for visible rows. Default live resolver wiring and
+manual terminal validation are still planned.
 
 ## Configuration
 
@@ -104,8 +105,8 @@ Recognized mode strings:
 - Emoji: `unicode`, `image`
 - Emote: `text`, `image`
 
-The current chat UI still uses fallbacks until asset events provide prepared
-cells. Mode strings are loaded, reported by diagnostics, and resolved into
+The current chat UI uses fallbacks until asset events provide prepared cells.
+Mode strings are loaded, reported by diagnostics, and resolved into
 deterministic app capability state; image-backed modes reserve stable
 placeholders before cells are available.
 

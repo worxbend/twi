@@ -293,6 +293,26 @@ func (q *Queue) Frames() map[string][]render.Row {
 	return frames
 }
 
+// ReplaceRows updates the rendered rows for an active reveal while preserving
+// visible progress. It is intended for layout-stable asset updates, such as
+// prepared image cells replacing fixed-width text fallbacks.
+func (q *Queue) ReplaceRows(id string, rows []render.Row) bool {
+	for i := range q.items {
+		if q.items[i].id != id {
+			continue
+		}
+		current := q.items[i].sequence
+		next := NewSequence(rows, q.cfg, current.lastAdvance)
+		next.visibleUnits = current.visibleUnits
+		if next.visibleUnits > len(next.units) {
+			next.visibleUnits = len(next.units)
+		}
+		q.items[i].sequence = next
+		return true
+	}
+	return false
+}
+
 func completedReveal(id string, sequence *Sequence, reason CompletionReason) CompletedReveal {
 	sequence.Complete()
 	return CompletedReveal{
