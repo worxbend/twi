@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -143,5 +144,22 @@ func TestLoadEnvOnlySkipsConfigFile(t *testing.T) {
 	}
 	if cfg.Twitch.Username != "env_user" {
 		t.Fatalf("username = %q, want env_user", cfg.Twitch.Username)
+	}
+}
+
+func TestDefaultCacheDirUsesPlatformCacheDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("XDG_CACHE_HOME does not define UserCacheDir on Windows")
+	}
+	dir := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", dir)
+
+	got, err := DefaultCacheDir()
+	if err != nil {
+		t.Fatalf("DefaultCacheDir returned error: %v", err)
+	}
+	want := filepath.Join(dir, "twi")
+	if got != want {
+		t.Fatalf("DefaultCacheDir = %q, want %q", got, want)
 	}
 }

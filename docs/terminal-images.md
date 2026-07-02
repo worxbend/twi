@@ -6,12 +6,12 @@
 
 - Text, Unicode, initials, and compact badge fallbacks are implemented for chat rows.
 - Renderer asset fallback fragments can reserve stable cell widths before images are available.
-- `internal/storage.AssetCache` provides context-aware cache methods; the in-memory implementation is intended for deterministic tests and performs no network access.
+- `internal/storage.AssetCache` provides context-aware cache methods. The in-memory implementation is intended for deterministic tests, and `internal/storage.DiskAssetCache` persists metadata plus cache-owned bytes under the platform cache directory using deterministic hashed paths.
 - `twi doctor` partially reports image-related readiness through terminal color hints, Kitty/Ghostty environment signals, cache writability, and selected image/avatar/emoji/emote modes.
 - Kitty-compatible image rendering is the first planned image protocol target.
 - Image loading and rendering must be capability-driven and non-blocking.
 - The chat UI must remain usable when image rendering is disabled, unsupported, still loading, or failed.
-- Known limitation: no Helix asset lookup, image download/cache fill, or Kitty/Ghostty drawing path is implemented yet.
+- Known limitation: no Helix asset lookup, image download/cache fill wiring, or Kitty/Ghostty drawing path is implemented yet.
 
 ## Support Tiers
 
@@ -110,7 +110,7 @@ the asset pipeline and terminal renderer are implemented.
 
 ## Cache Rules
 
-Planned cache location:
+Cache location:
 
 ```text
 $XDG_CACHE_HOME/twi
@@ -124,7 +124,8 @@ Cache behavior should:
 - Use ETag or Last-Modified where practical.
 - Avoid refetching avatars for every message from the same user.
 - Batch Twitch user lookups to avoid API limits.
-- Never store OAuth tokens or client secrets.
+- Derive on-disk paths from hashed cache keys instead of original IDs, source URLs, or credential-bearing request data.
+- Never store OAuth tokens, client secrets, or credential-bearing URLs.
 
 ## Troubleshooting Targets
 
