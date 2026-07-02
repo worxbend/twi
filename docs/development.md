@@ -65,28 +65,50 @@ The plan calls for interfaces around:
 
 ## Tooling
 
-The agent loop has been using these validation commands as the exact Go gate:
+Pull requests run the repository-native Go gate through GitHub Actions. Run the
+same command set from a clean checkout before opening or updating a PR:
 
 ```sh
+export GOTOOLCHAIN=auto TERM=xterm-256color
+export XDG_CONFIG_HOME="$(mktemp -d)" XDG_CACHE_HOME="$(mktemp -d)"
+export TWI_TWITCH_USERNAME= TWI_TWITCH_OAUTH_TOKEN= TWI_TWITCH_REFRESH_TOKEN=
+export TWI_TWITCH_CLIENT_ID= TWI_TWITCH_CLIENT_SECRET=
+export TWITCH_USERNAME= TWITCH_ACCESS_TOKEN= TWITCH_REFRESH_TOKEN=
+export TWITCH_CLIENT_ID= TWITCH_CLIENT_SECRET=
 go version
 go mod tidy
 go fmt ./...
+git diff --exit-code
 go vet ./...
 go test ./...
 go test -race ./...
 go tool govulncheck ./...
 go tool staticcheck ./...
+go build -o /tmp/twi-validation ./cmd/twi
+go run ./cmd/twi --help
+go run ./cmd/twi chat --mock --channel example
+go run ./cmd/twi chat --mock --channel one --channel two
+go run ./cmd/twi doctor
+go run ./cmd/twi config show
+git diff --check origin/main...HEAD
 ```
+
+The empty Twitch credential environment variables plus isolated
+`XDG_CONFIG_HOME` and `XDG_CACHE_HOME` directories keep smoke checks independent
+from local config files, secrets, or a Twitch account. Credentialed Twitch chat,
+Docker build/runtime checks, and Kitty/Ghostty inline-image validation are
+manual or release-specific checks. Replace `origin/main` with the PR base branch
+when needed; use plain `git diff --check` for uncommitted local changes.
 
 Task-specific smoke and metadata checks used by recent iterations:
 
 ```sh
 go run ./cmd/twi --help
 go run ./cmd/twi chat --mock --channel example
+go run ./cmd/twi chat --mock --channel one --channel two
 go run ./cmd/twi doctor
 go run ./cmd/twi config show
 go run ./cmd/twi chat --channel example
-jq empty .agent-loop/tasks.json
 git diff --check
 ```
 

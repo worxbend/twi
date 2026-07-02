@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  go-quality:
+    name: Go quality gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GOTOOLCHAIN: auto
+      TERM: xterm-256color
+      XDG_CONFIG_HOME: ${{ runner.temp }}/twi-config
+      XDG_CACHE_HOME: ${{ runner.temp }}/twi-cache
+      TWI_TWITCH_USERNAME: ""
+      TWI_TWITCH_OAUTH_TOKEN: ""
+      TWI_TWITCH_REFRESH_TOKEN: ""
+      TWI_TWITCH_CLIENT_ID: ""
+      TWI_TWITCH_CLIENT_SECRET: ""
+      TWITCH_USERNAME: ""
+      TWITCH_ACCESS_TOKEN: ""
+      TWITCH_REFRESH_TOKEN: ""
+      TWITCH_CLIENT_ID: ""
+      TWITCH_CLIENT_SECRET: ""
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Prepare isolated app directories
+        run: mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
+
+      - name: Check formatting and module files
+        run: |
+          go version
+          go mod tidy
+          go fmt ./...
+          git diff --exit-code
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Unit tests
+        run: go test ./...
+
+      - name: Race tests
+        run: go test -race ./...
+
+      - name: Vulnerability scan
+        run: go tool govulncheck ./...
+
+      - name: Static analysis
+        run: go tool staticcheck ./...
+
+      - name: Build CLI
+        run: go build -o "$RUNNER_TEMP/twi-validation" ./cmd/twi
+
+      - name: Credential-free CLI smoke checks
+        run: |
+          go run ./cmd/twi --help
+          go run ./cmd/twi chat --mock --channel example
+          go run ./cmd/twi chat --mock --channel one --channel two
+          go run ./cmd/twi doctor
+          go run ./cmd/twi config show
+
+      - name: Diff whitespace check
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          zero_sha=0000000000000000000000000000000000000000
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            git diff --check "origin/${GITHUB_BASE_REF}...HEAD"
+          elif [ -n "$BEFORE_SHA" ] && [ "$BEFORE_SHA" != "$zero_sha" ]; then
+            git diff --check "$BEFORE_SHA" "$GITHUB_SHA"
+          else
+            git diff-tree --check --no-commit-id --root -r "$GITHUB_SHA"
+          fi

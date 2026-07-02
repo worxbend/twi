@@ -176,16 +176,40 @@ More detail: [Docker Guide](docs/docker.md).
 
 ## Developer Commands
 
+The default CI quality gate runs this same credential-free command set from a
+clean checkout:
+
 ```sh
+export GOTOOLCHAIN=auto TERM=xterm-256color
+export XDG_CONFIG_HOME="$(mktemp -d)" XDG_CACHE_HOME="$(mktemp -d)"
+export TWI_TWITCH_USERNAME= TWI_TWITCH_OAUTH_TOKEN= TWI_TWITCH_REFRESH_TOKEN=
+export TWI_TWITCH_CLIENT_ID= TWI_TWITCH_CLIENT_SECRET=
+export TWITCH_USERNAME= TWITCH_ACCESS_TOKEN= TWITCH_REFRESH_TOKEN=
+export TWITCH_CLIENT_ID= TWITCH_CLIENT_SECRET=
 go version
 go mod tidy
 go fmt ./...
+git diff --exit-code
 go vet ./...
 go test ./...
 go test -race ./...
 go tool govulncheck ./...
 go tool staticcheck ./...
+go build -o /tmp/twi-validation ./cmd/twi
+go run ./cmd/twi --help
+go run ./cmd/twi chat --mock --channel example
+go run ./cmd/twi chat --mock --channel one --channel two
+go run ./cmd/twi doctor
+go run ./cmd/twi config show
+git diff --check origin/main...HEAD
 ```
+
+Credentialed Twitch chat, Docker-only checks, and Kitty/Ghostty inline-image
+validation are manual or release-specific checks, not part of the default pull
+request gate.
+
+If your PR targets a different base branch, replace `origin/main` with that
+branch. Use plain `git diff --check` for uncommitted local changes.
 
 Restricted environment cache-friendly form:
 
