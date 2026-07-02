@@ -1,6 +1,6 @@
 # Terminal Images
 
-`twi` is planned to support inline images for avatars, Twitch emotes, and standard emoji in capable terminals. The Kitty-compatible renderer core exists behind the internal image renderer boundary, and chat rows can now reserve image placeholders and substitute prepared image cells without changing fallback text. The current MVP implements ready text, Unicode, initials, compact badge, and emote-token fallbacks; live avatar URL metadata can be batched and cached, and visible-row asset events can prepare fixed-width image cells without blocking input.
+`twi` supports fallback-safe inline image plumbing for avatars, Twitch emotes, and standard emoji in capable terminals. The Kitty-compatible renderer core exists behind the internal image renderer boundary, and chat rows can reserve image placeholders and substitute prepared image cells without changing fallback text. The current MVP implements ready text, Unicode, initials, compact badge, and emote-token fallbacks; live avatar, badge, emote, and emoji metadata can be resolved and cached, and visible-row asset events can prepare fixed-width image cells without blocking input.
 
 ## Current State
 
@@ -12,7 +12,7 @@
 - `internal/render.KittyRenderer` can produce fixed-cell Kitty graphics output for prepared cached PNG assets in supported terminals.
 - Image loading and rendering must be capability-driven and non-blocking.
 - The chat UI must remain usable when image rendering is disabled, unsupported, still loading, or failed.
-- Known limitation: default live startup does not yet install a concrete asset resolver/downloader/renderer stack, and Kitty/Ghostty inline drawing still needs manual terminal validation.
+- Known limitation: default live startup does not yet install a concrete asset resolver/downloader/renderer stack, and Kitty/Ghostty inline drawing still needs manual terminal validation in a compatible terminal.
 
 ## Support Tiers
 
@@ -20,7 +20,7 @@ Tier 1:
 
 - Kitty.
 - Ghostty or other Kitty graphics protocol compatible terminals.
-- Expected to support inline images once the renderer is integrated into chat rows.
+- Expected to support inline images through the Kitty-compatible renderer path; manual terminal validation is still required.
 
 Tier 2:
 
@@ -32,14 +32,14 @@ Tier 3:
 - Basic terminals with reduced visual capability.
 - Expected to use compact text fallbacks and reduced motion where needed.
 
-## Planned Image Features
+## Image Feature Status
 
 Avatars:
 
-- Resolve Twitch user `profile_image_url` values through Helix Get Users. This metadata step is implemented for visible live-chat authors when `avatar_mode = "image"` and Twitch API credentials are configured.
+- Resolve Twitch user `profile_image_url` values through Helix Get Users for visible live-chat authors when `avatar_mode = "image"` and Twitch API credentials are configured.
 - Cache profile metadata by user ID and login.
-- Download and cache image assets.
-- Render fixed-size inline images where supported.
+- Download and cache image assets through the asset resolver/cache boundary.
+- Render fixed-size inline images where supported and prepared cells are available.
 - Fall back to initials or user chips without changing message layout.
 
 Twitch emotes:
@@ -47,20 +47,20 @@ Twitch emotes:
 - Parse emote positions from Twitch IRC tags.
 - Resolve emote metadata and CDN template URLs.
 - Cache metadata and image assets.
-- Render image emotes where supported.
+- Render image emotes where supported and prepared cells are available.
 - Fall back to compact text tokens.
 
 Standard emoji:
 
 - Detect emoji grapheme clusters.
-- Resolve local or provider-backed emoji image assets.
-- Render emoji images where supported.
+- Resolve provider-neutral emoji image asset keys.
+- Render emoji images where supported and prepared cells are available.
 - Fall back to native Unicode emoji.
 
 Badges:
 
 - Cache global and channel badge metadata.
-- Render as compact labels or icons.
+- Render as compact labels or prepared image cells.
 - Keep text fallbacks available.
 
 ## Capability Decisions
@@ -84,7 +84,7 @@ Resolved states:
 
 Inline image drawing has a renderer core, row-level substitution point, and
 Bubble Tea asset-event path for visible rows. Default live resolver wiring and
-manual terminal validation are still planned.
+manual Kitty/Ghostty validation are still planned.
 
 ## Configuration
 
