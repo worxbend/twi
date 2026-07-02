@@ -276,6 +276,11 @@ func RequestCacheKey(req Request) storage.AssetKey {
 func cacheKey(ref twitch.AssetRef, channelID string) storage.AssetKey {
 	ref = normalizeRef(ref)
 	id := ref.ID
+	if ref.Kind == KindEmoji {
+		if emojiID, ok := EmojiAssetID(id); ok {
+			id = emojiID
+		}
+	}
 	if ref.Kind == KindBadge && channelID != "" && id != "" {
 		id = channelID + "/" + id
 	}

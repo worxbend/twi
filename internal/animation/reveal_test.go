@@ -116,8 +116,8 @@ func TestFixedWidthFallbackFramesDoNotCoalesce(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.FastInterval = time.Millisecond
 	rows := []render.Row{{Fragments: []render.Fragment{
-		{Kind: render.FragmentEmojiFallback, Text: "😀", WidthCells: 2, Ref: twitch.AssetRef{Kind: "emoji", ID: "😀"}},
-		{Kind: render.FragmentEmojiFallback, Text: "😀", WidthCells: 2, Ref: twitch.AssetRef{Kind: "emoji", ID: "😀"}},
+		{Kind: render.FragmentEmojiFallback, Text: "😀", WidthCells: 2, Ref: twitch.AssetRef{Kind: "emoji", ID: "1f600"}},
+		{Kind: render.FragmentEmojiFallback, Text: "😀", WidthCells: 2, Ref: twitch.AssetRef{Kind: "emoji", ID: "1f600"}},
 	}}}
 	sequence := NewSequence(rows, cfg, now)
 
@@ -132,6 +132,44 @@ func TestFixedWidthFallbackFramesDoNotCoalesce(t *testing.T) {
 	}
 	if got, want := len(frame[0].Fragments), 2; got != want {
 		t.Fatalf("frame fragment count = %d, want %d: %#v", got, want, frame[0].Fragments)
+	}
+}
+
+func TestEmojiPlaceholderAndNativeFallbackRevealConsistently(t *testing.T) {
+	msg := twitch.ChatMessage{
+		Timestamp:   time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC),
+		DisplayName: "emoji_fan",
+		Type:        twitch.MessageTypeChat,
+		Text:        "go 👍🏽 now",
+	}
+	placeholderOpts := render.DefaultOptions(80)
+	placeholderOpts.Assets.ShowAvatars = false
+	placeholderOpts.Assets.EmojiWidthCells = 2
+	nativeOpts := placeholderOpts
+	nativeOpts.Assets.EmojiWidthCells = 0
+
+	placeholderUnits := Units(render.Rows(msg, placeholderOpts))
+	nativeUnits := Units(render.Rows(msg, nativeOpts))
+
+	placeholderEmoji := emojiRevealUnits(placeholderUnits)
+	nativeEmoji := emojiRevealUnits(nativeUnits)
+	if len(placeholderEmoji) != 1 || len(nativeEmoji) != 1 {
+		t.Fatalf("emoji units = %d placeholder, %d native; want one each", len(placeholderEmoji), len(nativeEmoji))
+	}
+	if placeholderEmoji[0].Fragment.Text != nativeEmoji[0].Fragment.Text {
+		t.Fatalf("emoji texts = %q and %q, want equal", placeholderEmoji[0].Fragment.Text, nativeEmoji[0].Fragment.Text)
+	}
+	if placeholderEmoji[0].Fragment.Ref.ID != "1f44d-1f3fd" || nativeEmoji[0].Fragment.Ref.ID != "1f44d-1f3fd" {
+		t.Fatalf("emoji refs = %#v and %#v, want normalized key", placeholderEmoji[0].Fragment.Ref, nativeEmoji[0].Fragment.Ref)
+	}
+	if placeholderEmoji[0].Fragment.WidthCells != 2 {
+		t.Fatalf("placeholder emoji width = %d, want fixed width 2", placeholderEmoji[0].Fragment.WidthCells)
+	}
+	if nativeEmoji[0].Fragment.WidthCells != 0 {
+		t.Fatalf("native emoji width = %d, want natural width", nativeEmoji[0].Fragment.WidthCells)
+	}
+	if len(placeholderUnits) != len(nativeUnits) {
+		t.Fatalf("unit counts = %d placeholder, %d native; want equal", len(placeholderUnits), len(nativeUnits))
 	}
 }
 
@@ -304,4 +342,14 @@ func plainFrame(rows []render.Row) []string {
 		plain = append(plain, row.Plain())
 	}
 	return plain
+}
+
+func emojiRevealUnits(units []RevealUnit) []RevealUnit {
+	var out []RevealUnit
+	for _, unit := range units {
+		if unit.Fragment.Kind == render.FragmentEmojiFallback {
+			out = append(out, unit)
+		}
+	}
+	return out
 }

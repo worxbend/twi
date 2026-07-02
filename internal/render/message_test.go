@@ -1,6 +1,7 @@
 package render
 
 import (
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -278,7 +279,7 @@ func TestRowsReserveStableAssetFallbackWidths(t *testing.T) {
 		{kind: FragmentAvatar, want: 5, ref: twitch.AssetRef{Kind: "avatar", ID: "user-1", URL: "https://static-cdn.example/avatar.png"}},
 		{kind: FragmentBadge, want: 6, ref: twitch.AssetRef{Kind: "badge", ID: "moderator/1"}},
 		{kind: FragmentEmoteFallback, want: 6, ref: twitch.AssetRef{Kind: "twitch_emote", ID: "25"}},
-		{kind: FragmentEmojiFallback, want: 2, ref: twitch.AssetRef{Kind: "emoji", ID: "😀"}},
+		{kind: FragmentEmojiFallback, want: 2, ref: twitch.AssetRef{Kind: "emoji", ID: "1f600"}},
 	}
 	for _, check := range checks {
 		fragment, ok := firstKind(rows, check.kind)
@@ -315,6 +316,54 @@ func TestRowsNoImageFallbackOutputIsIntentional(t *testing.T) {
 	want := []string{"[TB] 20:00 twi_bot: Kappa  😀"}
 	if got := rowsToPlain(rows); !reflect.DeepEqual(got, want) {
 		t.Fatalf("fallback rows mismatch\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+func TestRowsMapEmojiAssetKeysAndPreserveGoldenFallback(t *testing.T) {
+	msg := twitch.ChatMessage{
+		Timestamp:   time.Date(2026, 7, 1, 20, 0, 0, 0, time.Local),
+		DisplayName: "emoji_fan",
+		Type:        twitch.MessageTypeChat,
+		Text:        "hi ☕️ 👍🏽 👩‍💻 👨‍👩‍👧‍👦 🇺🇸 1️⃣ ♥️",
+	}
+	opts := DefaultOptions(120)
+	opts.Assets.ShowAvatars = false
+
+	rows := Rows(msg, opts)
+	golden, err := os.ReadFile("testdata/emoji_rows.golden")
+	if err != nil {
+		t.Fatalf("read emoji golden: %v", err)
+	}
+	if got, want := strings.Join(rowsToPlain(rows), "\n")+"\n", string(golden); got != want {
+		t.Fatalf("emoji rows mismatch\n got: %q\nwant: %q", got, want)
+	}
+
+	wantRefs := []string{
+		"2615",
+		"1f44d-1f3fd",
+		"1f469-200d-1f4bb",
+		"1f468-200d-1f469-200d-1f467-200d-1f466",
+		"1f1fa-1f1f8",
+		"31-20e3",
+		"2665",
+	}
+	var gotRefs []string
+	var gotFallbacks []string
+	for _, row := range rows {
+		for _, fragment := range row.Fragments {
+			if fragment.Kind != FragmentEmojiFallback {
+				continue
+			}
+			gotRefs = append(gotRefs, fragment.Ref.ID)
+			gotFallbacks = append(gotFallbacks, fragment.Text)
+		}
+	}
+	if !reflect.DeepEqual(gotRefs, wantRefs) {
+		t.Fatalf("emoji refs = %#v, want %#v", gotRefs, wantRefs)
+	}
+	wantFallbacks := []string{"☕️", "👍🏽", "👩‍💻", "👨‍👩‍👧‍👦", "🇺🇸", "1️⃣", "♥️"}
+	if !reflect.DeepEqual(gotFallbacks, wantFallbacks) {
+		t.Fatalf("emoji fallbacks = %#v, want %#v", gotFallbacks, wantFallbacks)
 	}
 }
 

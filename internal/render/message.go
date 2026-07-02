@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rivo/uniseg"
+	"github.com/w0rxbend/twi/internal/emoji"
 	"github.com/w0rxbend/twi/internal/storage"
 	"github.com/w0rxbend/twi/internal/theme"
 	"github.com/w0rxbend/twi/internal/twitch"
@@ -521,7 +522,7 @@ func splitTextFragments(text string, opts Options) []Fragment {
 			})
 			continue
 		}
-		if isEmojiCluster(cluster) {
+		if emoji.IsCluster(cluster) {
 			flushText()
 			fragments = append(fragments, Fragment{
 				Kind:       FragmentEmojiFallback,
@@ -869,8 +870,12 @@ func emojiAssetRef(text string, ref twitch.AssetRef) twitch.AssetRef {
 	if ref.Kind == "" {
 		ref.Kind = "emoji"
 	}
-	if ref.ID == "" {
-		ref.ID = text
+	if ref.ID == "" || ref.ID == text {
+		if id, ok := emoji.AssetID(text); ok {
+			ref.ID = id
+		} else if ref.ID == "" {
+			ref.ID = text
+		}
 	}
 	return ref
 }
@@ -990,18 +995,6 @@ func textWidth(value string) int {
 func isMentionPart(cluster string) bool {
 	for _, r := range cluster {
 		return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
-	}
-	return false
-}
-
-func isEmojiCluster(cluster string) bool {
-	for _, r := range cluster {
-		switch {
-		case r >= 0x1F000 && r <= 0x1FAFF:
-			return true
-		case r >= 0x2600 && r <= 0x27BF:
-			return true
-		}
 	}
 	return false
 }
