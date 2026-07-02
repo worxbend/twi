@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/w0rxbend/twi/internal/animation"
 	"github.com/w0rxbend/twi/internal/config"
 	"github.com/w0rxbend/twi/internal/twitch"
 )
@@ -694,6 +695,170 @@ func TestMockShellInputAndScrollRemainResponsiveDuringAnimation(t *testing.T) {
 	}
 }
 
+func TestLiveShellBurstKeepsRevealQueueBoundedAndControlsResponsive(t *testing.T) {
+	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
+	client := NewFakeChatClient(1)
+	if err := client.QueueSendResult(SendResult{AcceptedAt: clock.Now(), Detail: "accepted during burst"}, nil); err != nil {
+		t.Fatalf("QueueSendResult returned error: %v", err)
+	}
+	model := newLiveShellModelWithClock("example", config.Default(), client, clock)
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 12})
+	model = updated.(mockShellModel)
+	for i := 0; i < 40; i++ {
+		updated, _ = model.Update(chatClientMessageMsg{
+			message: mockIncomingMessage("example", fmt.Sprintf("burst-%02d", i), fmt.Sprintf("burst message %02d", i)),
+			ok:      true,
+		})
+		model = updated.(mockShellModel)
+		if model.revealQueue.Len() > animation.DefaultConfig().MaxQueued {
+			t.Fatalf("after burst message %02d reveal queue len = %d, want <= %d", i, model.revealQueue.Len(), animation.DefaultConfig().MaxQueued)
+		}
+	}
+
+	if got, want := model.revealQueue.Len(), animation.DefaultConfig().MaxQueued; got != want {
+		t.Fatalf("reveal queue len after burst = %d, want %d", got, want)
+	}
+	if got, want := len(model.messages), 40-animation.DefaultConfig().MaxQueued; got != want {
+		t.Fatalf("static overflow messages = %d, want %d", got, want)
+	}
+	for _, want := range []string{"burst message 00", "burst message 07"} {
+		if !messagesContainText(model.messages, want) {
+			t.Fatalf("overflowed static messages missing %q: %#v", want, model.messages)
+		}
+	}
+	if messagesContainText(model.messages, "burst message 08") {
+		t.Fatalf("non-overflowed burst message rendered statically too early: %#v", model.messages)
+	}
+
+	updated, _ = model.Update(tea.WindowSizeMsg{Width: 36, Height: 9})
+	model = updated.(mockShellModel)
+	view := model.View()
+	if got, want := lineCount(view), 9; got != want {
+		t.Fatalf("burst resized view line count = %d, want %d:\n%s", got, want, view)
+	}
+	for i, line := range strings.Split(strings.TrimSuffix(view, "\n"), "\n") {
+		if got := lipglossWidth(line); got > 36 {
+			t.Fatalf("burst resized line %d width = %d, want <= 36:\n%s", i+1, got, view)
+		}
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	model = updated.(mockShellModel)
+	if model.scrollOffset == 0 {
+		t.Fatal("page up during burst left scrollOffset at 0")
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	model = updated.(mockShellModel)
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("still responsive")})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("composer input during burst returned command %#v, want nil", cmd)
+	}
+	if got, want := model.composerText, "still responsive"; got != want {
+		t.Fatalf("composer text during burst = %q, want %q", got, want)
+	}
+	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("Enter during burst returned nil command, want send command")
+	}
+	completed := cmd().(composerSendCompletedMsg)
+	updated, _ = model.Update(completed)
+	model = updated.(mockShellModel)
+	if got, want := model.sendState, composerSendSucceeded; got != want {
+		t.Fatalf("sendState after burst send = %q, want %q", got, want)
+	}
+	if !strings.Contains(model.sendFeedback, "accepted during burst") {
+		t.Fatalf("sendFeedback after burst = %q, want accepted detail", model.sendFeedback)
+	}
+}
+
+func TestMockShellScrolledBurstRendersStaticallyWithoutRevealBacklog(t *testing.T) {
+	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
+	model := newMockShellModelWithClock("example", config.Default(), clock)
+	model.messages = numberedMockMessages("example", 30)
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 12})
+	model = updated.(mockShellModel)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	model = updated.(mockShellModel)
+	if model.scrollOffset == 0 {
+		t.Fatal("test setup failed: scrollOffset = 0 after page up")
+	}
+	beforeView := model.View()
+	beforeOffset := model.scrollOffset
+
+	for i := 0; i < 12; i++ {
+		updated, cmd := model.Update(mockIncomingMessageMsg{
+			message: mockIncomingMessage("example", fmt.Sprintf("offscreen-%02d", i), fmt.Sprintf("offscreen burst %02d", i)),
+		})
+		model = updated.(mockShellModel)
+		if cmd != nil {
+			t.Fatalf("off-screen burst message %02d returned command %#v, want no reveal tick", i, cmd)
+		}
+	}
+
+	if got := model.revealQueue.Len(); got != 0 {
+		t.Fatalf("off-screen burst reveal queue len = %d, want 0", got)
+	}
+	if got := len(model.activeOrder); got != 0 {
+		t.Fatalf("off-screen active reveal count = %d, want 0", got)
+	}
+	if got, want := len(model.messages), 42; got != want {
+		t.Fatalf("messages after off-screen burst = %d, want %d", got, want)
+	}
+	if model.scrollOffset <= beforeOffset {
+		t.Fatalf("scrollOffset after off-screen burst = %d, want > %d to preserve visible page", model.scrollOffset, beforeOffset)
+	}
+	afterView := model.View()
+	if afterView != beforeView {
+		t.Fatalf("off-screen static burst changed visible scrolled page:\nbefore:\n%s\nafter:\n%s", beforeView, afterView)
+	}
+	if strings.Contains(afterView, "offscreen burst") {
+		t.Fatalf("off-screen burst appeared in current scrolled viewport:\n%s", afterView)
+	}
+}
+
+func TestMockShellCompletingActiveRevealPreservesScrolledViewport(t *testing.T) {
+	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
+	model := newMockShellModelWithClock("example", config.Default(), clock)
+	model.messages = numberedMockMessages("example", 30)
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 12})
+	model = updated.(mockShellModel)
+	updated, _ = model.Update(mockIncomingMessageMsg{
+		message: mockIncomingMessage("example", "active-while-scrolled", "active reveal finishes while scrolled"),
+	})
+	model = updated.(mockShellModel)
+	if got := model.revealQueue.Len(); got != 1 {
+		t.Fatalf("reveal queue len = %d, want 1", got)
+	}
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	model = updated.(mockShellModel)
+	if model.scrollOffset == 0 {
+		t.Fatal("test setup failed: scrollOffset = 0 after page up")
+	}
+	beforeView := model.View()
+	beforeOffset := model.scrollOffset
+
+	driveRevealToCompletion(t, &model, clock)
+
+	if got := model.revealQueue.Len(); got != 0 {
+		t.Fatalf("reveal queue len after completion = %d, want 0", got)
+	}
+	if !messagesContainText(model.messages, "active reveal finishes while scrolled") {
+		t.Fatalf("completed reveal missing from static messages: %#v", model.messages)
+	}
+	if got := model.scrollOffset; got != beforeOffset {
+		t.Fatalf("scrollOffset after active completion = %d, want %d", got, beforeOffset)
+	}
+	if afterView := model.View(); afterView != beforeView {
+		t.Fatalf("active reveal completion changed visible scrolled page:\nbefore:\n%s\nafter:\n%s", beforeView, afterView)
+	}
+}
+
 func TestMockShellDuplicateIncomingMessageIDsCompleteIndependently(t *testing.T) {
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
 	model := newMockShellModelWithClock("example", config.Default(), clock)
@@ -874,6 +1039,15 @@ func numberedMockMessages(channel string, count int) []twitch.ChatMessage {
 		})
 	}
 	return messages
+}
+
+func messagesContainText(messages []twitch.ChatMessage, text string) bool {
+	for _, message := range messages {
+		if strings.Contains(message.Text, text) {
+			return true
+		}
+	}
+	return false
 }
 
 func lipglossWidth(value string) int {

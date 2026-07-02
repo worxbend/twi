@@ -42,7 +42,7 @@ Keep boundaries strict:
 - UI should depend on internal interfaces, not Twitch library types.
 - Twitch/network code should not depend on Bubble Tea components.
 - Rendering should consume normalized messages and assets, not raw IRC strings.
-- Animation should consume render rows/fragments, not raw strings; queue overflow completes the oldest active reveal immediately so callers can render it statically.
+- Animation should consume render rows/fragments, not raw strings; queue overflow completes the oldest active reveal immediately so callers can render it statically. App views also render new messages statically while the chat viewport is scrolled away from the bottom so off-screen traffic cannot grow a reveal backlog or shift the user's current page.
 - Image loading and network work must not block Bubble Tea `Update` or `View`; current asset fallback rendering is pure row construction, and future cache/image work should flow through commands/messages.
 
 ## Core Interfaces

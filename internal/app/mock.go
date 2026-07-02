@@ -760,6 +760,11 @@ func (m mockShellModel) nextConnectionStateCommand() tea.Cmd {
 }
 
 func (m *mockShellModel) enqueueMessage(message twitch.ChatMessage) tea.Cmd {
+	if m.scrollOffset > 0 {
+		m.appendStaticMessage(message, true)
+		return nil
+	}
+
 	layout := m.layout()
 	rowWidth := layout.width
 	if layout.chatFramed {
@@ -771,7 +776,7 @@ func (m *mockShellModel) enqueueMessage(message twitch.ChatMessage) tea.Cmd {
 	result := m.revealQueue.Enqueue(revealID, render.Rows(message, m.renderOptions(rowWidth)))
 	m.completeReveals(result.Overflow)
 	if result.Complete != nil {
-		m.messages = append(m.messages, message)
+		m.appendStaticMessage(message, false)
 		return nil
 	}
 	if result.Queued {
@@ -797,10 +802,39 @@ func (m *mockShellModel) completeReveals(completed []animation.CompletedReveal) 
 		if !ok {
 			continue
 		}
-		m.messages = append(m.messages, message)
+		m.appendStaticMessageReplacingRows(message, m.scrollOffset > 0, len(reveal.Rows))
 		delete(m.activeMessages, reveal.ID)
 		m.removeActiveReveal(reveal.ID)
 	}
+}
+
+func (m *mockShellModel) appendStaticMessage(message twitch.ChatMessage, preserveScrolledView bool) {
+	m.appendStaticMessageReplacingRows(message, preserveScrolledView, 0)
+}
+
+func (m *mockShellModel) appendStaticMessageReplacingRows(message twitch.ChatMessage, preserveScrolledView bool, replacedRows int) {
+	rowCount := 0
+	if preserveScrolledView {
+		rowCount = m.staticMessageRowCount(message) - replacedRows
+	}
+	m.messages = append(m.messages, message)
+	if preserveScrolledView {
+		m.scrollOffset += rowCount
+	}
+}
+
+func (m mockShellModel) staticMessageRowCount(message twitch.ChatMessage) int {
+	layout := m.layout()
+	rowWidth := layout.width
+	if layout.chatFramed {
+		rowWidth = layout.width - 4
+	}
+	rowWidth = clampMin(rowWidth, 1)
+	rows := render.Rows(message, m.renderOptions(rowWidth))
+	if len(rows) == 0 {
+		return 1
+	}
+	return len(rows)
 }
 
 func (m *mockShellModel) removeActiveReveal(id string) {

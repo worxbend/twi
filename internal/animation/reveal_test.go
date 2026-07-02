@@ -1,6 +1,7 @@
 package animation
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -209,6 +210,60 @@ func TestQueueCompletesOldestRevealOnOverflow(t *testing.T) {
 	}
 	if _, ok := queue.Frames()["one"]; ok {
 		t.Fatal("overflowed reveal should not remain queued")
+	}
+}
+
+func TestQueueBurstOverflowIsDeterministicAndBounded(t *testing.T) {
+	clock := &fakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
+	cfg := DefaultConfig()
+	cfg.MaxQueued = 3
+	cfg.FastInterval = time.Hour
+	queue := NewQueue(cfg, clock)
+
+	overflowed := make([]string, 0)
+	for i := 0; i < 10; i++ {
+		id := fmt.Sprintf("message-%02d", i)
+		result := queue.Enqueue(id, textRows(id))
+		if !result.Queued {
+			t.Fatalf("enqueue %s was not queued: %#v", id, result)
+		}
+		if result.QueueSize > cfg.MaxQueued {
+			t.Fatalf("enqueue %s queue size = %d, want <= %d", id, result.QueueSize, cfg.MaxQueued)
+		}
+		for _, reveal := range result.Overflow {
+			overflowed = append(overflowed, reveal.ID)
+			if reveal.Reason != CompletionOverflow {
+				t.Fatalf("overflow reason for %s = %q, want %q", reveal.ID, reveal.Reason, CompletionOverflow)
+			}
+			if got, want := plainFrame(reveal.Rows), []string{reveal.ID}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("overflow rows for %s = %#v, want %#v", reveal.ID, got, want)
+			}
+		}
+	}
+
+	wantOverflowed := []string{
+		"message-00",
+		"message-01",
+		"message-02",
+		"message-03",
+		"message-04",
+		"message-05",
+		"message-06",
+	}
+	if !reflect.DeepEqual(overflowed, wantOverflowed) {
+		t.Fatalf("overflowed IDs = %#v, want %#v", overflowed, wantOverflowed)
+	}
+	if got, want := queue.Len(), cfg.MaxQueued; got != want {
+		t.Fatalf("queue len = %d, want %d", got, want)
+	}
+	if got, want := queue.OverflowCount(), len(wantOverflowed); got != want {
+		t.Fatalf("overflow count = %d, want %d", got, want)
+	}
+	frames := queue.Frames()
+	for _, id := range []string{"message-07", "message-08", "message-09"} {
+		if _, ok := frames[id]; !ok {
+			t.Fatalf("active frames missing %s; got %#v", id, frames)
+		}
 	}
 }
 
