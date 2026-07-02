@@ -46,7 +46,7 @@ type fdWriter interface {
 }
 
 type mockShellModel struct {
-	channel               string
+	channels              *channelStateSet
 	animationMode         string
 	imageMode             string
 	avatarMode            string
@@ -58,14 +58,9 @@ type mockShellModel struct {
 	avatarResolver        AvatarResolver
 	assetResolver         assets.EventResolver
 	imageRenderer         render.ImageRenderer
-	status                ConnectionState
-	messages              []twitch.ChatMessage
 	incoming              []twitch.ChatMessage
 	nextIncoming          int
 	nextReveal            int
-	revealQueue           *animation.Queue
-	activeOrder           []string
-	activeMessages        map[string]twitch.ChatMessage
 	width                 int
 	height                int
 	focus                 mockFocus
@@ -77,7 +72,6 @@ type mockShellModel struct {
 	sendQueue             []queuedComposerSend
 	sendState             composerSendState
 	sendFeedback          string
-	scrollOffset          int
 	revealTickScheduled   bool
 	avatarLookupScheduled bool
 	avatarLookupInFlight  bool
@@ -244,8 +238,19 @@ func newMockShellModelWithCapability(channel string, cfg config.Config, capabili
 func newMockShellModelWithClockAndCapability(channel string, cfg config.Config, clock animation.Clock, capability render.ImageCapabilityDecision) mockShellModel {
 	connectedAt := time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)
 	animationConfig := mockAnimationConfig(cfg.Features.AnimationMode)
+	channels := newChannelStateSet(configuredChannels(channel, cfg.DefaultChannels), animationConfig, clock)
+	for _, channelName := range channels.channelNames() {
+		state := channels.ensure(channelName)
+		state.status = ConnectionState{
+			Status:  ConnectionConnected,
+			Channel: channelName,
+			Detail:  "mock source ready: no network",
+			At:      connectedAt,
+		}
+		state.messages = seededMockMessages(channelName, connectedAt)
+	}
 	return mockShellModel{
-		channel:         channel,
+		channels:        channels,
 		animationMode:   string(animationConfig.Mode),
 		imageMode:       capability.Mode,
 		avatarMode:      capability.Avatar.Mode,
@@ -253,19 +258,10 @@ func newMockShellModelWithClockAndCapability(channel string, cfg config.Config, 
 		emoteMode:       capability.Emote.Mode,
 		imageCapability: capability,
 		sourceDetail:    "mock source: no network",
-		status: ConnectionState{
-			Status:  ConnectionConnected,
-			Channel: channel,
-			Detail:  "mock source ready: no network",
-			At:      connectedAt,
-		},
-		messages:       seededMockMessages(channel, connectedAt),
-		incoming:       incomingMockMessages(channel, connectedAt),
-		revealQueue:    animation.NewQueue(animationConfig, clock),
-		activeMessages: make(map[string]twitch.ChatMessage),
-		width:          defaultMockWidth,
-		height:         defaultMockHeight,
-		focus:          mockFocusChat,
+		incoming:        incomingMockMessages(channels.activeName(), connectedAt),
+		width:           defaultMockWidth,
+		height:          defaultMockHeight,
+		focus:           mockFocusChat,
 	}
 }
 
@@ -283,8 +279,16 @@ func newLiveShellModelWithClockAndOptions(channel string, cfg config.Config, cli
 
 func newLiveShellModelWithClockOptionsAndCapability(channel string, cfg config.Config, client ChatClient, clock animation.Clock, opts ClientOptions, capability render.ImageCapabilityDecision) mockShellModel {
 	animationConfig := mockAnimationConfig(cfg.Features.AnimationMode)
+	channels := newChannelStateSet(configuredChannels(channel, cfg.DefaultChannels), animationConfig, clock)
+	active := channels.activeState()
+	active.status = ConnectionState{
+		Status:  ConnectionConnecting,
+		Channel: active.name,
+		Detail:  "connecting to Twitch IRC",
+		At:      time.Now(),
+	}
 	return mockShellModel{
-		channel:         channel,
+		channels:        channels,
 		animationMode:   string(animationConfig.Mode),
 		imageMode:       capability.Mode,
 		avatarMode:      capability.Avatar.Mode,
@@ -296,14 +300,6 @@ func newLiveShellModelWithClockOptionsAndCapability(channel string, cfg config.C
 		avatarResolver:  opts.AvatarResolver,
 		assetResolver:   opts.AssetResolver,
 		imageRenderer:   opts.ImageRenderer,
-		status: ConnectionState{
-			Status:  ConnectionConnecting,
-			Channel: channel,
-			Detail:  "connecting to Twitch IRC",
-			At:      time.Now(),
-		},
-		revealQueue:     animation.NewQueue(animationConfig, clock),
-		activeMessages:  make(map[string]twitch.ChatMessage),
 		avatarRequested: make(map[string]bool),
 		assetRequested:  make(map[string]bool),
 		imageCells:      make(map[render.ImageCellKey]render.ImageCell),
@@ -434,6 +430,20 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.clampScroll()
 				return m, nil
 			}
+			if m.focus == mockFocusChat && len(msg.Runes) == 1 && msg.Runes[0] == ']' {
+				if m.channels.switchBy(1) {
+					m.clampScroll()
+					return m.withAsyncAssetCommands(nil)
+				}
+				return m, nil
+			}
+			if m.focus == mockFocusChat && len(msg.Runes) == 1 && msg.Runes[0] == '[' {
+				if m.channels.switchBy(-1) {
+					m.clampScroll()
+					return m.withAsyncAssetCommands(nil)
+				}
+				return m, nil
+			}
 			if m.focus == mockFocusChat && len(msg.Runes) == 1 && msg.Runes[0] == 'q' {
 				return m, tea.Quit
 			}
@@ -463,12 +473,12 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.withAsyncAssetCommands(cmds...)
 	case chatClientMessageMsg:
 		if !msg.ok {
-			m.status = ConnectionState{
+			m.channels.applyConnectionState(ConnectionState{
 				Status:  ConnectionDisconnected,
-				Channel: m.channel,
+				Channel: m.activeChannelName(),
 				Detail:  "chat message stream closed",
 				At:      time.Now(),
-			}
+			})
 			return m, nil
 		}
 		var cmds []tea.Cmd
@@ -480,29 +490,27 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.withAsyncAssetCommands(cmds...)
 	case chatClientConnectionStateMsg:
 		if !msg.ok {
-			if m.status.Status != ConnectionClosed {
-				m.status = ConnectionState{
+			if m.activeChannelState().status.Status != ConnectionClosed {
+				m.channels.applyConnectionState(ConnectionState{
 					Status:  ConnectionDisconnected,
-					Channel: m.channel,
+					Channel: m.activeChannelName(),
 					Detail:  "connection state stream closed",
 					At:      time.Now(),
-				}
+				})
 			}
 			return m, nil
 		}
-		m.status = msg.state
-		if m.status.Channel == "" {
-			m.status.Channel = m.channel
-		}
+		m.channels.applyConnectionState(msg.state)
 		return m, m.nextConnectionStateCommand()
 	case composerSendCompletedMsg:
 		return m.completeComposerSend(msg)
 	case mockAnimationTickMsg:
 		m.revealTickScheduled = false
-		result := m.revealQueue.Advance()
+		active := m.activeChannelState()
+		result := active.revealQueue.Advance()
 		m.completeReveals(result.Completed)
 		m.clampScroll()
-		if m.revealQueue.Len() > 0 {
+		if active.revealQueue.Len() > 0 {
 			return m, m.scheduleRevealTick()
 		}
 		if result.Changed {
@@ -565,11 +573,15 @@ func (m mockShellModel) View() string {
 }
 
 func (m mockShellModel) statusLine(width int) string {
-	left := fmt.Sprintf("#%s %s", m.channel, m.status.Status)
+	active := m.activeChannelState()
+	left := fmt.Sprintf("#%s %s", active.name, active.status.Status)
+	if totalUnread := m.channels.totalUnread(); totalUnread > 0 && width >= 48 {
+		left += fmt.Sprintf(" | unread=%d", totalUnread)
+	}
 	if width >= 50 && m.sendFeedback != "" {
 		left += " | send: " + m.sendFeedback
-	} else if width >= 34 && m.status.Detail != "" {
-		left += " - " + m.status.Detail
+	} else if width >= 34 && active.status.Detail != "" {
+		left += " - " + active.status.Detail
 	}
 	right := ""
 	if width >= 64 {
@@ -589,7 +601,7 @@ func (m mockShellModel) statusLine(width int) string {
 
 func (m mockShellModel) chatView(layout mockShellLayout) string {
 	rows := m.chatRows(layout)
-	rows = visibleRows(rows, layout.chatContentHeight, m.scrollOffset)
+	rows = visibleRows(rows, layout.chatContentHeight, m.activeChannelState().scrollOffset)
 
 	if len(rows) < layout.chatContentHeight {
 		for len(rows) < layout.chatContentHeight {
@@ -616,20 +628,21 @@ func (m mockShellModel) chatView(layout mockShellLayout) string {
 }
 
 func (m mockShellModel) chatRows(layout mockShellLayout) []string {
+	active := m.activeChannelState()
 	rowWidth := layout.width
 	if layout.chatFramed {
 		rowWidth = layout.width - 4
 	}
 	rowWidth = clampMin(rowWidth, 1)
 
-	rows := make([]string, 0, len(m.messages))
-	for _, msg := range m.messages {
+	rows := make([]string, 0, len(active.messages))
+	for _, msg := range active.messages {
 		for _, row := range render.Rows(msg, m.renderOptions(rowWidth)) {
 			rows = append(rows, terminalRowString(row, rowWidth))
 		}
 	}
-	frames := m.revealQueue.Frames()
-	for _, id := range m.activeOrder {
+	frames := active.revealQueue.Frames()
+	for _, id := range active.activeOrder {
 		for _, row := range frames[id] {
 			rows = append(rows, terminalRowString(row, rowWidth))
 		}
@@ -638,7 +651,7 @@ func (m mockShellModel) chatRows(layout mockShellLayout) []string {
 }
 
 func (m mockShellModel) composerView(layout mockShellLayout) string {
-	label := fmt.Sprintf(" Message #%s", m.channel)
+	label := fmt.Sprintf(" Message #%s", m.activeChannelName())
 	if m.focus == mockFocusComposer {
 		label += " [focus]"
 	}
@@ -702,6 +715,21 @@ func (m mockShellModel) helpView(width, height int) string {
 func isInteractiveTerminal(w io.Writer) bool {
 	file, ok := w.(fdWriter)
 	return ok && term.IsTerminal(int(file.Fd()))
+}
+
+func (m mockShellModel) activeChannelState() *channelState {
+	if m.channels == nil {
+		channels := newChannelStateSet([]string{"chat"}, mockAnimationConfig(m.animationMode), nil)
+		return channels.activeState()
+	}
+	return m.channels.activeState()
+}
+
+func (m mockShellModel) activeChannelName() string {
+	if m.channels == nil {
+		return "chat"
+	}
+	return m.channels.activeName()
 }
 
 func clampMin(value, minimum int) int {
@@ -834,17 +862,18 @@ func (m *mockShellModel) scrollBy(delta int) {
 	if delta == 0 {
 		delta = 1
 	}
-	m.scrollOffset += delta
+	m.activeChannelState().scrollOffset += delta
 	m.clampScroll()
 }
 
 func (m *mockShellModel) clampScroll() {
+	active := m.activeChannelState()
 	maxScroll := m.maxScrollOffset()
-	if m.scrollOffset > maxScroll {
-		m.scrollOffset = maxScroll
+	if active.scrollOffset > maxScroll {
+		active.scrollOffset = maxScroll
 	}
-	if m.scrollOffset < 0 {
-		m.scrollOffset = 0
+	if active.scrollOffset < 0 {
+		active.scrollOffset = 0
 	}
 }
 
@@ -897,7 +926,16 @@ func (m mockShellModel) nextConnectionStateCommand() tea.Cmd {
 }
 
 func (m *mockShellModel) enqueueMessage(message twitch.ChatMessage) tea.Cmd {
-	if m.scrollOffset > 0 {
+	state, activeChannel := m.channels.applyMessage(message)
+	if state == nil {
+		return nil
+	}
+	if !activeChannel {
+		return nil
+	}
+	message.Channel = state.name
+
+	if state.scrollOffset > 0 {
 		m.appendStaticMessage(message, true)
 		return nil
 	}
@@ -910,15 +948,15 @@ func (m *mockShellModel) enqueueMessage(message twitch.ChatMessage) tea.Cmd {
 	rowWidth = clampMin(rowWidth, 1)
 
 	revealID := m.nextRevealID(message)
-	result := m.revealQueue.Enqueue(revealID, render.Rows(message, m.renderOptions(rowWidth)))
+	result := state.revealQueue.Enqueue(revealID, render.Rows(message, m.renderOptions(rowWidth)))
 	m.completeReveals(result.Overflow)
 	if result.Complete != nil {
 		m.appendStaticMessage(message, false)
 		return nil
 	}
 	if result.Queued {
-		m.activeOrder = append(m.activeOrder, revealID)
-		m.activeMessages[revealID] = message
+		state.activeOrder = append(state.activeOrder, revealID)
+		state.activeMessages[revealID] = message
 		return m.scheduleRevealTick()
 	}
 	return nil
@@ -934,13 +972,14 @@ func (m *mockShellModel) nextRevealID(message twitch.ChatMessage) string {
 }
 
 func (m *mockShellModel) completeReveals(completed []animation.CompletedReveal) {
+	state := m.activeChannelState()
 	for _, reveal := range completed {
-		message, ok := m.activeMessages[reveal.ID]
+		message, ok := state.activeMessages[reveal.ID]
 		if !ok {
 			continue
 		}
-		m.appendStaticMessageReplacingRows(message, m.scrollOffset > 0, len(reveal.Rows))
-		delete(m.activeMessages, reveal.ID)
+		m.appendStaticMessageReplacingRows(message, state.scrollOffset > 0, len(reveal.Rows))
+		delete(state.activeMessages, reveal.ID)
 		m.removeActiveReveal(reveal.ID)
 	}
 }
@@ -950,13 +989,20 @@ func (m *mockShellModel) appendStaticMessage(message twitch.ChatMessage, preserv
 }
 
 func (m *mockShellModel) appendStaticMessageReplacingRows(message twitch.ChatMessage, preserveScrolledView bool, replacedRows int) {
+	state := m.channels.ensure(message.Channel)
+	if state == nil {
+		state = m.activeChannelState()
+	}
 	rowCount := 0
 	if preserveScrolledView {
 		rowCount = m.staticMessageRowCount(message) - replacedRows
 	}
-	m.messages = append(m.messages, message)
+	if message.Channel == "" {
+		message.Channel = state.name
+	}
+	state.messages = append(state.messages, message)
 	if preserveScrolledView {
-		m.scrollOffset += rowCount
+		state.scrollOffset += rowCount
 	}
 }
 
@@ -975,18 +1021,19 @@ func (m mockShellModel) staticMessageRowCount(message twitch.ChatMessage) int {
 }
 
 func (m *mockShellModel) removeActiveReveal(id string) {
-	for i, activeID := range m.activeOrder {
+	state := m.activeChannelState()
+	for i, activeID := range state.activeOrder {
 		if activeID != id {
 			continue
 		}
-		copy(m.activeOrder[i:], m.activeOrder[i+1:])
-		m.activeOrder = m.activeOrder[:len(m.activeOrder)-1]
+		copy(state.activeOrder[i:], state.activeOrder[i+1:])
+		state.activeOrder = state.activeOrder[:len(state.activeOrder)-1]
 		return
 	}
 }
 
 func (m *mockShellModel) scheduleRevealTick() tea.Cmd {
-	if m.revealTickScheduled || m.revealQueue.Len() == 0 {
+	if m.revealTickScheduled || m.activeChannelState().revealQueue.Len() == 0 {
 		return nil
 	}
 	m.revealTickScheduled = true
@@ -1076,6 +1123,7 @@ func (m mockShellModel) pendingAvatarRequests() []assets.AvatarRequest {
 }
 
 func (m mockShellModel) visibleAvatarMessages() []twitch.ChatMessage {
+	active := m.activeChannelState()
 	layout := m.layout()
 	if layout.chatContentHeight <= 0 {
 		return nil
@@ -1086,9 +1134,9 @@ func (m mockShellModel) visibleAvatarMessages() []twitch.ChatMessage {
 	}
 	rowWidth = clampMin(rowWidth, 1)
 
-	rowCounts := make([]int, 0, len(m.messages))
+	rowCounts := make([]int, 0, len(active.messages))
 	totalRows := 0
-	for _, message := range m.messages {
+	for _, message := range active.messages {
 		count := len(render.Rows(message, m.renderOptions(rowWidth)))
 		if count <= 0 {
 			count = 1
@@ -1096,30 +1144,30 @@ func (m mockShellModel) visibleAvatarMessages() []twitch.ChatMessage {
 		rowCounts = append(rowCounts, count)
 		totalRows += count
 	}
-	frames := m.revealQueue.Frames()
-	for _, id := range m.activeOrder {
+	frames := active.revealQueue.Frames()
+	for _, id := range active.activeOrder {
 		totalRows += len(frames[id])
 	}
 
-	start := totalRows - layout.chatContentHeight - m.scrollOffset
+	start := totalRows - layout.chatContentHeight - active.scrollOffset
 	if start < 0 {
 		start = 0
 	}
 	end := start + layout.chatContentHeight
 	messages := make([]twitch.ChatMessage, 0, layout.chatContentHeight)
 	cursor := 0
-	for i, message := range m.messages {
+	for i, message := range active.messages {
 		next := cursor + rowCounts[i]
 		if rangesOverlap(cursor, next, start, end) {
 			messages = append(messages, message)
 		}
 		cursor = next
 	}
-	for _, id := range m.activeOrder {
+	for _, id := range active.activeOrder {
 		rows := frames[id]
 		next := cursor + len(rows)
 		if rangesOverlap(cursor, next, start, end) {
-			if message, ok := m.activeMessages[id]; ok {
+			if message, ok := active.activeMessages[id]; ok {
 				messages = append(messages, message)
 			}
 		}
@@ -1137,12 +1185,14 @@ func (m *mockShellModel) applyAvatarResults(results []assets.AvatarResult) {
 		if !result.Found || strings.TrimSpace(result.AvatarURL) == "" {
 			continue
 		}
-		for i := range m.messages {
-			applyAvatarToMessage(&m.messages[i], result)
-		}
-		for id, message := range m.activeMessages {
-			applyAvatarToMessage(&message, result)
-			m.activeMessages[id] = message
+		for _, state := range m.channels.states {
+			for i := range state.messages {
+				applyAvatarToMessage(&state.messages[i], result)
+			}
+			for id, message := range state.activeMessages {
+				applyAvatarToMessage(&message, result)
+				state.activeMessages[id] = message
+			}
 		}
 	}
 }
@@ -1295,7 +1345,7 @@ func (m mockShellModel) assetRequestForFragment(message twitch.ChatMessage, frag
 	request := assets.Request{
 		ID:          assetRequestID(fragment.Ref, message.Channel),
 		Ref:         fragment.Ref,
-		ChannelID:   firstNonEmptyString(message.Channel, m.channel),
+		ChannelID:   firstNonEmptyString(message.Channel, m.activeChannelName()),
 		UserID:      message.AuthorID,
 		UserLogin:   message.AuthorLogin,
 		Fallback:    fragment.Text,
@@ -1387,7 +1437,8 @@ func imageCellKeyFromAssetEvent(event assets.Event) (render.ImageCellKey, bool) 
 }
 
 func (m *mockShellModel) refreshActiveRevealRows() {
-	if m.revealQueue == nil || m.revealQueue.Len() == 0 {
+	state := m.activeChannelState()
+	if state.revealQueue == nil || state.revealQueue.Len() == 0 {
 		return
 	}
 	layout := m.layout()
@@ -1396,12 +1447,12 @@ func (m *mockShellModel) refreshActiveRevealRows() {
 		rowWidth = layout.width - 4
 	}
 	rowWidth = clampMin(rowWidth, 1)
-	for _, id := range m.activeOrder {
-		message, ok := m.activeMessages[id]
+	for _, id := range state.activeOrder {
+		message, ok := state.activeMessages[id]
 		if !ok {
 			continue
 		}
-		m.revealQueue.ReplaceRows(id, render.Rows(message, m.renderOptions(rowWidth)))
+		state.revealQueue.ReplaceRows(id, render.Rows(message, m.renderOptions(rowWidth)))
 	}
 }
 
@@ -1418,9 +1469,10 @@ func (m *mockShellModel) queueComposerSend() (tea.Model, tea.Cmd) {
 	}
 
 	m.nextSend++
+	channel := m.activeChannelName()
 	m.sendQueue = append(m.sendQueue, queuedComposerSend{
 		ID:               m.nextSend,
-		Channel:          m.channel,
+		Channel:          channel,
 		Text:             text,
 		Draft:            draft,
 		ReplyToMessageID: replyMessageID(m.replyTo),
@@ -1430,7 +1482,7 @@ func (m *mockShellModel) queueComposerSend() (tea.Model, tea.Cmd) {
 	m.composerText = ""
 	m.replyTo = nil
 	m.sendState = composerSendQueued
-	m.sendFeedback = fmt.Sprintf("queued for #%s", m.channel)
+	m.sendFeedback = fmt.Sprintf("queued for #%s", channel)
 	return *m, m.startNextComposerSend()
 }
 
@@ -1670,8 +1722,9 @@ func (m *mockShellModel) startReplyMode() {
 }
 
 func (m mockShellModel) replyableMessages() []twitch.ChatMessage {
-	messages := make([]twitch.ChatMessage, 0, len(m.messages))
-	for _, message := range m.messages {
+	active := m.activeChannelState()
+	messages := make([]twitch.ChatMessage, 0, len(active.messages))
+	for _, message := range active.messages {
 		if strings.TrimSpace(message.ID) != "" {
 			messages = append(messages, message)
 		}

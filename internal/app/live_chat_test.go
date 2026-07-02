@@ -298,6 +298,98 @@ func TestLiveShellConsumesClientMessagesAndConnectionStates(t *testing.T) {
 	}
 }
 
+func TestLiveShellKeepsPerChannelHistoryStatusUnreadAndSwitching(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	cfg.DefaultChannels = []string{"alpha", "beta"}
+	client := NewFakeChatClient(1)
+	model := newLiveShellModelWithClock("alpha", cfg, client, nil)
+
+	alphaState := ConnectionState{
+		Status:  ConnectionConnected,
+		Channel: "alpha",
+		Detail:  "alpha connected",
+		At:      time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC),
+	}
+	betaState := ConnectionState{
+		Status:  ConnectionReconnecting,
+		Channel: "beta",
+		Detail:  "beta reconnecting",
+		At:      time.Date(2026, 7, 2, 12, 0, 1, 0, time.UTC),
+	}
+	for _, state := range []ConnectionState{alphaState, betaState} {
+		updated, _ := model.Update(chatClientConnectionStateMsg{state: state, ok: true})
+		model = updated.(mockShellModel)
+	}
+
+	alphaMessage := mockIncomingMessage("alpha", "alpha-1", "alpha active history")
+	betaMessage := mockIncomingMessage("beta", "beta-1", "beta inactive history")
+	for _, msg := range []twitch.ChatMessage{alphaMessage, betaMessage} {
+		updated, _ := model.Update(chatClientMessageMsg{message: msg, ok: true})
+		model = updated.(mockShellModel)
+	}
+
+	alpha := model.channels.states[channelKey("alpha")]
+	beta := model.channels.states[channelKey("beta")]
+	if alpha == nil || beta == nil {
+		t.Fatalf("channel states = %#v, want alpha and beta", model.channels.channelNames())
+	}
+	if got, want := len(alpha.messages), 1; got != want {
+		t.Fatalf("alpha history length = %d, want %d: %#v", got, want, alpha.messages)
+	}
+	if got, want := len(beta.messages), 1; got != want {
+		t.Fatalf("beta history length = %d, want %d: %#v", got, want, beta.messages)
+	}
+	if !messagesContainText(alpha.messages, "alpha active history") || messagesContainText(alpha.messages, "beta inactive history") {
+		t.Fatalf("alpha history not isolated: %#v", alpha.messages)
+	}
+	if !messagesContainText(beta.messages, "beta inactive history") || messagesContainText(beta.messages, "alpha active history") {
+		t.Fatalf("beta history not isolated: %#v", beta.messages)
+	}
+	if got, want := beta.unread, 1; got != want {
+		t.Fatalf("beta unread = %d, want %d", got, want)
+	}
+	view := model.View()
+	for _, want := range []string{"#alpha connected", "alpha connected", "unread=1", "alpha active history"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("active alpha view missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "beta inactive history") {
+		t.Fatalf("inactive beta history leaked into alpha view:\n%s", view)
+	}
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("channel switch returned command %#v, want nil without visible assets", cmd)
+	}
+	if got, want := model.activeChannelName(), "beta"; got != want {
+		t.Fatalf("active channel = %q, want %q", got, want)
+	}
+	if got := beta.unread; got != 0 {
+		t.Fatalf("beta unread after activation = %d, want 0", got)
+	}
+	view = model.View()
+	for _, want := range []string{"#beta reconnecting", "beta reconnecting", "beta inactive history"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("active beta view missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "alpha active history") || strings.Contains(view, "unread=1") {
+		t.Fatalf("alpha history or stale unread leaked into beta view:\n%s", view)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	model = updated.(mockShellModel)
+	if got, want := model.activeChannelName(), "alpha"; got != want {
+		t.Fatalf("active channel after wrap = %q, want %q", got, want)
+	}
+	if view := model.View(); !strings.Contains(view, "alpha active history") || strings.Contains(view, "beta inactive history") {
+		t.Fatalf("wrapped alpha view has wrong history:\n%s", view)
+	}
+}
+
 type fakeTwitchTransport struct {
 	events chan twitch.Event
 

@@ -283,7 +283,7 @@ func TestMockShellFocusHelpAndComposerInput(t *testing.T) {
 
 func TestMockShellPageKeysScrollViewport(t *testing.T) {
 	model := newMockShellModel("example", config.Default())
-	model.messages = numberedMockMessages("example", 12)
+	model.activeChannelState().messages = numberedMockMessages("example", 12)
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 12})
 	model = updated.(mockShellModel)
@@ -301,7 +301,7 @@ func TestMockShellPageKeysScrollViewport(t *testing.T) {
 	if !strings.Contains(scrolled, "message-04") {
 		t.Fatalf("page up viewport missing previous page message:\n%s", scrolled)
 	}
-	if model.scrollOffset == 0 {
+	if model.activeChannelState().scrollOffset == 0 {
 		t.Fatal("scrollOffset = 0 after page up, want non-zero")
 	}
 
@@ -313,13 +313,13 @@ func TestMockShellPageKeysScrollViewport(t *testing.T) {
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgDown})
 	model = updated.(mockShellModel)
-	if model.scrollOffset == 0 {
+	if model.activeChannelState().scrollOffset == 0 {
 		t.Fatal("scrollOffset after one page down = 0, want still scrolled")
 	}
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgDown})
 	model = updated.(mockShellModel)
-	if model.scrollOffset != 0 {
-		t.Fatalf("scrollOffset after second page down = %d, want 0", model.scrollOffset)
+	if model.activeChannelState().scrollOffset != 0 {
+		t.Fatalf("scrollOffset after second page down = %d, want 0", model.activeChannelState().scrollOffset)
 	}
 	if !strings.Contains(model.View(), "message-11") {
 		t.Fatalf("second page down viewport missing latest message:\n%s", model.View())
@@ -538,7 +538,7 @@ func TestLiveShellRateLimitedSendShowsReasonAndRestoresComposer(t *testing.T) {
 func TestLiveShellSelectsReplyContextAndEscCancelsWithoutLosingDraft(t *testing.T) {
 	client := NewFakeChatClient(1)
 	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
-	model.messages = []twitch.ChatMessage{
+	model.activeChannelState().messages = []twitch.ChatMessage{
 		{
 			ID:          "",
 			Channel:     "example",
@@ -594,7 +594,7 @@ func TestLiveShellRStartsReplyModeAndReplySendUsesParentID(t *testing.T) {
 		t.Fatalf("QueueSendResult returned error: %v", err)
 	}
 	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
-	model.messages = []twitch.ChatMessage{
+	model.activeChannelState().messages = []twitch.ChatMessage{
 		{
 			ID:          "parent-1",
 			Channel:     "example",
@@ -751,7 +751,7 @@ func TestMockShellFastModeRevealsIncomingMessage(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("incoming fast message returned nil command, want reveal tick")
 	}
-	if got, want := model.revealQueue.Len(), 1; got != want {
+	if got, want := model.activeChannelState().revealQueue.Len(), 1; got != want {
 		t.Fatalf("reveal queue len = %d, want %d", got, want)
 	}
 	if strings.Contains(model.View(), "animated text arrives") {
@@ -767,7 +767,7 @@ func TestMockShellFastModeRevealsIncomingMessage(t *testing.T) {
 	}
 
 	driveRevealToCompletion(t, &model, clock)
-	if got := model.revealQueue.Len(); got != 0 {
+	if got := model.activeChannelState().revealQueue.Len(); got != 0 {
 		t.Fatalf("reveal queue len after completion = %d, want 0", got)
 	}
 	if !strings.Contains(model.View(), "animated text arrives") {
@@ -787,7 +787,7 @@ func TestMockShellOffModeRendersIncomingMessageWithoutRevealTick(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("off mode incoming message returned command %#v, want nil reveal tick", cmd)
 	}
-	if got := model.revealQueue.Len(); got != 0 {
+	if got := model.activeChannelState().revealQueue.Len(); got != 0 {
 		t.Fatalf("off mode reveal queue len = %d, want 0", got)
 	}
 	if !strings.Contains(model.View(), "off mode is immediate") {
@@ -808,7 +808,7 @@ func TestMockShellReducedModeUsesFewerChangedFramesThanFastMode(t *testing.T) {
 func TestMockShellInputAndScrollRemainResponsiveDuringAnimation(t *testing.T) {
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
 	model := newMockShellModelWithClock("example", config.Default(), clock)
-	model.messages = numberedMockMessages("example", 12)
+	model.activeChannelState().messages = numberedMockMessages("example", 12)
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 12})
 	model = updated.(mockShellModel)
 
@@ -816,13 +816,13 @@ func TestMockShellInputAndScrollRemainResponsiveDuringAnimation(t *testing.T) {
 		message: mockIncomingMessage("example", "active-reveal", "animation keeps running"),
 	})
 	model = updated.(mockShellModel)
-	if got := model.revealQueue.Len(); got != 1 {
+	if got := model.activeChannelState().revealQueue.Len(); got != 1 {
 		t.Fatalf("reveal queue len = %d, want 1", got)
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
 	model = updated.(mockShellModel)
-	if model.scrollOffset == 0 {
+	if model.activeChannelState().scrollOffset == 0 {
 		t.Fatal("page up during animation left scrollOffset at 0")
 	}
 
@@ -836,7 +836,7 @@ func TestMockShellInputAndScrollRemainResponsiveDuringAnimation(t *testing.T) {
 	if got, want := model.composerText, "ok"; got != want {
 		t.Fatalf("composer text during animation = %q, want %q", got, want)
 	}
-	if got := model.revealQueue.Len(); got != 1 {
+	if got := model.activeChannelState().revealQueue.Len(); got != 1 {
 		t.Fatalf("reveal queue len after input/scroll = %d, want 1", got)
 	}
 }
@@ -857,24 +857,24 @@ func TestLiveShellBurstKeepsRevealQueueBoundedAndControlsResponsive(t *testing.T
 			ok:      true,
 		})
 		model = updated.(mockShellModel)
-		if model.revealQueue.Len() > animation.DefaultConfig().MaxQueued {
-			t.Fatalf("after burst message %02d reveal queue len = %d, want <= %d", i, model.revealQueue.Len(), animation.DefaultConfig().MaxQueued)
+		if model.activeChannelState().revealQueue.Len() > animation.DefaultConfig().MaxQueued {
+			t.Fatalf("after burst message %02d reveal queue len = %d, want <= %d", i, model.activeChannelState().revealQueue.Len(), animation.DefaultConfig().MaxQueued)
 		}
 	}
 
-	if got, want := model.revealQueue.Len(), animation.DefaultConfig().MaxQueued; got != want {
+	if got, want := model.activeChannelState().revealQueue.Len(), animation.DefaultConfig().MaxQueued; got != want {
 		t.Fatalf("reveal queue len after burst = %d, want %d", got, want)
 	}
-	if got, want := len(model.messages), 40-animation.DefaultConfig().MaxQueued; got != want {
+	if got, want := len(model.activeChannelState().messages), 40-animation.DefaultConfig().MaxQueued; got != want {
 		t.Fatalf("static overflow messages = %d, want %d", got, want)
 	}
 	for _, want := range []string{"burst message 00", "burst message 07"} {
-		if !messagesContainText(model.messages, want) {
-			t.Fatalf("overflowed static messages missing %q: %#v", want, model.messages)
+		if !messagesContainText(model.activeChannelState().messages, want) {
+			t.Fatalf("overflowed static messages missing %q: %#v", want, model.activeChannelState().messages)
 		}
 	}
-	if messagesContainText(model.messages, "burst message 08") {
-		t.Fatalf("non-overflowed burst message rendered statically too early: %#v", model.messages)
+	if messagesContainText(model.activeChannelState().messages, "burst message 08") {
+		t.Fatalf("non-overflowed burst message rendered statically too early: %#v", model.activeChannelState().messages)
 	}
 
 	updated, _ = model.Update(tea.WindowSizeMsg{Width: 36, Height: 9})
@@ -891,7 +891,7 @@ func TestLiveShellBurstKeepsRevealQueueBoundedAndControlsResponsive(t *testing.T
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
 	model = updated.(mockShellModel)
-	if model.scrollOffset == 0 {
+	if model.activeChannelState().scrollOffset == 0 {
 		t.Fatal("page up during burst left scrollOffset at 0")
 	}
 
@@ -933,7 +933,7 @@ func TestLiveShellBatchesVisibleAvatarLookups(t *testing.T) {
 	cfg.Features.ImageMode = "normal"
 	cfg.Features.AvatarMode = "image"
 	model := newLiveShellModelWithClockAndOptions("example", cfg, client, nil, ClientOptions{AvatarResolver: resolver})
-	model.messages = []twitch.ChatMessage{
+	model.activeChannelState().messages = []twitch.ChatMessage{
 		{ID: "m1", AuthorID: "42", AuthorLogin: "viewer", DisplayName: "Viewer", Text: "first", Type: twitch.MessageTypeChat},
 		{ID: "m2", AuthorID: "42", AuthorLogin: "viewer", DisplayName: "Viewer", Text: "second", Type: twitch.MessageTypeChat},
 		{ID: "m3", AuthorID: "99", AuthorLogin: "mod", DisplayName: "Mod", Text: "third", Type: twitch.MessageTypeChat},
@@ -969,7 +969,7 @@ func TestLiveShellBatchesVisibleAvatarLookups(t *testing.T) {
 
 	updated, _ = model.Update(resolved)
 	model = updated.(mockShellModel)
-	for _, message := range model.messages {
+	for _, message := range model.activeChannelState().messages {
 		if message.AuthorID != "42" && message.AuthorID != "99" {
 			continue
 		}
@@ -995,19 +995,19 @@ func TestLiveShellAvatarResolutionKeepsFallbackRowsStable(t *testing.T) {
 		Type:        twitch.MessageTypeChat,
 	}
 	beforeRows := renderRowsToPlain(render.Rows(message, model.renderOptions(80)))
-	model.messages = []twitch.ChatMessage{message}
+	model.activeChannelState().messages = []twitch.ChatMessage{message}
 	model.applyAvatarResults([]assets.AvatarResult{{
 		UserID:    "42",
 		UserLogin: "viewer",
 		AvatarURL: "https://static-cdn.example/viewer.png",
 		Found:     true,
 	}})
-	afterRows := renderRowsToPlain(render.Rows(model.messages[0], model.renderOptions(80)))
+	afterRows := renderRowsToPlain(render.Rows(model.activeChannelState().messages[0], model.renderOptions(80)))
 
 	if !reflect.DeepEqual(afterRows, beforeRows) {
 		t.Fatalf("fallback rows changed after avatar resolution\nbefore: %#v\nafter:  %#v", beforeRows, afterRows)
 	}
-	fragment, ok := firstRenderKind(render.Rows(model.messages[0], model.renderOptions(80)), render.FragmentAvatar)
+	fragment, ok := firstRenderKind(render.Rows(model.activeChannelState().messages[0], model.renderOptions(80)), render.FragmentAvatar)
 	if !ok {
 		t.Fatal("avatar fragment missing after resolution")
 	}
@@ -1033,7 +1033,7 @@ func TestLiveShellAssetEventsRefreshVisibleRows(t *testing.T) {
 		AssetResolver: resolver,
 		ImageRenderer: renderer,
 	})
-	model.messages = []twitch.ChatMessage{assetEventMessage("visible-assets", "25", "😀")}
+	model.activeChannelState().messages = []twitch.ChatMessage{assetEventMessage("visible-assets", "25", "😀")}
 
 	before := model.View()
 	for _, notWant := range []string{"[A42]", "BMOD", "EM25", ":)"} {
@@ -1080,8 +1080,8 @@ func TestLiveShellAssetEventsPreserveViewportReplyAndComposer(t *testing.T) {
 		AssetResolver: &appFakeAssetResolver{},
 		ImageRenderer: &appFakeImageRenderer{},
 	})
-	model.messages = numberedMockMessages("example", 40)
-	model.messages = append(model.messages, assetEventMessage("asset-target", "25", "😀"))
+	model.activeChannelState().messages = numberedMockMessages("example", 40)
+	model.activeChannelState().messages = append(model.activeChannelState().messages, assetEventMessage("asset-target", "25", "😀"))
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 12})
 	model = updated.(mockShellModel)
@@ -1090,7 +1090,7 @@ func TestLiveShellAssetEventsPreserveViewportReplyAndComposer(t *testing.T) {
 	model.focus = mockFocusComposer
 	model.composerText = "draft reply"
 	model.replyTo = &composerReplyContext{MessageID: "mock-35", Author: "viewer", Text: "message-35"}
-	beforeOffset := model.scrollOffset
+	beforeOffset := model.activeChannelState().scrollOffset
 	beforeReply := *model.replyTo
 	beforeView := model.View()
 
@@ -1100,7 +1100,7 @@ func TestLiveShellAssetEventsPreserveViewportReplyAndComposer(t *testing.T) {
 	}})
 	model = updated.(mockShellModel)
 
-	if got := model.scrollOffset; got != beforeOffset {
+	if got := model.activeChannelState().scrollOffset; got != beforeOffset {
 		t.Fatalf("scrollOffset after asset update = %d, want %d", got, beforeOffset)
 	}
 	if got, want := model.focus, mockFocusComposer; got != want {
@@ -1127,10 +1127,10 @@ func TestLiveShellAssetResolverOnlyRequestsVisibleHistory(t *testing.T) {
 		ImageRenderer: &appFakeImageRenderer{},
 	})
 	for i := 0; i < 80; i++ {
-		model.messages = append(model.messages, assetEventMessage(fmt.Sprintf("hidden-%02d", i), fmt.Sprintf("hidden-%02d", i), "😀"))
+		model.activeChannelState().messages = append(model.activeChannelState().messages, assetEventMessage(fmt.Sprintf("hidden-%02d", i), fmt.Sprintf("hidden-%02d", i), "😀"))
 	}
 	for i := 0; i < 20; i++ {
-		model.messages = append(model.messages, assetEventMessage(fmt.Sprintf("visible-%02d", i), fmt.Sprintf("visible-%02d", i), "😀"))
+		model.activeChannelState().messages = append(model.activeChannelState().messages, assetEventMessage(fmt.Sprintf("visible-%02d", i), fmt.Sprintf("visible-%02d", i), "😀"))
 	}
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 96, Height: 12})
@@ -1165,7 +1165,7 @@ func TestLiveShellAssetFailureCanRetryVisibleRequest(t *testing.T) {
 		AssetResolver: resolver,
 		ImageRenderer: renderer,
 	})
-	model.messages = []twitch.ChatMessage{assetEventMessage("retry-assets", "25", "😀")}
+	model.activeChannelState().messages = []twitch.ChatMessage{assetEventMessage("retry-assets", "25", "😀")}
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 96, Height: 12})
 	model = updated.(mockShellModel)
@@ -1207,7 +1207,7 @@ func TestMockShellAssetEventRefreshesActiveRevealRows(t *testing.T) {
 	cfg.Features.EmoteMode = "image"
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
 	model := newMockShellModelWithClock("example", cfg, clock)
-	model.messages = nil
+	model.activeChannelState().messages = nil
 
 	updated, _ := model.Update(mockIncomingMessageMsg{message: activeAssetEventMessage()})
 	model = updated.(mockShellModel)
@@ -1216,7 +1216,7 @@ func TestMockShellAssetEventRefreshesActiveRevealRows(t *testing.T) {
 		updated, _ = model.Update(mockAnimationTickMsg{})
 		model = updated.(mockShellModel)
 	}
-	if got := model.revealQueue.Len(); got == 0 {
+	if got := model.activeChannelState().revealQueue.Len(); got == 0 {
 		t.Fatal("active reveal completed before asset refresh test could run")
 	}
 	if view := model.View(); !strings.Contains(view, "Kappa") {
@@ -1235,17 +1235,17 @@ func TestMockShellAssetEventRefreshesActiveRevealRows(t *testing.T) {
 func TestMockShellScrolledBurstRendersStaticallyWithoutRevealBacklog(t *testing.T) {
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
 	model := newMockShellModelWithClock("example", config.Default(), clock)
-	model.messages = numberedMockMessages("example", 30)
+	model.activeChannelState().messages = numberedMockMessages("example", 30)
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 12})
 	model = updated.(mockShellModel)
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
 	model = updated.(mockShellModel)
-	if model.scrollOffset == 0 {
+	if model.activeChannelState().scrollOffset == 0 {
 		t.Fatal("test setup failed: scrollOffset = 0 after page up")
 	}
 	beforeView := model.View()
-	beforeOffset := model.scrollOffset
+	beforeOffset := model.activeChannelState().scrollOffset
 
 	for i := 0; i < 12; i++ {
 		updated, cmd := model.Update(mockIncomingMessageMsg{
@@ -1257,17 +1257,17 @@ func TestMockShellScrolledBurstRendersStaticallyWithoutRevealBacklog(t *testing.
 		}
 	}
 
-	if got := model.revealQueue.Len(); got != 0 {
+	if got := model.activeChannelState().revealQueue.Len(); got != 0 {
 		t.Fatalf("off-screen burst reveal queue len = %d, want 0", got)
 	}
-	if got := len(model.activeOrder); got != 0 {
+	if got := len(model.activeChannelState().activeOrder); got != 0 {
 		t.Fatalf("off-screen active reveal count = %d, want 0", got)
 	}
-	if got, want := len(model.messages), 42; got != want {
+	if got, want := len(model.activeChannelState().messages), 42; got != want {
 		t.Fatalf("messages after off-screen burst = %d, want %d", got, want)
 	}
-	if model.scrollOffset <= beforeOffset {
-		t.Fatalf("scrollOffset after off-screen burst = %d, want > %d to preserve visible page", model.scrollOffset, beforeOffset)
+	if model.activeChannelState().scrollOffset <= beforeOffset {
+		t.Fatalf("scrollOffset after off-screen burst = %d, want > %d to preserve visible page", model.activeChannelState().scrollOffset, beforeOffset)
 	}
 	afterView := model.View()
 	if afterView != beforeView {
@@ -1281,7 +1281,7 @@ func TestMockShellScrolledBurstRendersStaticallyWithoutRevealBacklog(t *testing.
 func TestMockShellCompletingActiveRevealPreservesScrolledViewport(t *testing.T) {
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
 	model := newMockShellModelWithClock("example", config.Default(), clock)
-	model.messages = numberedMockMessages("example", 30)
+	model.activeChannelState().messages = numberedMockMessages("example", 30)
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 12})
 	model = updated.(mockShellModel)
@@ -1289,26 +1289,26 @@ func TestMockShellCompletingActiveRevealPreservesScrolledViewport(t *testing.T) 
 		message: mockIncomingMessage("example", "active-while-scrolled", "active reveal finishes while scrolled"),
 	})
 	model = updated.(mockShellModel)
-	if got := model.revealQueue.Len(); got != 1 {
+	if got := model.activeChannelState().revealQueue.Len(); got != 1 {
 		t.Fatalf("reveal queue len = %d, want 1", got)
 	}
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
 	model = updated.(mockShellModel)
-	if model.scrollOffset == 0 {
+	if model.activeChannelState().scrollOffset == 0 {
 		t.Fatal("test setup failed: scrollOffset = 0 after page up")
 	}
 	beforeView := model.View()
-	beforeOffset := model.scrollOffset
+	beforeOffset := model.activeChannelState().scrollOffset
 
 	driveRevealToCompletion(t, &model, clock)
 
-	if got := model.revealQueue.Len(); got != 0 {
+	if got := model.activeChannelState().revealQueue.Len(); got != 0 {
 		t.Fatalf("reveal queue len after completion = %d, want 0", got)
 	}
-	if !messagesContainText(model.messages, "active reveal finishes while scrolled") {
-		t.Fatalf("completed reveal missing from static messages: %#v", model.messages)
+	if !messagesContainText(model.activeChannelState().messages, "active reveal finishes while scrolled") {
+		t.Fatalf("completed reveal missing from static messages: %#v", model.activeChannelState().messages)
 	}
-	if got := model.scrollOffset; got != beforeOffset {
+	if got := model.activeChannelState().scrollOffset; got != beforeOffset {
 		t.Fatalf("scrollOffset after active completion = %d, want %d", got, beforeOffset)
 	}
 	if afterView := model.View(); afterView != beforeView {
@@ -1326,7 +1326,7 @@ func TestMockShellDuplicateIncomingMessageIDsCompleteIndependently(t *testing.T)
 		})
 		model = updated.(mockShellModel)
 	}
-	if got := model.revealQueue.Len(); got != 2 {
+	if got := model.activeChannelState().revealQueue.Len(); got != 2 {
 		t.Fatalf("reveal queue len = %d, want 2", got)
 	}
 
@@ -1366,7 +1366,7 @@ func TestMockShellResizeDuringAnimationStaysWithinBounds(t *testing.T) {
 func TestMockShellNarrowLayoutStaysWithinBounds(t *testing.T) {
 	model := newMockShellModel("example", config.Default())
 	model.composerText = "hello 😀 表"
-	model.messages = append(model.messages, twitch.ChatMessage{
+	model.activeChannelState().messages = append(model.activeChannelState().messages, twitch.ChatMessage{
 		ID:          "wide",
 		Channel:     "example",
 		Timestamp:   time.Date(2026, 7, 2, 20, 0, 10, 0, time.UTC),
@@ -1479,7 +1479,7 @@ func changedRevealFrames(t *testing.T, mode, text string) int {
 	model = updated.(mockShellModel)
 
 	changed := 0
-	for model.revealQueue.Len() > 0 {
+	for model.activeChannelState().revealQueue.Len() > 0 {
 		before := model.View()
 		clock.Add(mockRevealDelay)
 		updated, _ = model.Update(mockAnimationTickMsg{})
@@ -1497,7 +1497,7 @@ func changedRevealFrames(t *testing.T, mode, text string) int {
 func driveRevealToCompletion(t *testing.T, model *mockShellModel, clock *appFakeClock) {
 	t.Helper()
 
-	for i := 0; model.revealQueue.Len() > 0; i++ {
+	for i := 0; model.activeChannelState().revealQueue.Len() > 0; i++ {
 		if i > 1000 {
 			t.Fatal("reveal did not complete")
 		}
