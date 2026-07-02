@@ -13,7 +13,7 @@
 
 `twi` is a terminal Twitch chat client with taste. It is keyboard-first, fast to launch, friendly to low-drama terminals, and allergic to leaking your OAuth token.
 
-The project is currently an MVP-shaped Go app: mock chat is ready without the network, live Twitch IRC read/send is partially shipped for configured channels, diagnostics are partially shipped, and login, richer multi-channel UX, and inline terminal images are still planned.
+The project is currently an MVP-shaped Go app: mock chat is ready without the network, live Twitch IRC read/send is partially shipped for configured channels, diagnostics are partially shipped, a keyboard-first channel sidebar is present, and login, richer multi-channel UX, and inline terminal images are still planned.
 
 ```text
         +---------------------------------------------+
@@ -100,7 +100,7 @@ Do not paste real tokens into commits, screenshots, issue comments, terminal rec
 | Avatar metadata | Partial | When live chat runs with `avatar_mode = "image"` plus Twitch API credentials, visible author avatar URLs are batched through Helix Get Users and cached; app asset events can prepare fixed-width avatar cells when an asset resolver/renderer is installed. |
 | Emote/badge metadata | Partial | Internal Helix adapters and cache-backed resolvers can turn known Twitch emote and badge IDs into public image-capable refs while keeping Unicode and exact emote-token fallbacks stable; app asset events can refresh visible rows without scroll or composer jumps. |
 | Login/setup | Planned | `twi login` is advertised but exits as planned/not implemented. |
-| Multi-channel UX | Partial | Messages, unread counts, scroll, drafts, replies, and sends are per-channel; visible sidebar/navigation polish remains planned. Twitch IRC connect/reconnect/disconnect callbacks are connection-level and are shown on configured channel states rather than as independent per-channel transport events. |
+| Multi-channel UX | Partial | Messages, unread counts, scroll, drafts, replies, and sends are per-channel. Normal and wide terminals show a keyboard-first channel sidebar with connection indicators and unread counts; narrow terminals collapse this into the status line. Twitch IRC connect/reconnect/disconnect callbacks are connection-level and are shown on configured channel states rather than as independent per-channel transport events. |
 | Inline terminal images | Partial | The renderer and app event path can substitute prepared fixed-width cells for visible avatar, badge, emote, and emoji rows; default live resolver wiring and manual Kitty/Ghostty validation remain planned. |
 
 ## Controls

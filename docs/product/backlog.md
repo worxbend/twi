@@ -7,8 +7,9 @@ Progress as of the initial swarm pass:
 
 - Done: Phase 0 requirements matrix, risk register, backlog, and six ADRs.
 - Done: Go module bootstrap, CLI shell, config precedence/redaction tests, normalized message model skeleton, Bubble Tea mock chat shell, module tool directives for `govulncheck`/`staticcheck`, Twitch IRC read adapter, the active-channel composer send queue, selected-message replies, `/me` action sends, and per-channel live routing.
-- Current status labels: mock chat is ready; multi-channel live IRC read/send
-  and diagnostics are partial; `twi login`, richer multi-channel UI, and
+- Current status labels: mock chat is ready; multi-channel live IRC read/send,
+  keyboard-first channel sidebar, and diagnostics are partial; `twi login`,
+  richer multi-channel UI beyond the sidebar, and
   inline terminal images are planned.
 - Credential rule: Twitch username/token values currently come from
   environment variables or the flat config file; CLI overrides cover channel
@@ -447,7 +448,7 @@ Risks: Twitch connection events are connection-level, not per-channel; the app
 copies them onto configured channel states.
 Follow-ups: Add reconnect isolation if transport supports it.
 
-Task: Add channel sidebar and keyboard navigation.
+Task: Add channel sidebar and keyboard navigation. Status: implemented for keyboard switching, normal/wide sidebar rendering, and narrow status collapse.
 Owner lane: UX/TUI engineer.
 Goal: Make multi-channel state visible and keyboard-first.
 Context: Current layout focuses on status, viewport, composer, and help.
@@ -456,6 +457,11 @@ Implementation notes: Keep narrow layout usable by collapsing or hiding the
 sidebar. Avoid making mouse required.
 Acceptance criteria: Users can switch channels, see unread counts and
 connection state, and keep drafts per channel.
+
+Current implementation: `[` and `]` switch the active channel from chat focus.
+Normal and wide layouts render a channel sidebar with active-channel,
+connection, and unread indicators. Narrow layouts hide the sidebar and keep
+channel count plus unread total in the status line.
 Verification: Layout snapshot tests at narrow/normal/wide widths; key-binding
 tests; manual resize check.
 Risks: Terminal width pressure can make the UI noisy.

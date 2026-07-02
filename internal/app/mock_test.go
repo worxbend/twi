@@ -694,6 +694,65 @@ func TestLiveShellKeepsComposerSendStatePerChannel(t *testing.T) {
 	}
 }
 
+func TestLiveShellSidebarSwitchesChannelsAndPreservesDrafts(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	cfg.DefaultChannels = []string{"alpha", "beta"}
+	client := NewFakeChatClient(1)
+	model := newLiveShellModelWithClock("alpha", cfg, client, nil)
+	model.width = 88
+	model.height = 14
+
+	alpha := model.channels.ensure("alpha")
+	beta := model.channels.ensure("beta")
+	alpha.status = ConnectionState{Status: ConnectionConnected, Channel: "alpha"}
+	beta.status = ConnectionState{Status: ConnectionDisconnected, Channel: "beta"}
+	alpha.composerText = "alpha draft"
+	beta.composerText = "beta draft"
+	beta.unread = 2
+	model.focus = mockFocusChat
+
+	view := model.View()
+	for _, want := range []string{"Channels", "> * #alpha", "! #beta 2", "alpha draft"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("sidebar view missing %q:\n%s", want, view)
+		}
+	}
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("channel switch returned command %#v, want nil", cmd)
+	}
+	if got, want := model.activeChannelName(), "beta"; got != want {
+		t.Fatalf("active channel = %q, want %q", got, want)
+	}
+	if got, want := alpha.composerText, "alpha draft"; got != want {
+		t.Fatalf("alpha draft after switch = %q, want %q", got, want)
+	}
+	if got, want := model.activeChannelState().composerText, "beta draft"; got != want {
+		t.Fatalf("active beta draft = %q, want %q", got, want)
+	}
+	if got := beta.unread; got != 0 {
+		t.Fatalf("beta unread after activation = %d, want 0", got)
+	}
+	view = model.View()
+	for _, want := range []string{"> ! #beta", "beta draft"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("active beta view missing %q:\n%s", want, view)
+		}
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	model = updated.(mockShellModel)
+	if got, want := model.activeChannelName(), "alpha"; got != want {
+		t.Fatalf("active channel after switch back = %q, want %q", got, want)
+	}
+	if got, want := model.activeChannelState().composerText, "alpha draft"; got != want {
+		t.Fatalf("restored alpha draft = %q, want %q", got, want)
+	}
+}
+
 func TestLiveShellSelectsReplyContextAndEscCancelsWithoutLosingDraft(t *testing.T) {
 	client := NewFakeChatClient(1)
 	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
@@ -1555,6 +1614,68 @@ func TestMockShellNarrowLayoutStaysWithinBounds(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Fatalf("narrow view missing %q:\n%s", want, view)
 		}
+	}
+}
+
+func TestMockShellChannelSidebarResponsiveLayouts(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	cfg.DefaultChannels = []string{"alpha", "beta", "gamma"}
+	model := newMockShellModel("alpha", cfg)
+	model.channels.ensure("alpha").status = ConnectionState{Status: ConnectionConnected, Channel: "alpha"}
+	model.channels.ensure("beta").status = ConnectionState{Status: ConnectionDisconnected, Channel: "beta"}
+	model.channels.ensure("gamma").status = ConnectionState{Status: ConnectionReconnecting, Channel: "gamma"}
+	model.channels.ensure("beta").unread = 3
+	model.channels.ensure("gamma").unread = 1
+
+	for _, tt := range []struct {
+		name         string
+		width        int
+		height       int
+		wantSidebar  bool
+		wantWideSize bool
+	}{
+		{name: "narrow", width: 48, height: 10},
+		{name: "normal", width: 88, height: 12, wantSidebar: true},
+		{name: "wide", width: 124, height: 14, wantSidebar: true, wantWideSize: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			updated, _ := model.Update(tea.WindowSizeMsg{Width: tt.width, Height: tt.height})
+			rendered := updated.(mockShellModel)
+			layout := rendered.layout()
+			view := rendered.View()
+
+			if got, want := lineCount(view), tt.height; got != want {
+				t.Fatalf("line count = %d, want %d:\n%s", got, want, view)
+			}
+			for i, line := range strings.Split(strings.TrimSuffix(view, "\n"), "\n") {
+				if got := lipglossWidth(line); got > tt.width {
+					t.Fatalf("line %d width = %d, want <= %d:\n%s", i+1, got, tt.width, view)
+				}
+			}
+			if (layout.sidebarWidth > 0) != tt.wantSidebar {
+				t.Fatalf("sidebarWidth = %d, want sidebar visible %v:\n%s", layout.sidebarWidth, tt.wantSidebar, view)
+			}
+			if tt.wantWideSize && layout.sidebarWidth != sidebarWideSize {
+				t.Fatalf("wide sidebar width = %d, want %d", layout.sidebarWidth, sidebarWideSize)
+			}
+			if !tt.wantSidebar {
+				if strings.Contains(view, "Channels") {
+					t.Fatalf("narrow view rendered full sidebar:\n%s", view)
+				}
+				for _, want := range []string{"#alpha connected", "channels=3", "unread=4"} {
+					if !strings.Contains(view, want) {
+						t.Fatalf("narrow view missing collapsed channel state %q:\n%s", want, view)
+					}
+				}
+				return
+			}
+			for _, want := range []string{"Channels", "> * #alpha", "! #beta 3", "~ #gamma 1"} {
+				if !strings.Contains(view, want) {
+					t.Fatalf("%s sidebar view missing %q:\n%s", tt.name, want, view)
+				}
+			}
+		})
 	}
 }
 

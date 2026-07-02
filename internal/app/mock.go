@@ -27,6 +27,9 @@ const (
 	mockRevealDelay   = 20 * time.Millisecond
 	avatarLookupDelay = 50 * time.Millisecond
 	assetLookupDelay  = 35 * time.Millisecond
+	sidebarMinWidth   = 72
+	sidebarNormalSize = 18
+	sidebarWideSize   = 24
 )
 
 // AvatarResolver is the app-facing boundary for batched author avatar
@@ -118,6 +121,9 @@ type mockShellLayout struct {
 	chatHeight            int
 	chatContentHeight     int
 	chatFramed            bool
+	chatWidth             int
+	sidebarWidth          int
+	sidebarContentHeight  int
 	composerHeight        int
 	composerContentHeight int
 	composerFramed        bool
@@ -554,7 +560,11 @@ func (m mockShellModel) View() string {
 		regions = append(regions, m.statusLine(layout.width))
 	}
 	if layout.chatHeight > 0 {
-		regions = append(regions, m.chatView(layout))
+		chat := m.chatView(layout)
+		if layout.sidebarWidth > 0 {
+			chat = lipgloss.JoinHorizontal(lipgloss.Top, m.sidebarView(layout), chat)
+		}
+		regions = append(regions, chat)
 	}
 	if layout.composerHeight > 0 {
 		regions = append(regions, m.composerView(layout))
@@ -568,20 +578,24 @@ func (m mockShellModel) View() string {
 
 func (m mockShellModel) statusLine(width int) string {
 	active := m.activeChannelState()
+	channelCount := len(m.channels.channelNames())
 	left := fmt.Sprintf("#%s %s", active.name, active.status.Status)
-	if totalUnread := m.channels.totalUnread(); totalUnread > 0 && width >= 48 {
-		left += fmt.Sprintf(" | unread=%d", totalUnread)
+	if channelCount > 1 && width >= 26 {
+		left += fmt.Sprintf(" | channels=%d", channelCount)
 	}
-	if width >= 50 && active.sendFeedback != "" {
-		left += " | send: " + active.sendFeedback
-	} else if width >= 34 && active.status.Detail != "" {
-		left += " - " + active.status.Detail
+	if totalUnread := m.channels.totalUnread(); totalUnread > 0 && width >= 34 {
+		left += fmt.Sprintf(" | unread=%d", totalUnread)
 	}
 	right := ""
 	if width >= 64 {
 		right = fmt.Sprintf(" focus=%s animation=%s images=%s", m.focusName(), m.animationMode, m.imageMode)
 	} else if width >= 42 {
 		right = fmt.Sprintf(" focus=%s", m.focusName())
+	}
+	if width >= 50 && active.sendFeedback != "" {
+		left += " | send: " + active.sendFeedback
+	} else if width >= 34 && active.status.Detail != "" && (channelCount == 1 || width >= 112) {
+		left += " - " + active.status.Detail
 	}
 	line := fitLine(" "+left+right, width)
 
@@ -605,7 +619,7 @@ func (m mockShellModel) chatView(layout mockShellLayout) string {
 
 	content := strings.Join(rows, "\n")
 	if !layout.chatFramed {
-		return fitBlock(content, layout.width, layout.chatHeight)
+		return fitBlock(content, layout.chatWidth, layout.chatHeight)
 	}
 
 	borderColor := lipgloss.Color("#5f6c7b")
@@ -613,7 +627,7 @@ func (m mockShellModel) chatView(layout mockShellLayout) string {
 		borderColor = lipgloss.Color("#8bd5ff")
 	}
 	return lipgloss.NewStyle().
-		Width(clampMin(layout.width-2, 0)).
+		Width(clampMin(layout.chatWidth-2, 0)).
 		Height(layout.chatContentHeight).
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(borderColor).
@@ -621,13 +635,65 @@ func (m mockShellModel) chatView(layout mockShellLayout) string {
 		Render(content)
 }
 
+func (m mockShellModel) sidebarView(layout mockShellLayout) string {
+	if layout.sidebarWidth <= 0 {
+		return ""
+	}
+	contentWidth := clampMin(layout.sidebarWidth-2, 1)
+	lines := make([]string, 0, layout.sidebarContentHeight)
+	lines = append(lines, fitLine(" Channels", contentWidth))
+	for _, key := range m.channels.order {
+		state := m.channels.states[key]
+		if state == nil {
+			continue
+		}
+		marker := " "
+		if key == m.channels.active {
+			marker = ">"
+		}
+		status := channelStatusIndicator(state.status.Status)
+		name := "#" + state.name
+		line := fmt.Sprintf("%s %s %s", marker, status, name)
+		if state.unread > 0 {
+			line += fmt.Sprintf(" %d", state.unread)
+		}
+		lines = append(lines, fitLine(line, contentWidth))
+	}
+	for len(lines) < layout.sidebarContentHeight {
+		lines = append(lines, fitLine("", contentWidth))
+	}
+	if len(lines) > layout.sidebarContentHeight {
+		lines = lines[:layout.sidebarContentHeight]
+	}
+
+	borderColor := lipgloss.Color("#5f6c7b")
+	if m.focus == mockFocusChat {
+		borderColor = lipgloss.Color("#cba6f7")
+	}
+	return lipgloss.NewStyle().
+		Width(contentWidth).
+		Height(layout.sidebarContentHeight).
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(borderColor).
+		Render(strings.Join(lines, "\n"))
+}
+
+func channelStatusIndicator(status ConnectionStatus) string {
+	switch status {
+	case ConnectionConnected:
+		return "*"
+	case ConnectionConnecting, ConnectionReconnecting:
+		return "~"
+	case ConnectionFailed, ConnectionDisconnected, ConnectionClosed:
+		return "!"
+	default:
+		return "-"
+	}
+}
+
 func (m mockShellModel) chatRows(layout mockShellLayout) []string {
 	active := m.activeChannelState()
-	rowWidth := layout.width
-	if layout.chatFramed {
-		rowWidth = layout.width - 4
-	}
-	rowWidth = clampMin(rowWidth, 1)
+	rowWidth := m.chatRowWidth(layout)
 
 	rows := make([]string, 0, len(active.messages))
 	for _, msg := range active.messages {
@@ -776,6 +842,7 @@ func (m mockShellModel) layout() mockShellLayout {
 	height := clampMin(m.height, 1)
 	layout := mockShellLayout{
 		width:        width,
+		chatWidth:    width,
 		statusHeight: 1,
 		helpHeight:   1,
 	}
@@ -823,10 +890,16 @@ func (m mockShellModel) layout() mockShellLayout {
 	}
 
 	layout.chatHeight = clampMin(remaining, 0)
+	layout.sidebarWidth = m.sidebarWidth(width, layout.chatHeight)
+	layout.chatWidth = clampMin(width-layout.sidebarWidth, 1)
 	layout.chatFramed = layout.chatHeight >= 3 && width >= 5
 	layout.chatContentHeight = layout.chatHeight
 	if layout.chatFramed {
 		layout.chatContentHeight = layout.chatHeight - 2
+	}
+	layout.sidebarContentHeight = layout.chatHeight - 2
+	if layout.sidebarContentHeight < 0 {
+		layout.sidebarContentHeight = 0
 	}
 	if layout.chatContentHeight < 0 {
 		layout.chatContentHeight = 0
@@ -840,9 +913,31 @@ func (m mockShellModel) layout() mockShellLayout {
 		} else {
 			layout.chatContentHeight = layout.chatHeight
 		}
+		layout.sidebarContentHeight = layout.chatHeight - 2
+		if layout.sidebarContentHeight < 0 {
+			layout.sidebarContentHeight = 0
+		}
 	}
 
 	return layout
+}
+
+func (m mockShellModel) sidebarWidth(width, chatHeight int) int {
+	if width < sidebarMinWidth || chatHeight < 3 || len(m.channels.channelNames()) < 2 {
+		return 0
+	}
+	if width >= 112 {
+		return sidebarWideSize
+	}
+	return sidebarNormalSize
+}
+
+func (m mockShellModel) chatRowWidth(layout mockShellLayout) int {
+	rowWidth := layout.chatWidth
+	if layout.chatFramed {
+		rowWidth = layout.chatWidth - 4
+	}
+	return clampMin(rowWidth, 1)
 }
 
 func (m *mockShellModel) cycleFocus() {
@@ -936,11 +1031,7 @@ func (m *mockShellModel) enqueueMessage(message twitch.ChatMessage) tea.Cmd {
 	}
 
 	layout := m.layout()
-	rowWidth := layout.width
-	if layout.chatFramed {
-		rowWidth = layout.width - 4
-	}
-	rowWidth = clampMin(rowWidth, 1)
+	rowWidth := m.chatRowWidth(layout)
 
 	revealID := m.nextRevealID(message)
 	result := state.revealQueue.Enqueue(revealID, render.Rows(message, m.renderOptions(rowWidth)))
@@ -1003,11 +1094,7 @@ func (m *mockShellModel) appendStaticMessageReplacingRows(message twitch.ChatMes
 
 func (m mockShellModel) staticMessageRowCount(message twitch.ChatMessage) int {
 	layout := m.layout()
-	rowWidth := layout.width
-	if layout.chatFramed {
-		rowWidth = layout.width - 4
-	}
-	rowWidth = clampMin(rowWidth, 1)
+	rowWidth := m.chatRowWidth(layout)
 	rows := render.Rows(message, m.renderOptions(rowWidth))
 	if len(rows) == 0 {
 		return 1
@@ -1123,11 +1210,7 @@ func (m mockShellModel) visibleAvatarMessages() []twitch.ChatMessage {
 	if layout.chatContentHeight <= 0 {
 		return nil
 	}
-	rowWidth := layout.width
-	if layout.chatFramed {
-		rowWidth = layout.width - 4
-	}
-	rowWidth = clampMin(rowWidth, 1)
+	rowWidth := m.chatRowWidth(layout)
 
 	rowCounts := make([]int, 0, len(active.messages))
 	totalRows := 0
@@ -1303,11 +1386,7 @@ func (m mockShellModel) pendingAssetRequests() []assets.Request {
 	if layout.chatContentHeight <= 0 {
 		return nil
 	}
-	rowWidth := layout.width
-	if layout.chatFramed {
-		rowWidth = layout.width - 4
-	}
-	rowWidth = clampMin(rowWidth, 1)
+	rowWidth := m.chatRowWidth(layout)
 
 	seen := make(map[string]bool)
 	requests := []assets.Request{}
@@ -1437,11 +1516,7 @@ func (m *mockShellModel) refreshActiveRevealRows() {
 		return
 	}
 	layout := m.layout()
-	rowWidth := layout.width
-	if layout.chatFramed {
-		rowWidth = layout.width - 4
-	}
-	rowWidth = clampMin(rowWidth, 1)
+	rowWidth := m.chatRowWidth(layout)
 	for _, id := range state.activeOrder {
 		message, ok := state.activeMessages[id]
 		if !ok {
@@ -1812,12 +1887,16 @@ func (m mockShellModel) helpLines(width, height int) []string {
 		if width < 38 {
 			return []string{" tab focus | ? help"}
 		}
-		return []string{" tab focus | ? help | pg scroll | r reply | esc cancel | q quit | ctrl+c quit | " + source}
+		line := " tab focus | [] chan | ? help | pg scroll | r reply | esc cancel | q quit | ctrl+c quit"
+		if width >= 112 {
+			line += " | " + source
+		}
+		return []string{line}
 	}
 
 	lines := []string{
 		" tab focus: chat/composer",
-		" up/down: select reply | r: reply | esc: cancel reply",
+		" [/]: switch channel | up/down: select reply | r: reply | esc: cancel reply",
 		" pgup/pgdn: scroll chat | ?: compact help | q: quit | ctrl+c: quit | " + source,
 	}
 	if width < 38 {
