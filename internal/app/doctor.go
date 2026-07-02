@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/w0rxbend/twi/internal/config"
+	"github.com/w0rxbend/twi/internal/render"
 	"github.com/w0rxbend/twi/internal/storage"
 	"github.com/w0rxbend/twi/internal/twitch"
 )
@@ -78,6 +79,7 @@ func DoctorWithOptions(ctx context.Context, cfg config.Config, opts DoctorOption
 		mouseCheck(opts.Environ),
 		kittyGraphicsCheck(cfg, opts.Environ),
 		cacheCheck(opts.CacheDir),
+		imageCapabilityCheck(cfg, opts.Environ, opts.CacheDir),
 		cachePruningCheck(ctx, opts.CacheDir),
 		featureModesCheck(cfg.Features),
 	}
@@ -271,7 +273,7 @@ func mouseCheck(environ []string) DoctorCheck {
 }
 
 func kittyGraphicsCheck(cfg config.Config, environ []string) DoctorCheck {
-	if !cfg.Features.EnableKittyImages || modeDisabled(cfg.Features.ImageMode) {
+	if !cfg.Features.EnableKittyImages || strings.EqualFold(strings.TrimSpace(cfg.Features.ImageMode), "off") {
 		return okCheck("kitty graphics", "disabled by config; text fallbacks active")
 	}
 	env := envMap(environ)
@@ -299,6 +301,39 @@ func cacheCheck(cacheDir string) DoctorCheck {
 		return warnCheck("cache directory", fmt.Sprintf("%s not writable: %v", cacheDir, err))
 	}
 	return okCheck("cache directory", cacheDir+" writable")
+}
+
+func imageCapabilityCheck(cfg config.Config, environ []string, cacheDir string) DoctorCheck {
+	decision, cacheErr := imageCapabilityDecision(cfg, environ, cacheDir)
+	detail := decision.Summary()
+	if cacheErr != nil {
+		detail += "; cache probe: " + cacheErr.Error()
+	}
+	switch decision.Status {
+	case render.ImageCapabilityEnabled, render.ImageCapabilityDisabled:
+		return okCheck("image capability", detail)
+	default:
+		return warnCheck("image capability", detail)
+	}
+}
+
+func imageCapabilityDecision(cfg config.Config, environ []string, cacheDir string) (render.ImageCapabilityDecision, error) {
+	writable, err := imageCacheWritable(cacheDir)
+	return render.DecideImageCapabilities(cfg.Features, render.DetectTerminalImageSignals(environ), writable), err
+}
+
+func imageCacheWritable(cacheDir string) (bool, error) {
+	if strings.TrimSpace(cacheDir) == "" {
+		defaultDir, err := config.DefaultCacheDir()
+		if err != nil {
+			return false, err
+		}
+		cacheDir = defaultDir
+	}
+	if err := storage.ProbeWritableDir(cacheDir); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func cachePruningCheck(ctx context.Context, cacheDir string) DoctorCheck {

@@ -7,7 +7,7 @@
 - Text, Unicode, initials, and compact badge fallbacks are implemented for chat rows.
 - Renderer asset fallback fragments can reserve stable cell widths before images are available.
 - `internal/storage.AssetCache` provides context-aware cache methods. The in-memory implementation is intended for deterministic tests, and `internal/storage.DiskAssetCache` persists metadata plus cache-owned bytes under the platform cache directory using deterministic hashed paths.
-- `twi doctor` partially reports image-related readiness through terminal color hints, Kitty/Ghostty environment signals, cache writability, and selected image/avatar/emoji/emote modes.
+- `twi doctor` reports image-related readiness through terminal color hints, Kitty/Ghostty environment signals, cache writability, selected image/avatar/emoji/emote modes, and the resolved image capability state.
 - Kitty-compatible image rendering is the first planned image protocol target.
 - Image loading and rendering must be capability-driven and non-blocking.
 - The chat UI must remain usable when image rendering is disabled, unsupported, still loading, or failed.
@@ -62,19 +62,27 @@ Badges:
 - Render as compact labels or icons.
 - Keep text fallbacks available.
 
-## Capability Detection
+## Capability Decisions
 
-The app should detect terminal image capability before enabling image rendering. Planned detection includes:
+The app now resolves image capability before enabling image-backed app work. The
+decision combines:
 
 - Kitty graphics protocol support.
 - True color support.
 - Cache directory writability.
 - Config and environment image mode settings.
 
-`twi doctor` now reports terminal color hints, Kitty/Ghostty environment
-signals, cache directory writability, and the selected image/avatar/emoji/emote
-modes. These are diagnostic hints only; inline image rendering is still behind
-future asset and terminal-renderer work.
+Resolved states:
+
+- `enabled`: image mode is active and the terminal/cache hints are suitable.
+- `disabled`: image mode is explicitly off or Kitty image support is disabled.
+- `unsupported`: `auto` mode found no Kitty/Ghostty signal, so text fallbacks
+  remain active.
+- `degraded`: explicit image mode or a supported terminal has missing true-color
+  or writable-cache signals; fallbacks remain available.
+
+Inline image drawing itself is still behind future asset and terminal-renderer
+work.
 
 ## Configuration
 
@@ -95,9 +103,10 @@ Recognized mode strings:
 - Emoji: `unicode`, `image`
 - Emote: `text`, `image`
 
-The MVP currently uses fallbacks only. Mode strings are loaded and reported by
-diagnostics, but image-backed modes should become visually effective only when
-the asset pipeline and terminal renderer are implemented.
+The current renderer still uses fallbacks only. Mode strings are loaded,
+reported by diagnostics, and resolved into deterministic app capability state;
+image-backed modes become visually effective once the Kitty renderer is
+implemented.
 
 ## Rendering Rules
 
@@ -135,6 +144,7 @@ Cache behavior should:
 
 - Kitty/Ghostty graphics signals detected from environment hints.
 - Kitty graphics unavailable or unknown, with text fallbacks active.
+- Image capability enabled, disabled, unsupported, or degraded.
 - Image mode disabled by config.
 - Cache directory writable or not writable.
 - Asset cache pruning complete, timed out, or failed because cleanup needs

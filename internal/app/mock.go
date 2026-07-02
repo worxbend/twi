@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/w0rxbend/twi/internal/assets"
 	"github.com/w0rxbend/twi/internal/config"
 	"github.com/w0rxbend/twi/internal/render"
+	"github.com/w0rxbend/twi/internal/storage"
 	"github.com/w0rxbend/twi/internal/twitch"
 	"golang.org/x/term"
 )
@@ -47,6 +49,7 @@ type mockShellModel struct {
 	avatarMode            string
 	emojiMode             string
 	emoteMode             string
+	imageCapability       render.ImageCapabilityDecision
 	sourceDetail          string
 	client                ChatClient
 	avatarResolver        AvatarResolver
@@ -164,7 +167,7 @@ func RunMock(w io.Writer, cfg config.Config) error {
 		channel = cfg.DefaultChannels[0]
 	}
 
-	model := newMockShellModel(channel, cfg)
+	model := newMockShellModelWithCapability(channel, cfg, runtimeImageCapability(cfg))
 	if !isInteractiveTerminal(w) {
 		_, err := fmt.Fprintln(w, model.View())
 		return err
@@ -194,7 +197,7 @@ func RunClientWithOptions(w io.Writer, cfg config.Config, client ChatClient, opt
 		channel = cfg.DefaultChannels[0]
 	}
 
-	model := newLiveShellModelWithOptions(channel, cfg, client, opts)
+	model := newLiveShellModelWithOptionsAndCapability(channel, cfg, client, opts, runtimeImageCapability(cfg))
 	if !isInteractiveTerminal(w) {
 		_, err := fmt.Fprintln(w, model.View())
 		return err
@@ -210,16 +213,25 @@ func newMockShellModel(channel string, cfg config.Config) mockShellModel {
 }
 
 func newMockShellModelWithClock(channel string, cfg config.Config, clock animation.Clock) mockShellModel {
+	return newMockShellModelWithClockAndCapability(channel, cfg, clock, deterministicImageCapability(cfg))
+}
+
+func newMockShellModelWithCapability(channel string, cfg config.Config, capability render.ImageCapabilityDecision) mockShellModel {
+	return newMockShellModelWithClockAndCapability(channel, cfg, nil, capability)
+}
+
+func newMockShellModelWithClockAndCapability(channel string, cfg config.Config, clock animation.Clock, capability render.ImageCapabilityDecision) mockShellModel {
 	connectedAt := time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)
 	animationConfig := mockAnimationConfig(cfg.Features.AnimationMode)
 	return mockShellModel{
-		channel:       channel,
-		animationMode: string(animationConfig.Mode),
-		imageMode:     cfg.Features.ImageMode,
-		avatarMode:    cfg.Features.AvatarMode,
-		emojiMode:     cfg.Features.EmojiMode,
-		emoteMode:     cfg.Features.EmoteMode,
-		sourceDetail:  "mock source: no network",
+		channel:         channel,
+		animationMode:   string(animationConfig.Mode),
+		imageMode:       capability.Mode,
+		avatarMode:      capability.Avatar.Mode,
+		emojiMode:       capability.Emoji.Mode,
+		emoteMode:       capability.Emote.Mode,
+		imageCapability: capability,
+		sourceDetail:    "mock source: no network",
 		status: ConnectionState{
 			Status:  ConnectionConnected,
 			Channel: channel,
@@ -240,22 +252,27 @@ func newLiveShellModelWithClock(channel string, cfg config.Config, client ChatCl
 	return newLiveShellModelWithClockAndOptions(channel, cfg, client, clock, ClientOptions{})
 }
 
-func newLiveShellModelWithOptions(channel string, cfg config.Config, client ChatClient, opts ClientOptions) mockShellModel {
-	return newLiveShellModelWithClockAndOptions(channel, cfg, client, nil, opts)
+func newLiveShellModelWithOptionsAndCapability(channel string, cfg config.Config, client ChatClient, opts ClientOptions, capability render.ImageCapabilityDecision) mockShellModel {
+	return newLiveShellModelWithClockOptionsAndCapability(channel, cfg, client, nil, opts, capability)
 }
 
 func newLiveShellModelWithClockAndOptions(channel string, cfg config.Config, client ChatClient, clock animation.Clock, opts ClientOptions) mockShellModel {
+	return newLiveShellModelWithClockOptionsAndCapability(channel, cfg, client, clock, opts, deterministicImageCapability(cfg))
+}
+
+func newLiveShellModelWithClockOptionsAndCapability(channel string, cfg config.Config, client ChatClient, clock animation.Clock, opts ClientOptions, capability render.ImageCapabilityDecision) mockShellModel {
 	animationConfig := mockAnimationConfig(cfg.Features.AnimationMode)
 	return mockShellModel{
-		channel:        channel,
-		animationMode:  string(animationConfig.Mode),
-		imageMode:      cfg.Features.ImageMode,
-		avatarMode:     cfg.Features.AvatarMode,
-		emojiMode:      cfg.Features.EmojiMode,
-		emoteMode:      cfg.Features.EmoteMode,
-		sourceDetail:   "live IRC",
-		client:         client,
-		avatarResolver: opts.AvatarResolver,
+		channel:         channel,
+		animationMode:   string(animationConfig.Mode),
+		imageMode:       capability.Mode,
+		avatarMode:      capability.Avatar.Mode,
+		emojiMode:       capability.Emoji.Mode,
+		emoteMode:       capability.Emote.Mode,
+		imageCapability: capability,
+		sourceDetail:    "live IRC",
+		client:          client,
+		avatarResolver:  opts.AvatarResolver,
 		status: ConnectionState{
 			Status:  ConnectionConnecting,
 			Channel: channel,
@@ -269,6 +286,19 @@ func newLiveShellModelWithClockAndOptions(channel string, cfg config.Config, cli
 		height:          defaultMockHeight,
 		focus:           mockFocusChat,
 	}
+}
+
+func runtimeImageCapability(cfg config.Config) render.ImageCapabilityDecision {
+	cacheWritable := false
+	cacheDir, err := config.DefaultCacheDir()
+	if err == nil && storage.ProbeWritableDir(cacheDir) == nil {
+		cacheWritable = true
+	}
+	return render.DecideImageCapabilities(cfg.Features, render.DetectTerminalImageSignals(os.Environ()), cacheWritable)
+}
+
+func deterministicImageCapability(cfg config.Config) render.ImageCapabilityDecision {
+	return render.DecideImageCapabilities(cfg.Features, render.TerminalImageSignals{}, true)
 }
 
 func seededMockMessages(channel string, startedAt time.Time) []twitch.ChatMessage {
@@ -932,7 +962,7 @@ func batchNonNil(cmds ...tea.Cmd) tea.Cmd {
 }
 
 func (m *mockShellModel) scheduleAvatarLookup() tea.Cmd {
-	if m.avatarResolver == nil || m.avatarLookupScheduled || m.avatarLookupInFlight || modeDisabled(m.avatarMode) {
+	if m.avatarResolver == nil || m.avatarLookupScheduled || m.avatarLookupInFlight || !m.imageCapability.Avatar.Active {
 		return nil
 	}
 	if len(m.pendingAvatarRequests()) == 0 {
@@ -964,7 +994,7 @@ func (m *mockShellModel) markAvatarRequests(requests []assets.AvatarRequest) {
 }
 
 func (m mockShellModel) pendingAvatarRequests() []assets.AvatarRequest {
-	if m.avatarResolver == nil || modeDisabled(m.avatarMode) {
+	if m.avatarResolver == nil || !m.imageCapability.Avatar.Active {
 		return nil
 	}
 	seen := make(map[string]bool)
@@ -1301,30 +1331,8 @@ func mockAnimationConfig(mode string) animation.Config {
 
 func (m mockShellModel) renderOptions(width int) render.Options {
 	opts := render.DefaultOptions(width)
-	opts.Assets = renderAssetOptions(m.imageMode, m.avatarMode, m.emojiMode, m.emoteMode)
+	opts.Assets = m.imageCapability.AssetOptions()
 	return opts
-}
-
-func renderAssetOptions(imageMode, avatarMode, emojiMode, emoteMode string) render.AssetOptions {
-	opts := render.AssetOptions{}
-	if !modeDisabled(avatarMode) {
-		opts.ShowAvatars = true
-		opts.AvatarWidthCells = render.FallbackAssetOptions().AvatarWidthCells
-	}
-	if !modeDisabled(imageMode) {
-		opts.BadgeWidthCells = render.FallbackAssetOptions().BadgeWidthCells
-	}
-	if strings.EqualFold(emojiMode, "image") && !modeDisabled(imageMode) {
-		opts.EmojiWidthCells = render.FallbackAssetOptions().EmojiWidthCells
-	}
-	if strings.EqualFold(emoteMode, "image") && !modeDisabled(imageMode) {
-		opts.EmoteWidthCells = render.FallbackAssetOptions().EmoteWidthCells
-	}
-	return opts
-}
-
-func modeDisabled(mode string) bool {
-	return strings.EqualFold(strings.TrimSpace(mode), "off")
 }
 
 func (m *mockShellModel) deleteComposerRune() {

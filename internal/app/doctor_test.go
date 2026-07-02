@@ -333,6 +333,93 @@ func TestDoctorReportsAssetCachePruningWarningsWithoutSecrets(t *testing.T) {
 	assertDoctorDoesNotLeak(t, report, "access_token=secret-token", "secret-token")
 }
 
+func TestDoctorReportsImageCapabilityStates(t *testing.T) {
+	imageFeatures := config.Default().Features
+	imageFeatures.AvatarMode = "image"
+	imageFeatures.EmojiMode = "image"
+	imageFeatures.EmoteMode = "image"
+
+	for _, tt := range []struct {
+		name       string
+		features   config.FeatureConfig
+		environ    []string
+		cacheDir   func(*testing.T) string
+		wantStatus DoctorStatus
+		wantDetail []string
+	}{
+		{
+			name:       "enabled",
+			features:   imageFeatures,
+			environ:    []string{"TERM=xterm-kitty", "COLORTERM=truecolor", "KITTY_WINDOW_ID=42"},
+			cacheDir:   writableDoctorCacheDir,
+			wantStatus: DoctorStatusOK,
+			wantDetail: []string{"enabled", "avatar=image/enabled", "emoji=image/enabled", "emote=image/enabled", "cache=writable"},
+		},
+		{
+			name: "disabled",
+			features: func() config.FeatureConfig {
+				features := imageFeatures
+				features.ImageMode = "off"
+				return features
+			}(),
+			environ:    []string{"TERM=xterm-kitty", "COLORTERM=truecolor", "KITTY_WINDOW_ID=42"},
+			cacheDir:   writableDoctorCacheDir,
+			wantStatus: DoctorStatusOK,
+			wantDetail: []string{"disabled", "image=off", "disabled by image_mode=off"},
+		},
+		{
+			name:       "unsupported auto",
+			features:   imageFeatures,
+			environ:    []string{"TERM=xterm-256color", "COLORTERM=truecolor"},
+			cacheDir:   writableDoctorCacheDir,
+			wantStatus: DoctorStatusWarn,
+			wantDetail: []string{"unsupported", "terminal=no-kitty", "text fallbacks active"},
+		},
+		{
+			name:       "degraded cache unwritable",
+			features:   imageFeatures,
+			environ:    []string{"TERM=xterm-kitty", "COLORTERM=truecolor", "KITTY_WINDOW_ID=42"},
+			cacheDir:   unwritableDoctorCachePath,
+			wantStatus: DoctorStatusWarn,
+			wantDetail: []string{"degraded", "cache=unwritable", "asset cache is not writable"},
+		},
+		{
+			name: "explicit override degraded",
+			features: func() config.FeatureConfig {
+				features := imageFeatures
+				features.ImageMode = "normal"
+				return features
+			}(),
+			environ:    []string{"TERM=xterm-256color", "COLORTERM=truecolor"},
+			cacheDir:   writableDoctorCacheDir,
+			wantStatus: DoctorStatusWarn,
+			wantDetail: []string{"degraded", "image=normal", "no Kitty/Ghostty graphics signal"},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Path = filepath.Join(t.TempDir(), "missing.toml")
+			cfg.Features = tt.features
+
+			report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+				Environ:           tt.environ,
+				CacheDir:          tt.cacheDir(t),
+				ReachabilityProbe: func(context.Context) error { return nil },
+			})
+
+			check := doctorCheck(t, report, "image capability")
+			if check.Status != tt.wantStatus {
+				t.Fatalf("image capability status = %q, want %q; detail=%q", check.Status, tt.wantStatus, check.Detail)
+			}
+			for _, want := range tt.wantDetail {
+				if !strings.Contains(check.Detail, want) {
+					t.Fatalf("image capability detail = %q, want it to contain %q", check.Detail, want)
+				}
+			}
+		})
+	}
+}
+
 func doctorCheck(t *testing.T, report DoctorReport, name string) DoctorCheck {
 	t.Helper()
 	for _, check := range report.Checks {
@@ -342,6 +429,20 @@ func doctorCheck(t *testing.T, report DoctorReport, name string) DoctorCheck {
 	}
 	t.Fatalf("doctor report missing check %q: %#v", name, report.Checks)
 	return DoctorCheck{}
+}
+
+func writableDoctorCacheDir(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(t.TempDir(), "cache")
+}
+
+func unwritableDoctorCachePath(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "cache-file")
+	if err := os.WriteFile(path, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("WriteFile cache fixture returned error: %v", err)
+	}
+	return path
 }
 
 func assertDoctorDoesNotLeak(t *testing.T, report DoctorReport, secrets ...string) {

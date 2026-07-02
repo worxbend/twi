@@ -59,6 +59,75 @@ func TestRunMockRendersInitialShellForNonInteractiveOutput(t *testing.T) {
 	}
 }
 
+func TestShellImageCapabilityStateIsDeterministic(t *testing.T) {
+	imageFeatures := config.Default().Features
+	imageFeatures.AvatarMode = "image"
+	imageFeatures.EmojiMode = "image"
+	imageFeatures.EmoteMode = "image"
+
+	for _, tt := range []struct {
+		name       string
+		features   config.FeatureConfig
+		wantStatus render.ImageCapabilityStatus
+		wantActive bool
+	}{
+		{
+			name:       "auto without terminal signal is unsupported",
+			features:   imageFeatures,
+			wantStatus: render.ImageCapabilityUnsupported,
+			wantActive: false,
+		},
+		{
+			name: "off disables image features",
+			features: func() config.FeatureConfig {
+				features := imageFeatures
+				features.ImageMode = "off"
+				return features
+			}(),
+			wantStatus: render.ImageCapabilityDisabled,
+			wantActive: false,
+		},
+		{
+			name: "explicit image mode is degraded but active",
+			features: func() config.FeatureConfig {
+				features := imageFeatures
+				features.ImageMode = "normal"
+				return features
+			}(),
+			wantStatus: render.ImageCapabilityDegraded,
+			wantActive: true,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Features = tt.features
+			model := newMockShellModel("example", cfg)
+
+			if model.imageCapability.Status != tt.wantStatus {
+				t.Fatalf("image capability status = %q, want %q; summary=%s", model.imageCapability.Status, tt.wantStatus, model.imageCapability.Summary())
+			}
+			if model.imageCapability.Avatar.Active != tt.wantActive ||
+				model.imageCapability.Emoji.Active != tt.wantActive ||
+				model.imageCapability.Emote.Active != tt.wantActive {
+				t.Fatalf("image feature activity = avatar:%v emoji:%v emote:%v, want %v",
+					model.imageCapability.Avatar.Active,
+					model.imageCapability.Emoji.Active,
+					model.imageCapability.Emote.Active,
+					tt.wantActive)
+			}
+
+			opts := model.renderOptions(80).Assets
+			if tt.wantActive {
+				if opts.EmojiWidthCells == 0 || opts.EmoteWidthCells == 0 || opts.BadgeWidthCells == 0 {
+					t.Fatalf("active image asset options = %#v, want reserved image widths", opts)
+				}
+			} else if opts.EmojiWidthCells != 0 || opts.EmoteWidthCells != 0 || opts.BadgeWidthCells != 0 {
+				t.Fatalf("inactive image asset options = %#v, want no image-only widths", opts)
+			}
+		})
+	}
+}
+
 func TestMockShellQuitsOnQAndCtrlC(t *testing.T) {
 	model := newMockShellModel("example", config.Default())
 
@@ -788,6 +857,7 @@ func TestLiveShellBatchesVisibleAvatarLookups(t *testing.T) {
 		},
 	}
 	cfg := config.Default()
+	cfg.Features.ImageMode = "normal"
 	cfg.Features.AvatarMode = "image"
 	model := newLiveShellModelWithClockAndOptions("example", cfg, client, nil, ClientOptions{AvatarResolver: resolver})
 	model.messages = []twitch.ChatMessage{
@@ -838,6 +908,7 @@ func TestLiveShellBatchesVisibleAvatarLookups(t *testing.T) {
 
 func TestLiveShellAvatarResolutionKeepsFallbackRowsStable(t *testing.T) {
 	cfg := config.Default()
+	cfg.Features.ImageMode = "normal"
 	cfg.Features.AvatarMode = "image"
 	model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
 		AvatarResolver: &appFakeAvatarResolver{},
