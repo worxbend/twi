@@ -67,6 +67,7 @@ Supported variables:
 | `TWITCH_CLIENT_SECRET` | Yes | Dotenv alias for client secret. |
 | `TWI_DEFAULT_CHANNELS` | No | Default channel list. |
 | `TWI_ENABLE_KITTY_IMAGES` | No | Enable or disable Kitty protocol image support. |
+| `TWI_ENABLE_MOUSE` | No | Enable or disable terminal mouse reporting and mouse shortcuts. |
 | `TWI_IMAGE_MODE` | No | Overall image mode. |
 | `TWI_AVATAR_MODE` | No | Avatar rendering mode. |
 | `TWI_EMOJI_MODE` | No | Standard emoji rendering mode. |
@@ -120,6 +121,7 @@ twitch_client_id = ""
 twitch_client_secret = ""
 default_channels = "somechannel"
 enable_kitty_images = true
+enable_mouse = true
 image_mode = "auto"
 avatar_mode = "initials"
 emoji_mode = "unicode"
@@ -172,8 +174,8 @@ The current diagnostics include:
   scopes, expiry, username mismatch, refresh availability, cancellation, and
   API-error states.
 - Twitch IRC reachability to `irc.chat.twitch.tv:6697`.
-- Terminal, true-color/256-color, and mouse capability hints from environment
-  variables.
+- Terminal, true-color/256-color, configured mouse support, and mouse
+  capability hints from environment variables.
 - Kitty/Ghostty graphics signals and the active image fallback state.
 - Cache directory writability using a single fixed-content probe file that is
   removed immediately, plus asset-cache pruning status for expired entries and

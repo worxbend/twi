@@ -467,15 +467,19 @@ tests; manual resize check.
 Risks: Terminal width pressure can make the UI noisy.
 Follow-ups: Add command palette switcher for narrow screens.
 
-Task: Add optional mouse support.
+Task: Add optional mouse support. Status: implemented for wheel scroll, channel click, composer focus, and message selection.
 Owner lane: UX/TUI engineer.
 Goal: Support mouse scroll, channel click, composer focus, and message select
 without weakening keyboard workflows.
-Context: Mouse is later scope and should be optional.
+Context: Mouse is optional and can be disabled through config or environment.
 Files likely touched: `internal/app`, `internal/config`,
 `docs/product/requirements.md`, `docs/config.md`.
 Implementation notes: Gate mouse support behind config or terminal capability.
 Keep behavior deterministic in tests.
+Current implementation: `enable_mouse` and `TWI_ENABLE_MOUSE` control Bubble
+Tea cell-motion startup and direct mouse-event handling. Mouse wheel scrolls
+the chat viewport, sidebar clicks switch channels, composer clicks focus the
+composer, and message clicks select reply context.
 Acceptance criteria: Mouse interactions work when enabled and all workflows
 remain accessible by keyboard.
 Verification: Bubble Tea mouse event tests; manual terminal mouse check.

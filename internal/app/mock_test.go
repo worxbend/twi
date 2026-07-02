@@ -326,6 +326,129 @@ func TestMockShellPageKeysScrollViewport(t *testing.T) {
 	}
 }
 
+func TestMockShellMouseEventsWhenEnabled(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	cfg.DefaultChannels = []string{"alpha", "beta"}
+	model := newMockShellModel("alpha", cfg)
+	model.channels.ensure("alpha").messages = numberedMockMessages("alpha", 12)
+	model.channels.ensure("beta").messages = numberedMockMessages("beta", 3)
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 88, Height: 12})
+	model = updated.(mockShellModel)
+	layout := model.layout()
+	chatX := layout.sidebarWidth + 2
+	contentY := layout.statusHeight + 1
+
+	updated, cmd := model.Update(tea.MouseMsg{
+		X:      chatX,
+		Y:      contentY,
+		Button: tea.MouseButtonWheelUp,
+		Action: tea.MouseActionPress,
+	})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("mouse wheel returned command %#v, want nil", cmd)
+	}
+	if model.activeChannelState().scrollOffset == 0 {
+		t.Fatal("mouse wheel up left scrollOffset at 0")
+	}
+	if !strings.Contains(model.View(), "message-08") {
+		t.Fatalf("mouse-scrolled viewport missing older row:\n%s", model.View())
+	}
+
+	betaY := layout.statusHeight + 1 + 2
+	updated, cmd = model.Update(tea.MouseMsg{
+		X:      2,
+		Y:      betaY,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+	})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		if msg := cmd(); msg != nil {
+			t.Fatalf("channel click command produced %T, want nil or no-op", msg)
+		}
+	}
+	if got, want := model.activeChannelName(), "beta"; got != want {
+		t.Fatalf("active channel after sidebar click = %q, want %q", got, want)
+	}
+	if got, want := model.focus, mockFocusChat; got != want {
+		t.Fatalf("focus after sidebar click = %v, want %v", got, want)
+	}
+
+	composerY := layout.statusHeight + layout.chatHeight + 1
+	updated, _ = model.Update(tea.MouseMsg{
+		X:      10,
+		Y:      composerY,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+	})
+	model = updated.(mockShellModel)
+	if got, want := model.focus, mockFocusComposer; got != want {
+		t.Fatalf("focus after composer click = %v, want %v", got, want)
+	}
+
+	if !model.channels.setActive("alpha") {
+		t.Fatal("test setup failed to switch back to alpha")
+	}
+	model.activeChannelState().scrollOffset = 0
+	layout = model.layout()
+	latestY := layout.statusHeight + 1 + layout.chatContentHeight - 1
+	updated, _ = model.Update(tea.MouseMsg{
+		X:      layout.sidebarWidth + 4,
+		Y:      latestY,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+	})
+	model = updated.(mockShellModel)
+	if model.activeChannelState().replyTo == nil || model.activeChannelState().replyTo.MessageID != "mock-11" {
+		t.Fatalf("replyTo after message click = %#v, want mock-11", model.activeChannelState().replyTo)
+	}
+	if got, want := model.focus, mockFocusChat; got != want {
+		t.Fatalf("focus after message click = %v, want %v", got, want)
+	}
+}
+
+func TestMockShellMouseEventsIgnoredWhenDisabled(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.EnableMouse = false
+	cfg.DefaultChannels = []string{"alpha", "beta"}
+	model := newMockShellModel("alpha", cfg)
+	model.channels.ensure("alpha").messages = numberedMockMessages("alpha", 12)
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 88, Height: 12})
+	model = updated.(mockShellModel)
+	layout := model.layout()
+
+	events := []tea.MouseMsg{
+		{X: layout.sidebarWidth + 2, Y: layout.statusHeight + 1, Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress},
+		{X: 2, Y: layout.statusHeight + 3, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress},
+		{X: 10, Y: layout.statusHeight + layout.chatHeight + 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress},
+		{X: layout.sidebarWidth + 4, Y: layout.statusHeight + 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress},
+	}
+	for _, event := range events {
+		updated, cmd := model.Update(event)
+		if cmd != nil {
+			t.Fatalf("disabled mouse event returned command %#v, want nil", cmd)
+		}
+		model = updated.(mockShellModel)
+	}
+
+	if got, want := model.activeChannelName(), "alpha"; got != want {
+		t.Fatalf("active channel after disabled mouse events = %q, want %q", got, want)
+	}
+	if got := model.activeChannelState().scrollOffset; got != 0 {
+		t.Fatalf("scrollOffset after disabled mouse events = %d, want 0", got)
+	}
+	if got, want := model.focus, mockFocusChat; got != want {
+		t.Fatalf("focus after disabled mouse events = %v, want %v", got, want)
+	}
+	if model.activeChannelState().replyTo != nil {
+		t.Fatalf("replyTo after disabled mouse events = %#v, want nil", model.activeChannelState().replyTo)
+	}
+}
+
 func TestLiveShellEnterQueuesComposerSendAndSuccessKeepsComposerCleared(t *testing.T) {
 	client := NewFakeChatClient(1)
 	acceptedAt := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)

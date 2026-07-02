@@ -17,6 +17,7 @@ func TestLoadPrecedence(t *testing.T) {
 		`twitch_oauth_token = "file_token"`,
 		`default_channels = "fileone,filetwo"`,
 		`animation_mode = "reduced"`,
+		`enable_mouse = "false"`,
 	}, "\n")
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
@@ -44,6 +45,23 @@ func TestLoadPrecedence(t *testing.T) {
 	}
 	if cfg.Features.AnimationMode != "reduced" {
 		t.Fatalf("animation mode = %q, want reduced", cfg.Features.AnimationMode)
+	}
+	if cfg.Features.EnableMouse {
+		t.Fatal("enable mouse = true, want file value false")
+	}
+}
+
+func TestLoadMouseFeatureFromEnvAndConfigShow(t *testing.T) {
+	cfg, err := LoadEnvOnly([]string{"TWI_ENABLE_MOUSE=false"}, Overrides{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Features.EnableMouse {
+		t.Fatal("EnableMouse = true, want false from env")
+	}
+	if !strings.Contains(cfg.RedactedString(), "enable_mouse = false") {
+		t.Fatalf("redacted config missing mouse flag:\n%s", cfg.RedactedString())
 	}
 }
 

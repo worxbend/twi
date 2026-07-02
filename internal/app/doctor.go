@@ -373,13 +373,14 @@ func assetCacheDir(cacheDir string) (string, error) {
 
 func featureModesCheck(features config.FeatureConfig) DoctorCheck {
 	detail := fmt.Sprintf(
-		"image=%s avatar=%s emoji=%s emote=%s animation=%s kitty=%t",
+		"image=%s avatar=%s emoji=%s emote=%s animation=%s kitty=%t mouse=%t",
 		features.ImageMode,
 		features.AvatarMode,
 		features.EmojiMode,
 		features.EmoteMode,
 		features.AnimationMode,
 		features.EnableKittyImages,
+		features.EnableMouse,
 	)
 	if unknown := unknownFeatureModes(features); len(unknown) > 0 {
 		return warnCheck("feature modes", detail+"; unknown: "+strings.Join(unknown, ", "))

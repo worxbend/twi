@@ -100,7 +100,7 @@ Do not paste real tokens into commits, screenshots, issue comments, terminal rec
 | Avatar metadata | Partial | When live chat runs with `avatar_mode = "image"` plus Twitch API credentials, visible author avatar URLs are batched through Helix Get Users and cached; app asset events can prepare fixed-width avatar cells when an asset resolver/renderer is installed. |
 | Emote/badge metadata | Partial | Internal Helix adapters and cache-backed resolvers can turn known Twitch emote and badge IDs into public image-capable refs while keeping Unicode and exact emote-token fallbacks stable; app asset events can refresh visible rows without scroll or composer jumps. |
 | Login/setup | Planned | `twi login` is advertised but exits as planned/not implemented. |
-| Multi-channel UX | Partial | Messages, unread counts, scroll, drafts, replies, and sends are per-channel. Normal and wide terminals show a keyboard-first channel sidebar with connection indicators and unread counts; narrow terminals collapse this into the status line. Twitch IRC connect/reconnect/disconnect callbacks are connection-level and are shown on configured channel states rather than as independent per-channel transport events. |
+| Multi-channel UX | Partial | Messages, unread counts, scroll, drafts, replies, and sends are per-channel. Normal and wide terminals show a keyboard-first channel sidebar with connection indicators and unread counts; optional mouse support can scroll chat, click channels, focus the composer, and select messages. Narrow terminals collapse channel state into the status line. Twitch IRC connect/reconnect/disconnect callbacks are connection-level and are shown on configured channel states rather than as independent per-channel transport events. |
 | Inline terminal images | Partial | The renderer and app event path can substitute prepared fixed-width cells for visible avatar, badge, emote, and emoji rows; default live resolver wiring and manual Kitty/Ghostty validation remain planned. |
 
 ## Controls
@@ -116,6 +116,8 @@ Do not paste real tokens into commits, screenshots, issue comments, terminal rec
 | `enter` | Send from the composer in live mode. |
 | `/me does a thing` | Send a Twitch action message. |
 
+Mouse support is enabled by default. Set `enable_mouse = false` or `TWI_ENABLE_MOUSE=false` to keep terminal mouse reporting disabled; all workflows remain available from the keyboard.
+
 ## Configure It
 
 Use environment variables for quick runs:
@@ -123,6 +125,7 @@ Use environment variables for quick runs:
 ```sh
 export TWI_DEFAULT_CHANNELS="somechannel"
 export TWI_ANIMATION_MODE="fast"
+export TWI_ENABLE_MOUSE="true"
 export TWI_AVATAR_MODE="initials"
 export TWI_EMOTE_MODE="text"
 ```
@@ -141,6 +144,7 @@ twitch_oauth_token = "PLACEHOLDER_TWITCH_OAUTH_TOKEN"
 twitch_refresh_token = "PLACEHOLDER_TWITCH_REFRESH_TOKEN"
 default_channels = "somechannel"
 enable_kitty_images = true
+enable_mouse = true
 image_mode = "auto"
 avatar_mode = "initials"
 emoji_mode = "unicode"

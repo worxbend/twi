@@ -51,6 +51,7 @@ type fdWriter interface {
 type mockShellModel struct {
 	channels              *channelStateSet
 	animationMode         string
+	mouseEnabled          bool
 	imageMode             string
 	avatarMode            string
 	emojiMode             string
@@ -188,7 +189,7 @@ func RunMock(w io.Writer, cfg config.Config) error {
 		return err
 	}
 
-	program := tea.NewProgram(model, tea.WithOutput(w), tea.WithAltScreen())
+	program := tea.NewProgram(model, programOptions(w, cfg)...)
 	_, err := program.Run()
 	return err
 }
@@ -218,9 +219,17 @@ func RunClientWithOptions(w io.Writer, cfg config.Config, client ChatClient, opt
 		return err
 	}
 
-	program := tea.NewProgram(model, tea.WithOutput(w), tea.WithAltScreen())
+	program := tea.NewProgram(model, programOptions(w, cfg)...)
 	_, err := program.Run()
 	return err
+}
+
+func programOptions(w io.Writer, cfg config.Config) []tea.ProgramOption {
+	options := []tea.ProgramOption{tea.WithOutput(w), tea.WithAltScreen()}
+	if cfg.Features.EnableMouse {
+		options = append(options, tea.WithMouseCellMotion())
+	}
+	return options
 }
 
 func newMockShellModel(channel string, cfg config.Config) mockShellModel {
@@ -252,6 +261,7 @@ func newMockShellModelWithClockAndCapability(channel string, cfg config.Config, 
 	return mockShellModel{
 		channels:        channels,
 		animationMode:   string(animationConfig.Mode),
+		mouseEnabled:    cfg.Features.EnableMouse,
 		imageMode:       capability.Mode,
 		avatarMode:      capability.Avatar.Mode,
 		emojiMode:       capability.Emoji.Mode,
@@ -290,6 +300,7 @@ func newLiveShellModelWithClockOptionsAndCapability(channel string, cfg config.C
 	return mockShellModel{
 		channels:        channels,
 		animationMode:   string(animationConfig.Mode),
+		mouseEnabled:    cfg.Features.EnableMouse,
 		imageMode:       capability.Mode,
 		avatarMode:      capability.Avatar.Mode,
 		emojiMode:       capability.Emoji.Mode,
@@ -455,6 +466,8 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.activeChannelState().composerText += string(msg.Runes)
 			}
 		}
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -954,6 +967,172 @@ func (m *mockShellModel) scrollBy(delta int) {
 	}
 	m.activeChannelState().scrollOffset += delta
 	m.clampScroll()
+}
+
+func (m *mockShellModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if !m.mouseEnabled {
+		return *m, nil
+	}
+
+	layout := m.layout()
+	event := tea.MouseEvent(msg)
+	if m.mouseInChatRegion(event, layout) {
+		switch {
+		case isMouseWheelUp(event):
+			m.scrollBy(3)
+			return *m, nil
+		case isMouseWheelDown(event):
+			m.scrollBy(-3)
+			return *m, nil
+		}
+	}
+
+	if !isMouseLeftPress(event) {
+		return *m, nil
+	}
+
+	if channel, ok := m.channelAtMouse(event, layout); ok {
+		m.focus = mockFocusChat
+		if m.channels.setActive(channel) {
+			m.clampScroll()
+			return m.withAsyncAssetCommands(nil)
+		}
+		return *m, nil
+	}
+	if m.mouseInComposer(event, layout) {
+		m.focus = mockFocusComposer
+		return *m, nil
+	}
+	if message, ok := m.messageAtMouse(event, layout); ok {
+		m.focus = mockFocusChat
+		m.activeChannelState().replyTo = replyContextFromMessage(message)
+		return *m, nil
+	}
+	if m.mouseInChatRegion(event, layout) {
+		m.focus = mockFocusChat
+	}
+	return *m, nil
+}
+
+func isMouseWheelUp(event tea.MouseEvent) bool {
+	return event.Button == tea.MouseButtonWheelUp
+}
+
+func isMouseWheelDown(event tea.MouseEvent) bool {
+	return event.Button == tea.MouseButtonWheelDown
+}
+
+func isMouseLeftPress(event tea.MouseEvent) bool {
+	return event.Button == tea.MouseButtonLeft && event.Action == tea.MouseActionPress
+}
+
+func (m mockShellModel) mouseInChatRegion(event tea.MouseEvent, layout mockShellLayout) bool {
+	chatTop := layout.statusHeight
+	chatLeft := layout.sidebarWidth
+	return event.X >= chatLeft &&
+		event.X < layout.width &&
+		event.Y >= chatTop &&
+		event.Y < chatTop+layout.chatHeight
+}
+
+func (m mockShellModel) mouseInComposer(event tea.MouseEvent, layout mockShellLayout) bool {
+	composerTop := layout.statusHeight + layout.chatHeight
+	return event.X >= 0 &&
+		event.X < layout.width &&
+		event.Y >= composerTop &&
+		event.Y < composerTop+layout.composerHeight
+}
+
+func (m mockShellModel) channelAtMouse(event tea.MouseEvent, layout mockShellLayout) (string, bool) {
+	if layout.sidebarWidth <= 0 || event.X < 0 || event.X >= layout.sidebarWidth {
+		return "", false
+	}
+	chatTop := layout.statusHeight
+	if event.Y < chatTop+1 || event.Y >= chatTop+layout.chatHeight-1 {
+		return "", false
+	}
+	contentRow := event.Y - chatTop - 1
+	channelIndex := contentRow - 1
+	if channelIndex < 0 || channelIndex >= len(m.channels.order) {
+		return "", false
+	}
+	state := m.channels.states[m.channels.order[channelIndex]]
+	if state == nil {
+		return "", false
+	}
+	return state.name, true
+}
+
+func (m mockShellModel) messageAtMouse(event tea.MouseEvent, layout mockShellLayout) (twitch.ChatMessage, bool) {
+	if !m.mouseInChatRegion(event, layout) || layout.chatContentHeight <= 0 {
+		return twitch.ChatMessage{}, false
+	}
+	chatTop := layout.statusHeight
+	contentTop := chatTop
+	if layout.chatFramed {
+		contentTop++
+	}
+	contentRow := event.Y - contentTop
+	if contentRow < 0 || contentRow >= layout.chatContentHeight {
+		return twitch.ChatMessage{}, false
+	}
+	return m.messageAtVisibleChatRow(layout, contentRow)
+}
+
+func (m mockShellModel) messageAtVisibleChatRow(layout mockShellLayout, contentRow int) (twitch.ChatMessage, bool) {
+	active := m.activeChannelState()
+	rowWidth := m.chatRowWidth(layout)
+
+	rowCounts := make([]int, 0, len(active.messages))
+	totalRows := 0
+	for _, message := range active.messages {
+		count := len(render.Rows(message, m.renderOptions(rowWidth)))
+		if count <= 0 {
+			count = 1
+		}
+		rowCounts = append(rowCounts, count)
+		totalRows += count
+	}
+	frames := active.revealQueue.Frames()
+	for _, id := range active.activeOrder {
+		totalRows += len(frames[id])
+	}
+
+	start := totalRows - layout.chatContentHeight - active.scrollOffset
+	if start < 0 {
+		start = 0
+	}
+	target := start + contentRow
+	if target < 0 || target >= totalRows {
+		return twitch.ChatMessage{}, false
+	}
+
+	cursor := 0
+	for i, message := range active.messages {
+		next := cursor + rowCounts[i]
+		if target >= cursor && target < next {
+			return selectableMessage(message)
+		}
+		cursor = next
+	}
+	for _, id := range active.activeOrder {
+		rows := frames[id]
+		next := cursor + len(rows)
+		if target >= cursor && target < next {
+			if message, ok := active.activeMessages[id]; ok {
+				return selectableMessage(message)
+			}
+		}
+		cursor = next
+	}
+	return twitch.ChatMessage{}, false
+}
+
+func selectableMessage(message twitch.ChatMessage) (twitch.ChatMessage, bool) {
+	if strings.TrimSpace(message.ID) == "" {
+		return twitch.ChatMessage{}, false
+	}
+	return message, true
 }
 
 func (m *mockShellModel) clampScroll() {

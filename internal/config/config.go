@@ -32,6 +32,7 @@ type TwitchConfig struct {
 
 type FeatureConfig struct {
 	EnableKittyImages bool
+	EnableMouse       bool
 	ImageMode         string
 	AvatarMode        string
 	EmojiMode         string
@@ -95,6 +96,7 @@ func Default() Config {
 	return Config{
 		Features: FeatureConfig{
 			EnableKittyImages: true,
+			EnableMouse:       true,
 			ImageMode:         "auto",
 			AvatarMode:        "initials",
 			EmojiMode:         "unicode",
@@ -130,6 +132,7 @@ func (c Config) RedactedString() string {
 		"twitch_client_secret = " + quote(redact(c.Twitch.ClientSecret)),
 		"default_channels = " + quote(strings.Join(c.DefaultChannels, ",")),
 		"enable_kitty_images = " + strconv.FormatBool(c.Features.EnableKittyImages),
+		"enable_mouse = " + strconv.FormatBool(c.Features.EnableMouse),
 		"image_mode = " + quote(c.Features.ImageMode),
 		"avatar_mode = " + quote(c.Features.AvatarMode),
 		"emoji_mode = " + quote(c.Features.EmojiMode),
@@ -219,6 +222,8 @@ func applyEnv(cfg *Config, environ []string) {
 			cfg.DefaultChannels = splitList(env[key])
 		case "TWI_ENABLE_KITTY_IMAGES":
 			cfg.Features.EnableKittyImages = parseBool(env[key], cfg.Features.EnableKittyImages)
+		case "TWI_ENABLE_MOUSE":
+			cfg.Features.EnableMouse = parseBool(env[key], cfg.Features.EnableMouse)
 		case "TWI_IMAGE_MODE":
 			cfg.Features.ImageMode = env[key]
 		case "TWI_AVATAR_MODE":
@@ -249,6 +254,8 @@ func applyKey(cfg *Config, key, value string) {
 		cfg.DefaultChannels = splitList(value)
 	case "enable_kitty_images":
 		cfg.Features.EnableKittyImages = parseBool(value, cfg.Features.EnableKittyImages)
+	case "enable_mouse":
+		cfg.Features.EnableMouse = parseBool(value, cfg.Features.EnableMouse)
 	case "image_mode":
 		cfg.Features.ImageMode = value
 	case "avatar_mode":
