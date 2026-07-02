@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -73,6 +74,8 @@ var (
 	ErrUnsafeAssetKey = errors.New("unsafe asset cache key")
 	// ErrUnsafeAssetPath reports an input path that may contain a URL or secret.
 	ErrUnsafeAssetPath = errors.New("unsafe asset cache path")
+	// ErrUnsafeAssetSourceURL reports source metadata that may contain a secret.
+	ErrUnsafeAssetSourceURL = errors.New("unsafe asset cache source URL")
 )
 
 // MemoryAssetCache is a deterministic in-memory AssetCache for tests and
@@ -117,6 +120,9 @@ func (c *MemoryAssetCache) PutAsset(ctx context.Context, record AssetRecord) err
 	}
 	if err := validateAssetKey(record.Key); err != nil {
 		return err
+	}
+	if record.SourceURL != "" && containsUnsafeCacheSourceURL(record.SourceURL) {
+		return ErrUnsafeAssetSourceURL
 	}
 	if record.Path != "" && containsUnsafeCacheText(record.Path) {
 		return ErrUnsafeAssetPath
@@ -181,6 +187,9 @@ func (c *DiskAssetCache) GetAsset(ctx context.Context, key AssetKey) (AssetRecor
 	if metadata.Version != diskAssetMetadataVersion || metadata.Key != key {
 		return AssetRecord{}, false, nil
 	}
+	if metadata.SourceURL != "" && containsUnsafeCacheSourceURL(metadata.SourceURL) {
+		return AssetRecord{}, false, nil
+	}
 
 	record := AssetRecord{
 		Key:         key,
@@ -217,6 +226,9 @@ func (c *DiskAssetCache) PutAsset(ctx context.Context, record AssetRecord) error
 	}
 	if c == nil {
 		return nil
+	}
+	if record.SourceURL != "" && containsUnsafeCacheSourceURL(record.SourceURL) {
+		return ErrUnsafeAssetSourceURL
 	}
 	if record.Path != "" && containsUnsafeCacheText(record.Path) {
 		return ErrUnsafeAssetPath
@@ -588,16 +600,60 @@ func containsUnsafeCacheText(value string) bool {
 	if strings.Contains(lower, "://") {
 		return true
 	}
+	return containsCredentialCacheMarker(lower)
+}
+
+func containsUnsafeCacheSourceURL(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	if containsCredentialCacheMarker(strings.ToLower(value)) {
+		return true
+	}
+	if unescaped, err := url.QueryUnescape(value); err == nil && containsCredentialCacheMarker(strings.ToLower(unescaped)) {
+		return true
+	}
+	if unescaped, err := url.PathUnescape(value); err == nil && containsCredentialCacheMarker(strings.ToLower(unescaped)) {
+		return true
+	}
+
+	parsed, err := url.Parse(value)
+	if err != nil || !parsed.IsAbs() || parsed.Host == "" || parsed.User != nil {
+		return true
+	}
+	scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
+	return scheme != "http" && scheme != "https"
+}
+
+func containsCredentialCacheMarker(lower string) bool {
 	markers := []string{
 		"oauth:",
 		"oauth_token=",
 		"access_token=",
 		"refresh_token=",
+		"token=",
+		"_token=",
+		"-token=",
 		"client_secret=",
 		"client-secret=",
+		"secret=",
+		"_secret=",
+		"-secret=",
 		"authorization=",
 		"authorization: bearer",
+		"auth=",
 		"bearer ",
+		"cookie=",
+		"set-cookie=",
+		"password=",
+		"passwd=",
+		"session=",
+		"api_key=",
+		"apikey=",
+		"device_code=",
+		"authorization_code=",
+		"code_verifier=",
 	}
 	for _, marker := range markers {
 		if strings.Contains(lower, marker) {

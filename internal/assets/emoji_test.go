@@ -174,15 +174,15 @@ func TestEmojiMetadataProviderUsesCacheHitWithoutTemplateValidation(t *testing.T
 }
 
 func TestEmojiMetadataProviderIgnoresUnsafeCachedSourceURL(t *testing.T) {
-	cache := storage.NewMemoryAssetCache()
 	key := storage.AssetKey{Kind: KindEmoji, ID: "1f600"}
-	if err := cache.PutAsset(context.Background(), storage.AssetRecord{
-		Key:       key,
-		SourceURL: "https://emoji.example/1f600.png?access_token=secret",
-		MediaType: "image/png",
-		ExpiresAt: time.Now().Add(time.Hour),
-	}); err != nil {
-		t.Fatalf("PutAsset returned error: %v", err)
+	cache := &unsafeSourceURLCache{
+		key: key,
+		record: storage.AssetRecord{
+			Key:       key,
+			SourceURL: "https://emoji.example/1f600.png?access_token=secret",
+			MediaType: "image/png",
+			ExpiresAt: time.Now().Add(time.Hour),
+		},
 	}
 	provider := NewEmojiMetadataProvider(EmojiProviderConfig{
 		Provider:    "custom",
@@ -196,6 +196,9 @@ func TestEmojiMetadataProviderIgnoresUnsafeCachedSourceURL(t *testing.T) {
 	}
 	if got, want := metadata.URL, "https://emoji.example/public/1f600.png"; got != want {
 		t.Fatalf("metadata URL = %q, want safe provider URL %q", got, want)
+	}
+	if cache.put.SourceURL != metadata.URL {
+		t.Fatalf("cached replacement SourceURL = %q, want %q", cache.put.SourceURL, metadata.URL)
 	}
 }
 
@@ -280,4 +283,30 @@ func TestEmojiMetadataProviderDiskCachePathsStayCredentialSafe(t *testing.T) {
 			}
 		}
 	}
+}
+
+type unsafeSourceURLCache struct {
+	key    storage.AssetKey
+	record storage.AssetRecord
+	put    storage.AssetRecord
+}
+
+func (c *unsafeSourceURLCache) GetAsset(ctx context.Context, key storage.AssetKey) (storage.AssetRecord, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return storage.AssetRecord{}, false, err
+	}
+	if c == nil || key != c.key {
+		return storage.AssetRecord{}, false, nil
+	}
+	return c.record, true, nil
+}
+
+func (c *unsafeSourceURLCache) PutAsset(ctx context.Context, record storage.AssetRecord) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if c != nil {
+		c.put = record
+	}
+	return nil
 }

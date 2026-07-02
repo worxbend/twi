@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -67,6 +68,14 @@ func TestMemoryAssetCacheRejectsCredentialBearingKeysAndPaths(t *testing.T) {
 	})
 	if !errors.Is(err, ErrUnsafeAssetPath) {
 		t.Fatalf("PutAsset unsafe path error = %v, want ErrUnsafeAssetPath", err)
+	}
+
+	err = cache.PutAsset(context.Background(), AssetRecord{
+		Key:       AssetKey{Kind: "emoji", ID: "1f600"},
+		SourceURL: "https://cdn.example/emoji.png?access_token=secret",
+	})
+	if !errors.Is(err, ErrUnsafeAssetSourceURL) {
+		t.Fatalf("PutAsset unsafe source URL error = %v, want ErrUnsafeAssetSourceURL", err)
 	}
 }
 
@@ -151,6 +160,38 @@ func TestDiskAssetCacheTreatsCorruptMetadataAsMiss(t *testing.T) {
 	}
 	if ok {
 		t.Fatal("GetAsset ok = true, want false for corrupt metadata")
+	}
+}
+
+func TestDiskAssetCacheTreatsUnsafeSourceURLMetadataAsMiss(t *testing.T) {
+	cache := NewDiskAssetCache(t.TempDir())
+	key := AssetKey{Kind: "avatar", ID: "user-1"}
+	paths, err := cache.paths(key)
+	if err != nil {
+		t.Fatalf("paths returned error: %v", err)
+	}
+	if err := os.MkdirAll(paths.dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	metadata := diskAssetMetadata{
+		Version:   diskAssetMetadataVersion,
+		Key:       key,
+		SourceURL: "https://cdn.example/avatar.png?access_token=secret",
+	}
+	data, err := json.Marshal(metadata)
+	if err != nil {
+		t.Fatalf("json.Marshal returned error: %v", err)
+	}
+	if err := os.WriteFile(paths.metadata, data, 0o600); err != nil {
+		t.Fatalf("WriteFile unsafe metadata returned error: %v", err)
+	}
+
+	_, ok, err := cache.GetAsset(context.Background(), key)
+	if err != nil {
+		t.Fatalf("GetAsset returned error: %v", err)
+	}
+	if ok {
+		t.Fatal("GetAsset ok = true, want miss for unsafe source URL")
 	}
 }
 
@@ -539,6 +580,13 @@ func TestDiskAssetCacheRejectsCredentialBearingKeysAndPaths(t *testing.T) {
 	})
 	if !errors.Is(err, ErrUnsafeAssetPath) {
 		t.Fatalf("PutAsset unsafe path error = %v, want ErrUnsafeAssetPath", err)
+	}
+	err = cache.PutAsset(context.Background(), AssetRecord{
+		Key:       AssetKey{Kind: "avatar", ID: "user-1"},
+		SourceURL: "https://cdn.example/avatar.png?client_secret=secret",
+	})
+	if !errors.Is(err, ErrUnsafeAssetSourceURL) {
+		t.Fatalf("PutAsset unsafe source URL error = %v, want ErrUnsafeAssetSourceURL", err)
 	}
 	if cacheBytes := readCacheFixtureBytes(t, root); cacheBytes != "" {
 		t.Fatalf("cache wrote files for rejected records: %q", cacheBytes)

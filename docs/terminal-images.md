@@ -8,13 +8,14 @@
 - Renderer asset fallback fragments can reserve stable cell widths before images are available.
 - Chat row generation can attach prepared renderer cells by stable URL-free asset key. Unsupported terminals, image-off mode, missing assets, and render failures keep the same fallback rows and reserved widths.
 - `internal/render.PNGImagePreparer` decodes bounded downloaded PNG, JPEG, and first-frame GIF assets, crops/scales them to the requested terminal cell rectangle, and writes renderer-ready PNG files without exposing source URLs, source paths, or token-like values in errors.
+- `internal/assets.PublicImageDownloader` fetches only validated public HTTP(S) PNG, JPEG, and GIF sources, validates redirects and public hosts, enforces response-size limits, and writes URL-free local files without sending auth or cookie headers.
 - Visible-row asset events remember permanent preparation/render failures by URL-free asset identity, downloaded record identity, and requested cell size so unchanged corrupt, oversized, unsafe, or unsupported assets keep stable fallbacks without repeated decode/render work.
 - `internal/storage.AssetCache` provides context-aware cache methods. The in-memory implementation is intended for deterministic tests, and `internal/storage.DiskAssetCache` persists metadata plus cache-owned bytes under the platform cache directory using deterministic hashed paths.
 - `twi doctor` reports image-related readiness through terminal color hints, Kitty/Ghostty environment signals, cache writability, selected image/avatar/emoji/emote modes, and the resolved image capability state.
 - `internal/render.KittyRenderer` can produce fixed-cell Kitty graphics output for prepared cached PNG assets in supported terminals.
 - Image loading and rendering must be capability-driven and non-blocking.
 - The chat UI must remain usable when image rendering is disabled, unsupported, still loading, or failed.
-- Known limitation: default live startup does not yet install a concrete asset resolver/downloader/preparer/renderer stack, and Kitty/Ghostty inline drawing still needs manual terminal validation in a compatible terminal.
+- Known limitation: default live startup does not yet install the concrete asset resolver/downloader/preparer/renderer stack, and Kitty/Ghostty inline drawing still needs manual terminal validation in a compatible terminal.
 
 ## Support Tiers
 
@@ -36,11 +37,11 @@ Tier 3:
 
 ## Image Feature Status
 
-Overall status: partial. The renderer, cache boundary, bounded image
-decode/cell preparation, fixed-width prepared cell substitution, capability
-decisions, and visible-row asset event path are implemented. Default live
-resolver/downloader/preparer/renderer wiring and manual Kitty/Ghostty validation are
-still planned.
+Overall status: partial. The renderer, cache boundary, public image downloader,
+bounded image decode/cell preparation, fixed-width prepared cell substitution,
+capability decisions, and visible-row asset event path are implemented. Default
+live resolver/downloader/preparer/renderer wiring and manual Kitty/Ghostty
+validation are still planned.
 
 Avatars:
 
@@ -153,6 +154,7 @@ Cache behavior should:
 - Avoid refetching avatars for every message from the same user.
 - Batch Twitch user lookups to avoid API limits.
 - Derive on-disk paths from hashed cache keys instead of original IDs, source URLs, or credential-bearing request data.
+- Reject local/private image source URLs, credential-bearing URL values, auth headers, cookie headers, and unsafe cache paths before writing downloaded bytes.
 - Never store OAuth tokens, client secrets, or credential-bearing URLs.
 
 ## Troubleshooting Targets
