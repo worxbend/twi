@@ -1,12 +1,21 @@
 # Initial Agent Backlog
 
-Status: First focused agent-loop tasks derived from `PLAN.md`.
+Status: Historical backlog plus current post-MVP planning notes. Current task
+status is tracked in `.agent-loop/tasks.json`.
 
 Progress as of the initial swarm pass:
 
 - Done: Phase 0 requirements matrix, risk register, backlog, and six ADRs.
 - Done: Go module bootstrap, CLI shell, config precedence/redaction tests, normalized message model skeleton, Bubble Tea mock chat shell, module tool directives for `govulncheck`/`staticcheck`, the one-channel Twitch IRC read adapter, the active-channel composer send queue, selected-message replies, and `/me` action sends.
-- Remaining near-term work: MVP documentation alignment, final validation, richer live-chat credential validation, and real asset/image rendering.
+- Current status labels: mock chat is ready; one-channel live IRC read/send and
+  diagnostics are partial; `twi login`, multi-channel live chat, and inline
+  terminal images are planned.
+- Credential rule: Twitch username/token values currently come from
+  environment variables or the flat config file; CLI overrides cover channel
+  and config path.
+- Remaining near-term work: current documentation alignment, richer live-chat
+  credential validation, high-throughput hardening, and real asset/image
+  rendering.
 
 Each task is intended to fit one implementation loop. Agents should keep write scope to
 the listed files where possible and use fakes before network-dependent code.

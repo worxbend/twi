@@ -1,18 +1,20 @@
 # Configuration
 
-This document describes the configuration model for `twi`. The implemented parser is intentionally small and should be expanded deliberately as new commands become real.
+This document describes the configuration model for `twi`. The implemented parser is intentionally small and should be expanded deliberately as planned commands become real.
 
 ## Current State
 
 - Config loading exists for flat `key = value` files, environment variables, and selected CLI overrides.
 - `twi config show` and `twi config path` exist in the CLI.
-- `twi chat --channel <channel>` uses Twitch username and token values from either canonical `TWI_*` variables or dotenv-friendly `TWITCH_*` aliases for the current one-channel Twitch IRC read path.
+- Mock chat is ready and does not require credentials or network access.
+- One-channel live IRC read/send is partially shipped: `twi chat --channel <channel>` can read, send, reply, and send `/me` actions when username/token credentials are configured.
 - Twitch credentials are currently read from environment variables or the flat config file. CLI flags currently override `--config` and `--channel`, not username or OAuth token values.
 - Config output redacts OAuth tokens and client secrets.
-- `twi doctor` reports the effective config file path, credential presence,
+- `twi doctor` diagnostics are partially shipped and report the effective config file path, credential presence,
   selected feature modes, Twitch IRC reachability, terminal hints, Kitty graphics
   signals, and cache directory writability without printing token or client
   secret values.
+- `twi login`, multi-channel live chat, and inline terminal images are planned.
 - Nested TOML tables are not implemented yet; keep config files flat.
 
 ## Precedence
@@ -112,8 +114,8 @@ This example matches the current flat parser. A richer TOML schema can be added 
 
 ```toml
 twitch_username = "my_login"
-twitch_oauth_token = "REDACTED"
-twitch_refresh_token = "REDACTED"
+twitch_oauth_token = "PLACEHOLDER_TWITCH_OAUTH_TOKEN"
+twitch_refresh_token = "PLACEHOLDER_TWITCH_REFRESH_TOKEN"
 twitch_client_id = ""
 twitch_client_secret = ""
 default_channels = "somechannel"
@@ -139,7 +141,7 @@ twi config path
 twi doctor
 ```
 
-`twi login` and multi-channel UI behavior are still planned. One-channel Twitch IRC chat is current when username, OAuth token, and channel are configured. Future flags for auth and mode settings should follow the precedence rules above.
+`twi login`, multi-channel UI behavior, and inline terminal images are still planned. One-channel Twitch IRC chat is current when username, OAuth token, and channel are configured. Future flags for auth and mode settings should follow the precedence rules above.
 
 ## Redacted Config Output
 

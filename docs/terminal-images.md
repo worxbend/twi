@@ -1,12 +1,13 @@
 # Terminal Images
 
-`twi` is planned to support inline images for avatars, Twitch emotes, and standard emoji in capable terminals. The current MVP implements stable text, Unicode, initials, compact badge, and emote-token fallbacks before inline image loading/rendering is added.
+`twi` is planned to support inline images for avatars, Twitch emotes, and standard emoji in capable terminals. Inline terminal images are not implemented yet. The current MVP implements ready text, Unicode, initials, compact badge, and emote-token fallbacks before inline image loading/rendering is added.
 
 ## Current State
 
 - Text, Unicode, initials, and compact badge fallbacks are implemented for chat rows.
 - Renderer asset fallback fragments can reserve stable cell widths before images are available.
 - `internal/storage.AssetCache` provides context-aware cache methods; the in-memory implementation is intended for deterministic tests and performs no network access.
+- `twi doctor` partially reports image-related readiness through terminal color hints, Kitty/Ghostty environment signals, cache writability, and selected image/avatar/emoji/emote modes.
 - Kitty-compatible image rendering is the first planned image protocol target.
 - Image loading and rendering must be capability-driven and non-blocking.
 - The chat UI must remain usable when image rendering is disabled, unsupported, still loading, or failed.
@@ -77,24 +78,26 @@ future asset and terminal-renderer work.
 
 ## Configuration
 
-Planned controls:
+Implemented controls for fallback rendering and diagnostics:
 
 ```sh
 TWI_ENABLE_KITTY_IMAGES=true
-TWI_IMAGE_MODE=normal
+TWI_IMAGE_MODE=auto
 TWI_AVATAR_MODE=initials
 TWI_EMOJI_MODE=unicode
 TWI_EMOTE_MODE=text
 ```
 
-Planned modes:
+Recognized mode strings:
 
-- Image: `off`, `small`, `normal`, `large`
+- Image: `auto`, `off`, `small`, `normal`, `large`
 - Avatar: `off`, `initials`, `image`
 - Emoji: `unicode`, `image`
 - Emote: `text`, `image`
 
-The MVP currently uses fallbacks only. Image modes should become effective when the asset pipeline and terminal renderer are implemented.
+The MVP currently uses fallbacks only. Mode strings are loaded and reported by
+diagnostics, but image-backed modes should become visually effective only when
+the asset pipeline and terminal renderer are implemented.
 
 ## Rendering Rules
 

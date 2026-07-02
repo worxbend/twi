@@ -16,6 +16,8 @@ The image uses a multi-stage build:
 
 ## Run Mock Chat
 
+Mock chat is ready today and does not need Twitch credentials or network access.
+
 ```sh
 docker run --rm -it twi:local chat --mock --channel demo
 ```
@@ -28,11 +30,20 @@ docker compose run --rm mock
 
 ## Run Live Chat
 
+Live chat is partially shipped for one Twitch IRC channel. It can read, send,
+reply, and send `/me` actions when username/token credentials are configured,
+but login/setup, multi-channel routing, and Helix-backed token validation are
+still planned.
+
+Username/token credentials currently come from environment variables or the
+flat config file. Docker examples pass them through environment variables; CLI
+flags currently override channel and config path only.
+
 Set credentials in your shell:
 
 ```sh
 export TWITCH_USERNAME="your_twitch_login"
-export TWITCH_ACCESS_TOKEN="keep-this-secret"
+export TWITCH_ACCESS_TOKEN="<your-twitch-access-token>"
 export TWITCH_CHANNEL="somechannel"
 ```
 
@@ -63,7 +74,12 @@ docker run --rm twi:local doctor
 docker compose run --rm doctor
 ```
 
-`doctor` is safe to share only after you personally review the output. It redacts OAuth tokens and client secrets, but local paths and terminal details may still be private.
+`doctor` diagnostics are partially shipped: they report credential presence,
+required-scope hints, Twitch IRC reachability, terminal hints, Kitty/Ghostty
+signals, cache writability, and feature modes. Token identity, ownership,
+expiry, and exact scope validation are planned. `doctor` is safe to share only
+after you personally review the output. It redacts OAuth tokens and client
+secrets, but local paths and terminal details may still be private.
 
 ## Use A Mounted Config File
 

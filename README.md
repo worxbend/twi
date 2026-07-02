@@ -13,7 +13,7 @@
 
 `twi` is a terminal Twitch chat client with taste. It is keyboard-first, fast to launch, friendly to low-drama terminals, and allergic to leaking your OAuth token.
 
-The project is currently an MVP-shaped Go app: mock chat works without the network, one-channel live Twitch IRC read/send works with credentials, diagnostics are built in, and rich terminal image support is still planned.
+The project is currently an MVP-shaped Go app: mock chat is ready without the network, one-channel live Twitch IRC read/send is partially shipped for one configured channel, diagnostics are partially shipped, and login, multi-channel UX, and inline terminal images are still planned.
 
 ```text
         +---------------------------------------------+
@@ -56,11 +56,11 @@ docker run --rm twi:local doctor
 
 ## Live Twitch Chat
 
-Live mode needs a Twitch login, an IRC OAuth token, and one channel. The token needs `chat:read`; sending from the composer also needs `chat:edit`.
+Live mode needs a Twitch login, an IRC OAuth token, and one channel. The token needs `chat:read`; sending from the composer also needs `chat:edit`. Username/token credentials currently come from environment variables or the flat config file. CLI flags currently override the channel and config path, not username or token values.
 
 ```sh
 export TWI_TWITCH_USERNAME="your_twitch_login"
-export TWI_TWITCH_OAUTH_TOKEN="oauth:keep-this-secret"
+export TWI_TWITCH_OAUTH_TOKEN="<your-twitch-oauth-token>"
 
 go run ./cmd/twi chat --channel somechannel
 ```
@@ -69,10 +69,10 @@ The shorter dotenv-style aliases also work:
 
 ```sh
 export TWITCH_USERNAME="your_twitch_login"
-export TWITCH_ACCESS_TOKEN="keep-this-secret"
+export TWITCH_ACCESS_TOKEN="<your-twitch-access-token>"
 export TWITCH_CLIENT_ID="your_client_id"
-export TWITCH_CLIENT_SECRET="keep-this-secret"
-export TWITCH_REFRESH_TOKEN="keep-this-secret"
+export TWITCH_CLIENT_SECRET="<your-twitch-client-secret>"
+export TWITCH_REFRESH_TOKEN="<your-twitch-refresh-token>"
 ```
 
 If Twitch IRC rejects the access token during login, `twi` will try one in-memory OAuth refresh and reconnect when `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, and `TWITCH_REFRESH_TOKEN` are also configured. It does not write the refreshed token back to disk yet.
@@ -90,16 +90,15 @@ Do not paste real tokens into commits, screenshots, issue comments, terminal rec
 
 ## What Works Today
 
-| Command | Status | Use it for |
+| Area | Status | Current behavior |
 | --- | --- | --- |
-| `twi chat --mock [--channel demo]` | Ready | Try the TUI without Twitch credentials. |
-| `twi chat --channel <channel>` | Ready | Join one Twitch channel over IRC. |
-| `twi config show` | Ready | Print effective config with secrets redacted. |
-| `twi config path` | Ready | Show the default config file path. |
-| `twi doctor` | Ready | Diagnose config, credentials, terminal hints, cache access, and Twitch reachability. |
-| `twi login` | Planned | Future interactive OAuth/setup flow. |
-| Multi-channel live chat | Planned | Current live mode intentionally supports one channel. |
-| Inline terminal images | Planned | Current renderer uses stable text and initials fallbacks. |
+| Mock chat | Ready | `twi chat --mock [--channel demo]` runs without Twitch credentials or network access. |
+| One-channel live IRC read/send | Partial | `twi chat --channel <channel>` can read, send, reply, and send `/me` actions for one channel when env/config credentials are present; token identity/scope validation and broader live manual evidence remain future work. |
+| Config commands | Ready | `twi config show` prints effective flat config with secrets redacted; `twi config path` shows the default config path. |
+| Diagnostics | Partial | `twi doctor` checks config path, credential presence, unverified scope hints, Twitch IRC reachability, terminal hints, Kitty/Ghostty signals, cache writability, and feature modes; Helix-backed identity/expiry/scope validation is planned. |
+| Login/setup | Planned | `twi login` is advertised but exits as planned/not implemented. |
+| Multi-channel live chat | Planned | Current live mode intentionally accepts only one channel. |
+| Inline terminal images | Planned | Current rendering uses stable text, initials, Unicode, badge, and emote-token fallbacks only. |
 
 ## Controls
 
@@ -135,8 +134,8 @@ Example:
 
 ```toml
 twitch_username = "your_twitch_login"
-twitch_oauth_token = "REDACTED"
-twitch_refresh_token = "REDACTED"
+twitch_oauth_token = "PLACEHOLDER_TWITCH_OAUTH_TOKEN"
+twitch_refresh_token = "PLACEHOLDER_TWITCH_REFRESH_TOKEN"
 default_channels = "somechannel"
 enable_kitty_images = true
 image_mode = "auto"

@@ -1,6 +1,12 @@
 # Risk Register
 
-Status: Initial Phase 0 register from `PLAN.md`.
+Status: Risk register aligned with the current MVP. Mock chat is ready;
+one-channel live IRC read/send and diagnostics are partial; login,
+multi-channel live chat, and inline terminal images remain planned.
+
+Credential assumption: Twitch username/token values currently come from
+environment variables or the flat config file. CLI overrides cover channel and
+config path, not username or token values.
 
 Likelihood and impact use `Low`, `Medium`, or `High`.
 

@@ -19,7 +19,7 @@ docker run --rm twi:local --help
 
 ## 2. Run Mock Chat First
 
-Mock mode is the friendly sandbox. No Twitch account, no token, no network drama.
+Mock mode is ready today and is the friendly sandbox. No Twitch account, no token, no network access.
 
 ```sh
 go run ./cmd/twi chat --mock --channel demo
@@ -51,18 +51,22 @@ docker compose run --rm mock
 
 ## 4. Configure Live Twitch Chat
 
-Live mode currently supports one Twitch channel. You need:
+Live mode is partially shipped: it currently supports one Twitch channel over IRC with read, send, selected-message replies, and `/me` actions. Token identity/scope validation, multi-channel routing, and login/setup are still planned.
+
+You need:
 
 - Your Twitch login name.
 - An IRC OAuth token.
 - `chat:read` scope to read chat.
 - `chat:edit` scope to send chat.
 
+Username/token credentials currently come from environment variables or the flat config file. CLI flags currently override the channel and config path, not username or token values.
+
 Environment variable setup:
 
 ```sh
 export TWITCH_USERNAME="your_twitch_login"
-export TWITCH_ACCESS_TOKEN="keep-this-secret"
+export TWITCH_ACCESS_TOKEN="<your-twitch-access-token>"
 export TWI_DEFAULT_CHANNELS="somechannel"
 ```
 
@@ -97,8 +101,8 @@ Create that file with flat `key = value` lines:
 
 ```toml
 twitch_username = "your_twitch_login"
-twitch_oauth_token = "REDACTED"
-twitch_refresh_token = "REDACTED"
+twitch_oauth_token = "PLACEHOLDER_TWITCH_OAUTH_TOKEN"
+twitch_refresh_token = "PLACEHOLDER_TWITCH_REFRESH_TOKEN"
 default_channels = "somechannel"
 enable_kitty_images = true
 image_mode = "auto"
@@ -125,6 +129,8 @@ docker run --rm twi:local doctor
 ```
 
 `doctor` reports config, credential presence, terminal hints, image fallback state, cache writability, and Twitch IRC reachability. It does not print raw OAuth tokens or client secrets.
+
+Diagnostics are partially shipped: `doctor` reports credential presence and required-scope hints, but Helix-backed token identity, expiry, ownership, and scope validation are planned.
 
 ## 7. Use The Dotfile Shape
 

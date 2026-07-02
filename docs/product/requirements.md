@@ -1,9 +1,20 @@
 # Product Requirements Matrix
 
-Status: Phase 0 planning artifact.
+Status: Product source of truth with current MVP status labels.
 
 Source: `PLAN.md`. Current stable Go was verified externally as `go1.26.4` on
-2026-07-01; local `go version` is `go1.26.0`.
+2026-07-01; recent agent-loop validation also used `go1.26.4 linux/amd64`.
+
+## Current Behavior Status
+
+| Area | Status | Notes |
+| --- | --- | --- |
+| Mock chat | Ready | Runs without Twitch credentials or network access. |
+| One-channel live IRC read/send | Partial | Reads, sends, replies, and sends `/me` actions for one configured channel with env/config credentials. Token identity/scope validation and broader manual Twitch evidence remain future work. |
+| Diagnostics | Partial | `twi doctor` reports config path, credential presence, unverified scope hints, Twitch IRC reachability, terminal hints, Kitty/Ghostty signals, cache writability, and feature modes. Helix-backed token validation is planned. |
+| Login/setup | Planned | `twi login` is not implemented. |
+| Multi-channel live chat | Planned | Current live mode intentionally supports one channel. |
+| Inline terminal images | Planned | Current renderer uses text, initials, Unicode, badge, and emote-token fallbacks only. |
 
 ## MVP Scope
 

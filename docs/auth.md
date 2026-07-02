@@ -5,8 +5,10 @@ This document describes the authentication model for `twi`. It covers the curren
 ## Current State
 
 - `twi login` is planned, not implemented.
+- Mock chat is ready and needs no Twitch credentials.
 - The MVP accepts Twitch credentials from environment variables or a local flat config file. CLI flags currently override the config path and channels, not username or token values.
-- The first real Twitch transport uses Twitch IRC.
+- One-channel live IRC read/send is partially shipped for configured credentials, including composer sends, selected-message replies, and `/me` actions.
+- `twi doctor` diagnostics are partially shipped; token identity, ownership, expiry, and exact scope validation are planned.
 - Later milestones may add interactive OAuth and richer EventSub/API chat support.
 
 ## MVP Credential Model
@@ -33,11 +35,11 @@ The interactive setup wizard is future work.
 Suggested environment variables:
 
 ```sh
-TWITCH_USERNAME=<your Twitch login>
-TWITCH_ACCESS_TOKEN=<your OAuth token>
-TWITCH_REFRESH_TOKEN=<your refresh token, future use>
-TWITCH_CLIENT_ID=<client id when Helix/API features need it>
-TWITCH_CLIENT_SECRET=<client secret only if a future flow needs it>
+TWITCH_USERNAME="your_twitch_login"
+TWITCH_ACCESS_TOKEN="<your-twitch-oauth-token>"
+TWITCH_REFRESH_TOKEN="<your-twitch-refresh-token>"
+TWITCH_CLIENT_ID="your_twitch_client_id"
+TWITCH_CLIENT_SECRET="<your-twitch-client-secret>"
 ```
 
 The canonical `TWI_TWITCH_USERNAME`, `TWI_TWITCH_OAUTH_TOKEN`, `TWI_TWITCH_REFRESH_TOKEN`, `TWI_TWITCH_CLIENT_ID`, and `TWI_TWITCH_CLIENT_SECRET` names still work and take priority when both forms are set. `TWITCH_ACCESS_TOKEN` may be either a plain token or an `oauth:`-prefixed IRC token.
