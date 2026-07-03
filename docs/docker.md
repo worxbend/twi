@@ -34,17 +34,18 @@ Live chat is partially shipped for configured Twitch IRC channels. It can read, 
 reply, and send `/me` actions when username/token credentials are configured.
 The keyboard-first channel sidebar, command palette, selected-message inspect
 panel, and optional mouse controls are current app behavior. `twi setup` writes
-non-secret config values and can hand off to login. `twi login` is an OAuth
-browser/callback flow that saves returned tokens through the restrictive
-credential-file fallback without printing them; refresh-token persistence after
-IRC reconnect and manual Kitty/Ghostty image validation are still planned. Live
+non-secret config values and can hand off to login. In the Linux container,
+`twi login` is an OAuth browser/callback flow that saves returned tokens
+through the restrictive credential-file fallback without printing them;
+refresh-token persistence after IRC reconnect and manual Kitty/Ghostty image validation are still planned. Live
 image asset wiring is current when config, credentials, cache, and terminal
 checks allow it.
 
 Username/token credentials currently come from environment variables, the flat
-config file, or the private credential file. Docker examples pass them through
-environment variables; CLI flags currently override channel and config path
-only. Environment and flat config values take precedence over saved credentials.
+config file, or on supported Unix builds the private credential file. Docker
+examples pass them through environment variables; CLI flags currently override
+channel and config path only. Environment and flat config values take
+precedence over saved credentials.
 
 Set credentials in your shell:
 
@@ -129,8 +130,8 @@ docker run --rm \
 
 The setup command does not write OAuth tokens, refresh tokens, callback codes,
 OAuth state, authorization URLs, or client secrets. Use environment variables,
-the flat config file, or the private credential file created by `twi login` for
-credentials. The container runs as UID/GID `10001`, so bind-mounted config
+the flat config file, or the private credential file created by `twi login` in
+the Linux container for credentials. The container runs as UID/GID `10001`, so bind-mounted config
 directories must be writable by that account.
 
 ## Deploy Notes

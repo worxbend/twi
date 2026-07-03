@@ -4,15 +4,16 @@ This document describes the authentication model for `twi`. It covers the curren
 
 ## Current State
 
-- `twi login` starts a Twitch authorization-code login through the browser/local-callback flow, validates the returned token, saves it through the private credential store, and reports identity/scope/storage status without printing token values.
+- On supported Unix builds, `twi login` starts a Twitch authorization-code login through the browser/local-callback flow, validates the returned token, saves it through the private credential store, and reports identity/scope/storage status without printing token values. On non-Unix builds, the credential-file fallback is disabled before the browser opens, and users should use environment variables or a private flat config file.
 - Mock chat is ready and needs no Twitch credentials.
-- The MVP accepts Twitch credentials from environment variables, a local flat config file, or the private credential file. CLI flags currently override the config path and channels, not username or token values.
+- The MVP accepts Twitch credentials from environment variables, a local flat config file, or on supported Unix builds the private credential file. CLI flags currently override the config path and channels, not username or token values.
 - Multi-channel live IRC read/send is partially shipped for configured credentials, including composer sends, selected-message replies, and `/me` actions.
 - Multi-channel UX is partially shipped: the keyboard-first sidebar, command palette, optional mouse controls, and selected-message inspect panel are current behavior.
 - `twi doctor` diagnostics are partially shipped; Twitch OAuth validation is wired into doctor and reports identity, expiry, required IRC scopes, username mismatch, and refresh availability without printing credential values.
-- The internal credential storage boundary and restrictive file fallback are
-  wired into `twi login`, `twi chat`, `twi config show`, and `twi doctor`.
-  `twi setup` can update non-secret config values and hand off to login.
+- The internal credential storage boundary and Unix-only restrictive file
+  fallback are wired into `twi login`, `twi chat`, `twi config show`, and
+  `twi doctor`. `twi setup` can update non-secret config values and hand off
+  to login.
   Richer EventSub/API chat support remains later work.
 
 ## MVP Credential Model
@@ -32,7 +33,7 @@ The implemented config sources are, from highest to lowest priority:
 1. CLI flags for `--config` and `--channel`.
 2. Environment variables.
 3. Config file.
-4. Saved credential file values for empty credential fields.
+4. Saved credential file values for empty credential fields on supported Unix builds.
 5. Defaults.
 
 `twi setup` is the current guided path for non-secret local configuration. It
@@ -108,10 +109,13 @@ The command requests the MVP scopes by default:
 - `chat:read`
 - `chat:edit`
 
-The command saves successful login results through the restrictive credential
-file fallback. Environment variables and flat config values still take
-precedence when present, so remove duplicates from shell profiles, `.env`, or
-`config.toml` after confirming saved credentials work.
+On supported Unix builds, the command saves successful login results through
+the restrictive credential file fallback. On non-Unix builds, the command stops
+before opening the browser because the file fallback is disabled until
+platform-specific ACL and reparse-point/no-follow protections are implemented.
+Environment variables and flat config values still take precedence when
+present, so remove duplicates from shell profiles, `.env`, or `config.toml`
+after confirming saved credentials work.
 
 `twi setup --login` delegates to this login command after writing only
 non-secret config values. `twi setup --login-dry-run` delegates to the bounded
@@ -162,7 +166,7 @@ for login/setup work:
 - `CredentialRecord`, the storage-owned DTO for Twitch identity, client ID,
   access token, refresh token, token type, scopes, expiry, and update time.
 - `MemoryCredentialStore` and `FailingCredentialStore` fakes for unit tests.
-- `CredentialFileStore`, the restrictive local fallback implementation.
+- `CredentialFileStore`, the restrictive Unix-only local fallback implementation.
 - A versioned fallback JSON record format for Twitch credentials.
 
 `CredentialRecord` stores token values as `auth.Secret`, so ordinary formatting
@@ -175,31 +179,37 @@ No OS keychain backend is implemented today. The interface is shaped so one can
 be added later after dependency, platform, and support tradeoffs are explicit,
 but users should not expect keychain behavior from the current binary.
 
-The fallback is a separate local credential file under the platform config
-directory, for example:
+The credential-file fallback is supported only on Go `unix` builds today,
+including Linux and macOS. It is a separate local credential file under the
+platform config directory, for example:
 
 ```text
 $XDG_CONFIG_HOME/twi/credentials.json
 ~/.config/twi/credentials.json
 ```
 
-It is not the existing flat `config.toml` file. The fallback implementation:
+It is not the existing flat `config.toml` file. On supported Unix builds, the
+fallback implementation:
 
 - creates credential directories with `0700` permissions;
 - creates credential files with `0600` permissions;
 - writes through a temporary file and same-directory rename where practical;
 - rejects symlinks at the credential directory or file path;
+- opens existing credential files with a no-follow file open;
 - rejects existing credential files or directories whose permissions do
   not match those exact modes;
 - uses redacted errors when file data, token values, provider errors, or migration
   failures are reported.
 
-The strongest no-follow protection is currently implemented on Unix platforms
-with a standard-library `O_NOFOLLOW` open in addition to `Lstat` checks. Other
-platforms still reject stable symlinks/reparse-point paths before opening, but
-do not yet have equivalent platform-specific no-follow and ACL enforcement. No
-Windows credential-file security guarantee beyond this stable-path check should
-be assumed until a dedicated platform hardening task is completed.
+Windows and other non-Unix builds do not have this file fallback enabled. The
+current binary does not enforce Windows owner-only ACLs, DACL inheritance
+rules, or reparse-point/no-follow protections for credential files, and it does
+not pretend that Unix `0700`/`0600` mode semantics apply there. On those
+platforms, `twi chat`, `twi config show`, and `twi doctor` continue to work
+with environment variables and the flat config file; `twi doctor` reports the
+disabled file fallback as a warning. `twi login` reports a redacted actionable
+error before starting OAuth so tokens are not obtained without a supported
+persistence path.
 
 The fallback JSON format is versioned. Version 1 records only Twitch OAuth
 credential material and safe identity metadata:

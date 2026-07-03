@@ -42,7 +42,9 @@ Behavior:
   returned token with Twitch, and prints only identity/scope status. Access
   tokens, refresh tokens, callback codes, OAuth state, authorization URLs, and
   client secrets are not printed. Successful logins save tokens through the
-  private credential store. Environment variables and flat config credentials
+  private credential store on supported Unix builds; on non-Unix builds the
+  credential-file fallback is disabled, so use environment variables or a
+  private flat config file. Environment variables and flat config credentials
   still take precedence when present.
 
 Flags:
@@ -129,6 +131,16 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	store, err := newCredentialStore()
+	if err != nil {
+		printLoginError(stderr, "prepare credential storage", err, baseRedactor)
+		return 1
+	}
+	if store == nil {
+		printLoginError(stderr, "prepare credential storage", errors.New("credential store unavailable"), baseRedactor)
+		return 1
+	}
+
 	waiter, err := newLoginCallbackWaiter(request.RedirectURI)
 	if err != nil {
 		fmt.Fprintf(stderr, "login callback unavailable: %s\n", baseRedactor.Redact(err.Error()))
@@ -198,15 +210,6 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 		result.Tokens.RefreshToken,
 	)
 	record := storage.CredentialRecordFromLoginResult(result, request.ClientID, time.Now().UTC())
-	store, err := newCredentialStore()
-	if err != nil {
-		printLoginError(stderr, "prepare credential storage", err, resultRedactor)
-		return 1
-	}
-	if store == nil {
-		printLoginError(stderr, "prepare credential storage", errors.New("credential store unavailable"), resultRedactor)
-		return 1
-	}
 	if err := store.SaveCredentials(ctx, record); err != nil {
 		printLoginError(stderr, "save credentials", err, resultRedactor)
 		return 1
@@ -236,7 +239,7 @@ func validateLoginConfig(request auth.LoginRequest) error {
 		missing = append(missing, "--redirect-uri")
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("login requires %s; existing env/config token credentials still work for `twi chat`, and saved credential files are used when those sources are empty", strings.Join(missing, " and "))
+		return fmt.Errorf("login requires %s; existing env/config token credentials still work for `twi chat`, and saved credential files are used on supported Unix builds when those sources are empty", strings.Join(missing, " and "))
 	}
 	return nil
 }
@@ -255,8 +258,8 @@ func printLoginDryRun(stdout io.Writer, cfg config.Config, redirectURI string, t
 	fmt.Fprintf(stdout, "Client ID: %s\n", presentMissing(cfg.Twitch.ClientID))
 	fmt.Fprintf(stdout, "Client secret: %s\n", presentMissing(cfg.Twitch.ClientSecret))
 	fmt.Fprintln(stdout, "Real login opens a browser and waits for a localhost callback.")
-	fmt.Fprintln(stdout, "Tokens are validated, saved privately, and never printed.")
-	fmt.Fprintln(stdout, "For live chat, saved credentials are used when environment variables or flat config credentials are empty.")
+	fmt.Fprintln(stdout, "On supported Unix builds, tokens are validated, saved privately, and never printed.")
+	fmt.Fprintln(stdout, "For live chat, saved credentials are used on supported Unix builds when environment variables or flat config credentials are empty.")
 }
 
 func presentMissing(value string) string {

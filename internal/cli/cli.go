@@ -413,6 +413,9 @@ func applyStoredCredentials(ctx context.Context, cfg *config.Config) (credential
 	}
 	if err != nil {
 		status.Err = err
+		if errors.Is(err, storage.ErrUnsupportedCredentialFilePlatform) {
+			return status, nil
+		}
 		return status, err
 	}
 	if store == nil {
@@ -422,6 +425,9 @@ func applyStoredCredentials(ctx context.Context, cfg *config.Config) (credential
 	record, ok, err := store.LoadCredentials(ctx)
 	if err != nil {
 		status.Err = err
+		if errors.Is(err, storage.ErrUnsupportedCredentialFilePlatform) {
+			return status, nil
+		}
 		return status, err
 	}
 	status.Present = ok

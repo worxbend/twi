@@ -185,6 +185,28 @@ func TestCredentialFilePlanValidationRejectsUnsafeModesAndMigration(t *testing.T
 	}
 }
 
+func TestCredentialFileStoreRejectsUnsupportedPlatformPolicy(t *testing.T) {
+	plan, err := NewCredentialFilePlan(filepath.Join(t.TempDir(), "credentials.json?state=state-secret&code=callback-secret"))
+	if err != nil {
+		t.Fatalf("NewCredentialFilePlan returned error: %v", err)
+	}
+
+	_, err = newCredentialFileStoreForPlatform(plan, credentialFilePlatform{
+		Supported: false,
+		Reason:    "credential-file fallback is disabled on this platform because ACL no-follow support is unavailable",
+		Action:    "use environment variables or a private flat config file",
+	})
+	if !errors.Is(err, ErrUnsupportedCredentialFilePlatform) {
+		t.Fatalf("NewCredentialFileStore unsupported platform error = %v, want ErrUnsupportedCredentialFilePlatform", err)
+	}
+	for _, want := range []string{"credential-file fallback is disabled", "environment variables", "private flat config file"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("unsupported platform error missing %q: %v", want, err)
+		}
+	}
+	assertCredentialErrorDoesNotLeak(t, err, "state-secret", "callback-secret")
+}
+
 func TestCredentialFileStoreSaveLoadAndDeleteUseRestrictiveModes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "twi", "credentials.json")
 	store := newCredentialFileStoreForTest(t, path)
@@ -634,6 +656,9 @@ func newCredentialFileStoreForTest(t *testing.T, path string) *CredentialFileSto
 		t.Fatalf("NewCredentialFilePlan returned error: %v", err)
 	}
 	store, err := NewCredentialFileStore(plan)
+	if errors.Is(err, ErrUnsupportedCredentialFilePlatform) {
+		t.Skipf("credential-file fallback unsupported on this platform: %v", err)
+	}
 	if err != nil {
 		t.Fatalf("NewCredentialFileStore returned error: %v", err)
 	}

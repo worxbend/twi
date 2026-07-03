@@ -60,7 +60,7 @@ the primary path.
 
 ## 4. Configure Live Twitch Chat
 
-Live mode is partially shipped: it supports one or more Twitch channels over IRC with read, send, selected-message replies, `/me` actions, keyboard-first channel switching/sidebar state, command palette actions, optional mouse controls, and selected-message inspect diagnostics. `twi setup` can write non-secret config values and hand off to login. `twi login` can validate an OAuth browser/callback flow and save returned tokens through the restrictive credential-file fallback without printing them.
+Live mode is partially shipped: it supports one or more Twitch channels over IRC with read, send, selected-message replies, `/me` actions, keyboard-first channel switching/sidebar state, command palette actions, optional mouse controls, and selected-message inspect diagnostics. `twi setup` can write non-secret config values and hand off to login. On supported Unix builds, `twi login` can validate an OAuth browser/callback flow and save returned tokens through the restrictive credential-file fallback without printing them.
 
 You need:
 
@@ -69,7 +69,7 @@ You need:
 - `chat:read` scope to read chat.
 - `chat:edit` scope to send chat.
 
-Username/token credentials currently come from environment variables, the flat config file, or the private credential file. Environment and flat config values take precedence over saved credentials. CLI flags currently override channels and config path, not username or token values.
+Username/token credentials currently come from environment variables, the flat config file, or on supported Unix builds the private credential file. Environment and flat config values take precedence over saved credentials. CLI flags currently override channels and config path, not username or token values.
 
 Guided setup:
 
@@ -97,10 +97,14 @@ go run ./cmd/twi login --dry-run
 For the real OAuth flow, set `TWITCH_CLIENT_ID`/`TWITCH_CLIENT_SECRET` or the
 canonical `TWI_TWITCH_CLIENT_ID`/`TWI_TWITCH_CLIENT_SECRET` names and register
 `http://127.0.0.1:17643/oauth/twitch/callback` on the Twitch app. The command
-validates returned tokens, saves them privately, and never prints them. The
-credential file fallback uses a separate private `credentials.json` under a
-`0700` platform config directory with `0600` file permissions; no OS keychain
-backend is implemented yet.
+On supported Unix builds, the command validates returned tokens, saves them
+privately, and never prints them. The credential file fallback uses a separate
+private `credentials.json` under a `0700` platform config directory with `0600`
+file permissions, symlink rejection, and no-follow file opens. On Windows and
+other non-Unix builds, the file fallback is disabled because owner-only ACL and
+reparse-point/no-follow guarantees are not implemented; use environment
+variables or a private flat config file there. No OS keychain backend is
+implemented yet.
 
 Environment variable setup:
 

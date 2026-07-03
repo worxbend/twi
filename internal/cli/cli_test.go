@@ -546,6 +546,42 @@ func TestLoginCredentialSaveFailureIsRedacted(t *testing.T) {
 	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "client-secret", "state-secret", "callback-code", "oauth:access-secret", "access-secret", "refresh-secret", "https://auth.example")
 }
 
+func TestLoginUnsupportedCredentialFileFallbackFailsBeforeBrowser(t *testing.T) {
+	t.Setenv("TWI_TWITCH_CLIENT_ID", "client-id")
+	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
+
+	resetLoginTestHooks(t)
+	newCredentialStore = func() (storage.CredentialStore, error) {
+		return nil, fmt.Errorf("%w: credential-file fallback is disabled on non-Unix builds; use environment variables or a private flat config file; oauth:storage-secret state=state-secret client_secret=client-secret", storage.ErrUnsupportedCredentialFilePlatform)
+	}
+	flowStarted := false
+	newLoginFlow = func() auth.LoginFlow {
+		flowStarted = true
+		return auth.NewFakeLoginFlow()
+	}
+	browserOpened := false
+	openLoginBrowser = func(context.Context, string) error {
+		browserOpened = true
+		return nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"login", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("Run returned %d, want 1; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if flowStarted || browserOpened {
+		t.Fatalf("login started OAuth flow=%v browser=%v, want credential storage preflight to stop first", flowStarted, browserOpened)
+	}
+	for _, want := range []string{"prepare credential storage", "disabled on non-Unix builds", "environment variables", "private flat config file"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr missing %q: %q", want, stderr.String())
+		}
+	}
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "client-secret", "storage-secret", "state-secret")
+}
+
 func TestLoginCancellationIsClearAndRedacted(t *testing.T) {
 	t.Setenv("TWI_TWITCH_CLIENT_ID", "client-id")
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
@@ -825,6 +861,46 @@ func TestLiveChatConfiguredStartsClient(t *testing.T) {
 	}
 }
 
+func TestLiveChatEnvCredentialsIgnoreUnsupportedCredentialFileFallback(t *testing.T) {
+	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
+	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
+
+	oldNewCredentialStore := newCredentialStore
+	oldNewLiveChatClient := newLiveChatClient
+	oldRunLiveChat := runLiveChat
+	t.Cleanup(func() {
+		newCredentialStore = oldNewCredentialStore
+		newLiveChatClient = oldNewLiveChatClient
+		runLiveChat = oldRunLiveChat
+	})
+
+	newCredentialStore = func() (storage.CredentialStore, error) {
+		return nil, fmt.Errorf("%w: credential-file fallback is disabled on non-Unix builds; use env/config; oauth:stored-secret", storage.ErrUnsupportedCredentialFilePlatform)
+	}
+	fake := app.NewFakeChatClient(1)
+	newLiveChatClient = func(context.Context, config.Config) (app.ChatClient, error) {
+		return fake, nil
+	}
+	runLiveChat = func(stdout io.Writer, _ config.Config, client app.ChatClient, _ app.ClientOptions) error {
+		if client != fake {
+			t.Fatalf("runLiveChat client = %#v, want fake", client)
+		}
+		_, err := stdout.Write([]byte("live shell started\n"))
+		return err
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "live shell started") {
+		t.Fatalf("stdout missing live shell output: %q", stdout.String())
+	}
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "oauth:secret-token", "secret-token", "stored-secret")
+}
+
 func TestLiveChatConfiguredStartsClientWithMultipleChannels(t *testing.T) {
 	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
@@ -1013,6 +1089,49 @@ func TestConfigShowLoadsStoredCredentialsAndRedactsTokens(t *testing.T) {
 	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "stored-access-token", "stored-refresh-secret", "config-path-secret", "config-code-secret")
 }
 
+func TestConfigShowIgnoresUnsupportedCredentialFileFallback(t *testing.T) {
+	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
+	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
+
+	oldNewCredentialStore := newCredentialStore
+	t.Cleanup(func() {
+		newCredentialStore = oldNewCredentialStore
+	})
+
+	for _, tc := range []struct {
+		name string
+		hook func() (storage.CredentialStore, error)
+	}{
+		{
+			name: "constructor error",
+			hook: func() (storage.CredentialStore, error) {
+				return nil, fmt.Errorf("%w: credential-file fallback is disabled on non-Unix builds; oauth:stored-secret", storage.ErrUnsupportedCredentialFilePlatform)
+			},
+		},
+		{
+			name: "load error",
+			hook: func() (storage.CredentialStore, error) {
+				return storage.FailingCredentialStore{Err: fmt.Errorf("%w: credential-file fallback is disabled on non-Unix builds; oauth:stored-secret", storage.ErrUnsupportedCredentialFilePlatform)}, nil
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			newCredentialStore = tc.hook
+
+			var stdout, stderr bytes.Buffer
+			code := Run([]string{"config", "show", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+
+			if code != 0 {
+				t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+			}
+			if !strings.Contains(stdout.String(), `twitch_username = "viewer"`) || !strings.Contains(stdout.String(), `twitch_oauth_token = "[redacted]"`) {
+				t.Fatalf("config output missing env credentials:\n%s", stdout.String())
+			}
+			assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "secret-token", "stored-secret")
+		})
+	}
+}
+
 func TestDoctorDoesNotPrintSecrets(t *testing.T) {
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:access-token-private")
 	t.Setenv("TWI_TWITCH_REFRESH_TOKEN", "refresh-secret")
@@ -1054,6 +1173,34 @@ func TestDoctorDoesNotPrintSecrets(t *testing.T) {
 	for _, secret := range []string{"oauth:access-token-private", "access-token-private", "bearer-secret", "client-secret", "refresh-secret", "auth-code-secret"} {
 		if strings.Contains(stdout.String(), secret) {
 			t.Fatalf("doctor output leaked %q: %s", secret, stdout.String())
+		}
+	}
+}
+
+func TestDoctorWarnsWhenCredentialFileFallbackUnsupported(t *testing.T) {
+	oldNewCredentialStore := newCredentialStore
+	oldBuildDoctorReport := buildDoctorReport
+	t.Cleanup(func() {
+		newCredentialStore = oldNewCredentialStore
+		buildDoctorReport = oldBuildDoctorReport
+	})
+
+	newCredentialStore = func() (storage.CredentialStore, error) {
+		return nil, fmt.Errorf("%w: credential-file fallback is disabled on non-Unix builds; use environment variables or a private flat config file", storage.ErrUnsupportedCredentialFilePlatform)
+	}
+	buildDoctorReport = func(context.Context, config.Config, error) app.DoctorReport {
+		return app.DoctorReport{}
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"doctor", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	for _, want := range []string{"[warn] credential file:", "disabled on non-Unix builds", "environment variables", "private flat config file", "using env/config/defaults"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("doctor output missing %q: %s", want, stdout.String())
 		}
 	}
 }

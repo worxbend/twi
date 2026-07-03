@@ -26,7 +26,7 @@ animation mode.
 
 Setup does not ask for or write OAuth tokens, refresh tokens, callback codes,
 OAuth state, authorization URLs, or client secrets. Use the login handoff to
-save tokens through the private credential store.
+save tokens through the private credential store on supported Unix builds.
 
 Flags:
 `
@@ -158,7 +158,7 @@ func runSetup(args []string, stdout, stderr io.Writer) int {
 	}
 	displayPath := config.RedactDisplayValue(cfg.Path)
 	fmt.Fprintf(stdout, "Updated non-secret config: %s\n", displayPath)
-	fmt.Fprintln(stdout, "Credential values stay outside config setup. Use `twi login` to save tokens privately.")
+	fmt.Fprintln(stdout, "Credential values stay outside config setup. On supported Unix builds, use `twi login` to save tokens privately.")
 
 	switch action {
 	case setupCredentialLogin:

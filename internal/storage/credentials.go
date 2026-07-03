@@ -33,6 +33,9 @@ var (
 	// ErrInsecureCredentialPermissions reports a file or directory mode that is
 	// unsuitable for credential storage.
 	ErrInsecureCredentialPermissions = errors.New("insecure credential permissions")
+	// ErrUnsupportedCredentialFilePlatform reports that the restrictive local
+	// credential-file fallback is unavailable for the current platform.
+	ErrUnsupportedCredentialFilePlatform = errors.New("unsupported credential file platform")
 	// ErrUnsupportedCredentialFileFormat reports a credential record with an
 	// unsupported schema version.
 	ErrUnsupportedCredentialFileFormat = errors.New("unsupported credential file format")
@@ -254,8 +257,15 @@ func NewDefaultCredentialFileStore() (*CredentialFileStore, error) {
 
 // NewCredentialFileStore creates a fallback file store for plan.
 func NewCredentialFileStore(plan CredentialFilePlan) (*CredentialFileStore, error) {
+	return newCredentialFileStoreForPlatform(plan, credentialFilePlatformPolicy())
+}
+
+func newCredentialFileStoreForPlatform(plan CredentialFilePlan, platform credentialFilePlatform) (*CredentialFileStore, error) {
 	if err := plan.Validate(); err != nil {
 		return nil, credentialFileOperationError("validate credential file plan", plan.Path, err, auth.Redactor{})
+	}
+	if err := platform.validate(); err != nil {
+		return nil, credentialFileOperationError("prepare credential storage", plan.Path, err, auth.Redactor{})
 	}
 	return &CredentialFileStore{plan: plan}, nil
 }
@@ -816,6 +826,7 @@ func credentialErrorMatches(err error) []error {
 	var matches []error
 	for _, candidate := range []error{
 		ErrInsecureCredentialPermissions,
+		ErrUnsupportedCredentialFilePlatform,
 		ErrUnsupportedCredentialFileFormat,
 		ErrMalformedCredentialFile,
 		fs.ErrPermission,
@@ -828,6 +839,27 @@ func credentialErrorMatches(err error) []error {
 		}
 	}
 	return matches
+}
+
+type credentialFilePlatform struct {
+	Supported bool
+	Reason    string
+	Action    string
+}
+
+func (p credentialFilePlatform) validate() error {
+	if p.Supported {
+		return nil
+	}
+	reason := strings.TrimSpace(p.Reason)
+	if reason == "" {
+		reason = "credential-file fallback is disabled on this platform"
+	}
+	action := strings.TrimSpace(p.Action)
+	if action != "" {
+		reason += "; " + action
+	}
+	return fmt.Errorf("%w: %s", ErrUnsupportedCredentialFilePlatform, reason)
 }
 
 func cloneCredentialScopes(scopes []auth.Scope) []auth.Scope {
