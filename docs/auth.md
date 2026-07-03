@@ -308,6 +308,13 @@ Secrets must be redacted from:
 
 Use labels such as `<redacted>` or show only whether a secret is present. Do not print token prefixes or suffixes unless the project intentionally documents that policy later.
 
+Debug logging is opt-in with `debug_logging = true`, `TWI_DEBUG_LOG=true`, or
+the `--debug-log` flag on `chat`, `login`, and `doctor`. Auth debug records log
+phase names, scope counts, identity names, refresh availability, status, and
+sanitized errors. They do not log authorization URLs, callback codes, OAuth
+state values, access tokens, refresh tokens, client secrets, auth headers, raw
+config secrets, raw token validation responses, or raw transport errors.
+
 ## Troubleshooting Targets
 
 Planned user-facing errors should distinguish:

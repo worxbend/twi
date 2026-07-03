@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -76,10 +77,12 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 	var redirectURI string
 	var timeout time.Duration
 	var dryRun bool
+	var debugFlags debugFlagOptions
 	fs.StringVar(&cfgPath, "config", "", "config file path")
 	fs.StringVar(&redirectURI, "redirect-uri", defaultLoginRedirectURI, "localhost OAuth callback URL registered for the Twitch app")
 	fs.DurationVar(&timeout, "timeout", defaultLoginTimeout, "maximum time to wait for browser authorization and callback")
 	fs.BoolVar(&dryRun, "dry-run", false, "explain login requirements without opening a browser, listening for a callback, or contacting Twitch")
+	addDebugFlags(fs, &debugFlags)
 	fs.Usage = func() {
 		fmt.Fprint(stderr, loginUsage)
 		fs.PrintDefaults()
@@ -104,14 +107,28 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	cfg, err := config.Load(os.Environ(), config.Overrides{ConfigPath: cfgPath})
+	overrides := config.Overrides{ConfigPath: cfgPath}
+	applyDebugFlagOverrides(&overrides, debugFlags)
+	cfg, err := config.Load(os.Environ(), overrides)
 	if err != nil {
 		fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
 		return 1
 	}
+	logger, closeLog, err := openDebugLogger(cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "open debug log: %s\n", config.RedactDisplayValue(err.Error()))
+		return 1
+	}
+	defer closeLog()
+	logger.Log(context.Background(), "cli.login.start",
+		slog.Bool("dry_run", dryRun),
+		slog.String("redirect_uri", redirectURI),
+		slog.Int64("timeout_ms", int64(timeout/time.Millisecond)),
+	)
 
 	if dryRun {
 		printLoginDryRun(stdout, cfg, redirectURI, timeout)
+		logger.Log(context.Background(), "cli.login.complete", slog.Bool("dry_run", true))
 		return 0
 	}
 
@@ -127,22 +144,27 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 		auth.NewSecret(cfg.Twitch.ClientSecret),
 	)
 	if err := validateLoginConfig(request); err != nil {
+		logger.Log(context.Background(), "cli.login.config_invalid", slog.String("error", baseRedactor.Redact(err.Error())))
 		fmt.Fprintln(stderr, baseRedactor.Redact(err.Error()))
 		return 2
 	}
 
 	store, err := newCredentialStore()
 	if err != nil {
+		logger.Log(context.Background(), "cli.login.storage_failed", slog.String("error", baseRedactor.Redact(err.Error())))
 		printLoginError(stderr, "prepare credential storage", err, baseRedactor)
 		return 1
 	}
 	if store == nil {
-		printLoginError(stderr, "prepare credential storage", errors.New("credential store unavailable"), baseRedactor)
+		err := errors.New("credential store unavailable")
+		logger.Log(context.Background(), "cli.login.storage_failed", slog.String("error", err.Error()))
+		printLoginError(stderr, "prepare credential storage", err, baseRedactor)
 		return 1
 	}
 
 	waiter, err := newLoginCallbackWaiter(request.RedirectURI)
 	if err != nil {
+		logger.Log(context.Background(), "cli.login.callback_unavailable", slog.String("error", baseRedactor.Redact(err.Error())))
 		fmt.Fprintf(stderr, "login callback unavailable: %s\n", baseRedactor.Redact(err.Error()))
 		return 2
 	}
@@ -154,9 +176,15 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 	flow := newLoginFlow()
 	challenge, err := flow.BeginLogin(ctx, request)
 	if err != nil {
+		logger.Log(context.Background(), "cli.login.begin_failed", slog.String("error", baseRedactor.Redact(err.Error())))
 		printLoginError(stderr, "start login", err, baseRedactor)
 		return 1
 	}
+	logger = logger.WithSecrets(challenge.AuthorizationURL, challenge.State)
+	logger.Log(context.Background(), "cli.login.begin_succeeded",
+		slog.Int("scope_count", len(challenge.Scopes)),
+		slog.Time("expires_at", challenge.ExpiresAt),
+	)
 
 	challengeRedactor := auth.NewRedactor(
 		auth.NewSecret(cfg.Twitch.OAuthToken),
@@ -171,15 +199,23 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintln(stdout, "Tokens will be validated, saved privately, and never printed.")
 
 	if err := openLoginBrowser(ctx, challenge.AuthorizationURL.Reveal()); err != nil {
+		logger.Log(context.Background(), "cli.login.browser_failed", slog.String("error", challengeRedactor.Redact(err.Error())))
 		printLoginError(stderr, "open browser", err, challengeRedactor)
 		return 1
 	}
+	logger.Log(context.Background(), "cli.login.browser_opened")
 
 	callback, err := waiter.Wait(ctx, challenge.State)
 	if err != nil {
+		logger.Log(context.Background(), "cli.login.callback_failed", slog.String("error", challengeRedactor.Redact(err.Error())))
 		printLoginError(stderr, "wait for OAuth callback", err, challengeRedactor)
 		return 1
 	}
+	logger = logger.WithSecrets(callback.Code, callback.State, callback.ExpectedState)
+	logger.Log(context.Background(), "cli.login.callback_received",
+		slog.Bool("has_code", callback.Code.Present()),
+		slog.Bool("state_present", callback.State.Present()),
+	)
 
 	callbackRedactor := auth.NewRedactor(
 		auth.NewSecret(cfg.Twitch.OAuthToken),
@@ -193,9 +229,16 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 	)
 	result, err := flow.CompleteLogin(ctx, callback)
 	if err != nil {
+		logger.Log(context.Background(), "cli.login.complete_failed", slog.String("error", callbackRedactor.Redact(err.Error())))
 		printLoginError(stderr, "complete login", err, callbackRedactor)
 		return 1
 	}
+	logger = logger.WithSecrets(result.Tokens.AccessToken, result.Tokens.RefreshToken)
+	logger.Log(context.Background(), "cli.login.complete_succeeded",
+		slog.String("login", result.Identity.Login),
+		slog.Int("scope_count", len(result.Scopes)),
+		slog.Bool("refresh_available", result.Tokens.RefreshAvailable()),
+	)
 
 	resultRedactor := auth.NewRedactor(
 		auth.NewSecret(cfg.Twitch.OAuthToken),
@@ -211,10 +254,13 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 	)
 	record := storage.CredentialRecordFromLoginResult(result, request.ClientID, time.Now().UTC())
 	if err := store.SaveCredentials(ctx, record); err != nil {
+		logger.Log(context.Background(), "cli.login.save_failed", slog.String("error", resultRedactor.Redact(err.Error())))
 		printLoginError(stderr, "save credentials", err, resultRedactor)
 		return 1
 	}
+	logger.Log(context.Background(), "cli.login.save_succeeded")
 	printLoginSuccess(stdout, result, resultRedactor)
+	logger.Log(context.Background(), "cli.login.complete", slog.Bool("dry_run", false))
 	return 0
 }
 

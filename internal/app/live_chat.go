@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/w0rxbend/twi/internal/auth"
+	"github.com/w0rxbend/twi/internal/debuglog"
 	"github.com/w0rxbend/twi/internal/twitch"
 )
 
@@ -33,6 +35,7 @@ type LiveChatClient struct {
 	reconnecting bool
 	lifecycleMu  sync.Mutex
 	closeOnce    sync.Once
+	debugLogger  debuglog.Logger
 }
 
 var _ ChatClient = (*LiveChatClient)(nil)
@@ -42,6 +45,10 @@ var _ ChatClient = (*LiveChatClient)(nil)
 // manual reconnect restart.
 type LiveChatTransportFactory func(context.Context) (twitch.ChatClient, error)
 
+type LiveChatClientOptions struct {
+	DebugLogger debuglog.Logger
+}
+
 var (
 	ErrReconnectUnavailable = errors.New("manual reconnect unavailable for this chat source")
 	ErrReconnectInProgress  = errors.New("manual reconnect already in progress")
@@ -50,6 +57,10 @@ var (
 )
 
 func NewLiveChatClient(ctx context.Context, transport twitch.ChatClient, buffer int) (*LiveChatClient, error) {
+	return NewLiveChatClientWithOptions(ctx, transport, buffer, LiveChatClientOptions{})
+}
+
+func NewLiveChatClientWithOptions(ctx context.Context, transport twitch.ChatClient, buffer int, opts LiveChatClientOptions) (*LiveChatClient, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -59,19 +70,23 @@ func NewLiveChatClient(ctx context.Context, transport twitch.ChatClient, buffer 
 	factory := func(context.Context) (twitch.ChatClient, error) {
 		return transport, nil
 	}
-	return newLiveChatClient(ctx, nil, factory, buffer)
+	return newLiveChatClient(ctx, nil, factory, buffer, opts)
 }
 
 // NewRestartableLiveChatClient creates a live client whose Reconnect method
 // tears down the active transport and starts a fresh transport from factory.
 func NewRestartableLiveChatClient(ctx context.Context, factory LiveChatTransportFactory, buffer int) (*LiveChatClient, error) {
+	return NewRestartableLiveChatClientWithOptions(ctx, factory, buffer, LiveChatClientOptions{})
+}
+
+func NewRestartableLiveChatClientWithOptions(ctx context.Context, factory LiveChatTransportFactory, buffer int, opts LiveChatClientOptions) (*LiveChatClient, error) {
 	if factory == nil {
 		return nil, errors.New("missing Twitch chat transport factory")
 	}
-	return newLiveChatClient(ctx, factory, factory, buffer)
+	return newLiveChatClient(ctx, factory, factory, buffer, opts)
 }
 
-func newLiveChatClient(ctx context.Context, reconnectFactory, initialFactory LiveChatTransportFactory, buffer int) (*LiveChatClient, error) {
+func newLiveChatClient(ctx context.Context, reconnectFactory, initialFactory LiveChatTransportFactory, buffer int, opts LiveChatClientOptions) (*LiveChatClient, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -80,13 +95,15 @@ func newLiveChatClient(ctx context.Context, reconnectFactory, initialFactory Liv
 	}
 
 	client := &LiveChatClient{
-		factory:  reconnectFactory,
-		baseCtx:  ctx,
-		messages: make(chan twitch.ChatMessage, buffer),
-		states:   make(chan ConnectionState, buffer),
-		done:     make(chan struct{}),
-		closed:   make(chan struct{}),
+		factory:     reconnectFactory,
+		baseCtx:     ctx,
+		messages:    make(chan twitch.ChatMessage, buffer),
+		states:      make(chan ConnectionState, buffer),
+		done:        make(chan struct{}),
+		closed:      make(chan struct{}),
+		debugLogger: opts.DebugLogger,
 	}
+	client.debugLiveEvent("live_chat.start", slog.Int("buffer", buffer), slog.Bool("restartable", reconnectFactory != nil))
 	client.emitState(ctx, ConnectionState{
 		Status: ConnectionConnecting,
 		Detail: "connecting to Twitch IRC",
@@ -96,6 +113,7 @@ func newLiveChatClient(ctx context.Context, reconnectFactory, initialFactory Liv
 	session, err := client.newSession(ctx, initialFactory)
 	if err != nil {
 		safeErr := errors.New(credentialSafeDetail(err))
+		client.debugLiveEvent("live_chat.start.failed", slog.String("error", safeErr.Error()))
 		client.emitState(ctx, ConnectionState{
 			Status: ConnectionFailed,
 			Detail: safeErr.Error(),
@@ -125,27 +143,39 @@ func (c *LiveChatClient) Send(ctx context.Context, req SendRequest) (SendResult,
 	if err := ctx.Err(); err != nil {
 		return SendResult{}, err
 	}
+	c.debugLiveSendRequest(req)
 	transport, err := c.currentTransport()
 	if err != nil {
+		c.debugLiveSendComplete(req, SendResult{}, err)
 		return SendResult{}, err
 	}
 	text := strings.TrimSpace(req.Text)
 	if text == "" {
-		return SendResult{}, errors.New("message text cannot be empty")
+		err := errors.New("message text cannot be empty")
+		c.debugLiveSendComplete(req, SendResult{}, err)
+		return SendResult{}, err
 	}
 	if req.Action {
 		text = actionWireText(text)
 	}
 	if req.ReplyToMessageID != "" {
 		if err := transport.Reply(ctx, req.Channel, req.ReplyToMessageID, text); err != nil {
-			return SendResult{}, errors.New(credentialSafeSendDetail(err))
+			safeErr := errors.New(credentialSafeSendDetail(err))
+			c.debugLiveSendComplete(req, SendResult{}, safeErr)
+			return SendResult{}, safeErr
 		}
-		return SendResult{AcceptedAt: time.Now()}, nil
+		result := SendResult{AcceptedAt: time.Now()}
+		c.debugLiveSendComplete(req, result, nil)
+		return result, nil
 	}
 	if err := transport.Send(ctx, req.Channel, text); err != nil {
-		return SendResult{}, errors.New(credentialSafeSendDetail(err))
+		safeErr := errors.New(credentialSafeSendDetail(err))
+		c.debugLiveSendComplete(req, SendResult{}, safeErr)
+		return SendResult{}, safeErr
 	}
-	return SendResult{AcceptedAt: time.Now()}, nil
+	result := SendResult{AcceptedAt: time.Now()}
+	c.debugLiveSendComplete(req, result, nil)
+	return result, nil
 }
 
 func actionWireText(text string) string {
@@ -197,10 +227,13 @@ func (c *LiveChatClient) Reconnect(ctx context.Context) error {
 		Detail: "manual reconnect restarting Twitch IRC",
 		At:     time.Now(),
 	})
+	c.debugLiveEvent("live_chat.reconnect.start")
 
 	old := c.swapSession(nil)
 	if err := old.stop(true); err != nil {
-		return errors.New(credentialSafeDetail(err))
+		safeErr := errors.New(credentialSafeDetail(err))
+		c.debugLiveEvent("live_chat.reconnect.failed", slog.String("error", safeErr.Error()))
+		return safeErr
 	}
 	if err := ctx.Err(); err != nil {
 		c.emitState(context.Background(), ConnectionState{
@@ -209,6 +242,7 @@ func (c *LiveChatClient) Reconnect(ctx context.Context) error {
 			Err:    err,
 			At:     time.Now(),
 		})
+		c.debugLiveEvent("live_chat.reconnect.failed", slog.String("error", err.Error()))
 		return err
 	}
 
@@ -221,6 +255,7 @@ func (c *LiveChatClient) Reconnect(ctx context.Context) error {
 				Err:    err,
 				At:     time.Now(),
 			})
+			c.debugLiveEvent("live_chat.reconnect.failed", slog.String("error", err.Error()))
 			return err
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -230,6 +265,7 @@ func (c *LiveChatClient) Reconnect(ctx context.Context) error {
 				Err:    err,
 				At:     time.Now(),
 			})
+			c.debugLiveEvent("live_chat.reconnect.failed", slog.String("error", err.Error()))
 			return err
 		}
 		safeErr := errors.New(credentialSafeDetail(err))
@@ -239,14 +275,17 @@ func (c *LiveChatClient) Reconnect(ctx context.Context) error {
 			Err:    safeErr,
 			At:     time.Now(),
 		})
+		c.debugLiveEvent("live_chat.reconnect.failed", slog.String("error", safeErr.Error()))
 		return safeErr
 	}
 	if err := c.ensureOpen(); err != nil {
 		_ = session.stop(true)
+		c.debugLiveEvent("live_chat.reconnect.failed", slog.String("error", err.Error()))
 		return err
 	}
 	c.setSession(session)
 	go c.bridge(session)
+	c.debugLiveEvent("live_chat.reconnect.session_started")
 	return nil
 }
 
@@ -295,15 +334,20 @@ func (c *LiveChatClient) newSession(ctx context.Context, factory LiveChatTranspo
 	if factory == nil {
 		return nil, ErrReconnectUnavailable
 	}
+	c.debugLiveEvent("live_chat.session.create")
 	transport, err := factory(ctx)
 	if err != nil {
+		c.debugLiveEvent("live_chat.session.create_failed", slog.String("error", credentialSafeDetail(err)))
 		return nil, err
 	}
 	if transport == nil {
-		return nil, errors.New("missing Twitch chat transport")
+		err := errors.New("missing Twitch chat transport")
+		c.debugLiveEvent("live_chat.session.create_failed", slog.String("error", err.Error()))
+		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
 		_ = transport.Close()
+		c.debugLiveEvent("live_chat.session.create_failed", slog.String("error", err.Error()))
 		return nil, err
 	}
 	sessionCtx, cancel := context.WithCancel(c.baseCtx)
@@ -313,13 +357,16 @@ func (c *LiveChatClient) newSession(ctx context.Context, factory LiveChatTranspo
 		transport: transport,
 		done:      make(chan struct{}),
 	}
+	c.debugLiveEvent("live_chat.transport.connect.start")
 	events, err := connectTransport(ctx, sessionCtx, transport)
 	if err != nil {
 		cancel()
 		_ = transport.Close()
+		c.debugLiveEvent("live_chat.transport.connect_failed", slog.String("error", credentialSafeDetail(err)))
 		return nil, err
 	}
 	session.events = events
+	c.debugLiveEvent("live_chat.transport.connect_started")
 	return session, nil
 }
 
@@ -424,6 +471,7 @@ func (s *liveChatSession) suppressed() bool {
 }
 
 func (c *LiveChatClient) handleEvent(ctx context.Context, event twitch.Event) {
+	c.debugTransportEvent(event)
 	switch event.Kind {
 	case twitch.EventMessage:
 		c.emitMessage(ctx, event.Message)

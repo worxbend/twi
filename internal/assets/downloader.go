@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/w0rxbend/twi/internal/debuglog"
 	"github.com/w0rxbend/twi/internal/storage"
 )
 
@@ -70,6 +72,7 @@ type PublicImageDownloaderOptions struct {
 	DownloadDir string
 	MaxBytes    int64
 	Now         func() time.Time
+	Logger      debuglog.Logger
 }
 
 // PublicImageDownloader downloads public PNG, JPEG, and GIF image sources into
@@ -94,19 +97,25 @@ func (d *PublicImageDownloader) Download(ctx context.Context, req DownloadReques
 	if err := ctx.Err(); err != nil {
 		return DownloadResult{}, err
 	}
+	d.logDownload(ctx, "asset.download.start", req.URL, nil)
 
 	source, err := d.validateSourceURL(ctx, req.URL)
 	if err != nil {
+		d.logDownload(ctx, "asset.download.failed", req.URL, err)
 		return DownloadResult{}, err
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, source.String(), nil)
 	if err != nil {
-		return DownloadResult{}, fmt.Errorf("%w: create request", ErrAssetDownloadFailed)
+		err = fmt.Errorf("%w: create request", ErrAssetDownloadFailed)
+		d.logDownload(ctx, "asset.download.failed", req.URL, err)
+		return DownloadResult{}, err
 	}
 
 	resp, err := d.httpClient().Do(httpReq)
 	if err != nil {
-		return DownloadResult{}, safeAssetDownloadHTTPError(ctx, err)
+		err = safeAssetDownloadHTTPError(ctx, err)
+		d.logDownload(ctx, "asset.download.failed", req.URL, err)
+		return DownloadResult{}, err
 	}
 	if resp.Body == nil {
 		resp.Body = io.NopCloser(bytes.NewReader(nil))
@@ -114,26 +123,36 @@ func (d *PublicImageDownloader) Download(ctx context.Context, req DownloadReques
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return DownloadResult{}, fmt.Errorf("%w: HTTP %d", ErrAssetDownloadBadStatus, resp.StatusCode)
+		err := fmt.Errorf("%w: HTTP %d", ErrAssetDownloadBadStatus, resp.StatusCode)
+		d.logDownload(ctx, "asset.download.failed", req.URL, err, slog.Int("http_status", resp.StatusCode))
+		return DownloadResult{}, err
 	}
 
 	opts := d.options()
 	if resp.ContentLength > opts.MaxBytes {
+		d.logDownload(ctx, "asset.download.failed", req.URL, ErrAssetDownloadTooLarge, slog.Int64("content_length", resp.ContentLength))
 		return DownloadResult{}, ErrAssetDownloadTooLarge
 	}
 	data, err := readAssetDownloadBody(ctx, resp.Body, opts.MaxBytes)
 	if err != nil {
+		d.logDownload(ctx, "asset.download.failed", req.URL, err)
 		return DownloadResult{}, err
 	}
 	mediaType, err := downloadedImageMediaType(resp.Header.Get("Content-Type"), req.MediaType, data)
 	if err != nil {
+		d.logDownload(ctx, "asset.download.failed", req.URL, err, slog.Int("byte_count", len(data)))
 		return DownloadResult{}, err
 	}
 	path, err := d.writeDownload(ctx, data)
 	if err != nil {
+		d.logDownload(ctx, "asset.download.failed", req.URL, err, slog.Int("byte_count", len(data)))
 		return DownloadResult{}, err
 	}
 
+	d.logDownload(ctx, "asset.download.succeeded", req.URL, nil,
+		slog.Int("byte_count", len(data)),
+		slog.String("media_type", mediaType),
+	)
 	return DownloadResult{
 		Path:            path,
 		PayloadIdentity: downloadPayloadIdentity(data),
@@ -141,6 +160,19 @@ func (d *PublicImageDownloader) Download(ctx context.Context, req DownloadReques
 		FetchedAt:       opts.Now(),
 		TemporaryPath:   true,
 	}, nil
+}
+
+func (d *PublicImageDownloader) logDownload(ctx context.Context, event, rawURL string, err error, attrs ...slog.Attr) {
+	opts := d.options()
+	fields := debuglog.URLFields("source_url", rawURL)
+	fields = append(fields,
+		slog.Bool("has_error", err != nil),
+	)
+	if err != nil {
+		fields = append(fields, slog.String("error", err.Error()))
+	}
+	fields = append(fields, attrs...)
+	opts.Logger.Log(ctx, event, fields...)
 }
 
 func (d *PublicImageDownloader) options() PublicImageDownloaderOptions {

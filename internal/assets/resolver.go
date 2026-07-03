@@ -3,11 +3,13 @@ package assets
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/w0rxbend/twi/internal/debuglog"
 	"github.com/w0rxbend/twi/internal/storage"
 	"github.com/w0rxbend/twi/internal/twitch"
 )
@@ -135,6 +137,7 @@ type Resolver struct {
 	Downloader Downloader
 	Cache      storage.AssetCache
 	Now        func() time.Time
+	Logger     debuglog.Logger
 }
 
 var _ EventResolver = (*Resolver)(nil)
@@ -160,6 +163,7 @@ func (r *Resolver) Resolve(ctx context.Context, req Request) Event {
 	if err := ctx.Err(); err != nil {
 		event.Kind = EventCanceled
 		event.Err = err
+		r.logEvent(ctx, "asset.resolve.canceled", event)
 		return event
 	}
 
@@ -173,6 +177,7 @@ func (r *Resolver) Resolve(ctx context.Context, req Request) Event {
 			event.Kind = EventCacheHit
 			event.Record = record
 			event.FromCache = true
+			r.logEvent(ctx, "asset.resolve.cache_hit", event)
 			return event
 		}
 	}
@@ -223,7 +228,46 @@ func (r *Resolver) Resolve(ctx context.Context, req Request) Event {
 
 	event.Kind = EventDownloaded
 	event.Record = record
+	r.logEvent(ctx, "asset.resolve.downloaded", event)
 	return event
+}
+
+func (r *Resolver) logEvent(ctx context.Context, name string, event Event) {
+	if r == nil {
+		return
+	}
+	assetKind, assetKindUnsafe := safeDebugAssetIdentity(event.Ref.Kind)
+	assetID, assetIDUnsafe := safeDebugAssetIdentity(event.Ref.ID)
+	recordKind, recordKindUnsafe := safeDebugAssetIdentity(event.Record.Key.Kind)
+	attrs := []slog.Attr{
+		slog.String("request_id", event.RequestID),
+		slog.String("asset_kind", assetKind),
+		slog.String("asset_id", assetID),
+		slog.Bool("asset_identity_unsafe", assetKindUnsafe || assetIDUnsafe),
+		slog.String("event_kind", string(event.Kind)),
+		slog.Bool("from_cache", event.FromCache),
+		slog.String("record_kind", recordKind),
+		slog.Bool("record_identity_unsafe", recordKindUnsafe),
+		slog.String("media_type", event.Record.MediaType),
+		slog.Int("width_cells", event.Record.WidthCells),
+		slog.Int("height_cells", event.Record.HeightCells),
+		slog.Bool("has_error", event.Err != nil),
+	}
+	if event.Err != nil {
+		attrs = append(attrs, slog.String("error", event.Err.Error()))
+	}
+	r.Logger.Log(ctx, name, attrs...)
+}
+
+func safeDebugAssetIdentity(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", false
+	}
+	if unsafeAssetKeyPart(value) {
+		return "", true
+	}
+	return value, false
 }
 
 func (r *Resolver) lookupMetadata(ctx context.Context, ref twitch.AssetRef, req Request) (Metadata, error) {
@@ -266,6 +310,9 @@ func (r *Resolver) errorEvent(event Event, err error) Event {
 		event.Kind = EventFailed
 	}
 	event.Err = err
+	if r != nil {
+		r.logEvent(context.Background(), "asset.resolve.failed", event)
+	}
 	return event
 }
 

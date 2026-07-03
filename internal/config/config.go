@@ -21,6 +21,7 @@ type Config struct {
 	Twitch          TwitchConfig
 	DefaultChannels []string
 	Features        FeatureConfig
+	Debug           DebugConfig
 }
 
 type TwitchConfig struct {
@@ -43,9 +44,17 @@ type FeatureConfig struct {
 	AnimationMode     string
 }
 
+type DebugConfig struct {
+	Enabled bool
+	LogPath string
+}
+
 type Overrides struct {
-	ConfigPath string
-	Channels   []string
+	ConfigPath      string
+	Channels        []string
+	DebugLogSet     bool
+	DebugLogEnabled bool
+	DebugLogPath    string
 }
 
 // Load returns the effective config. Precedence is flags/overrides > env >
@@ -70,6 +79,7 @@ func Load(environ []string, overrides Overrides) (Config, error) {
 	if len(overrides.Channels) > 0 {
 		cfg.DefaultChannels = normalizeChannels(overrides.Channels)
 	}
+	applyOverrides(&cfg, overrides)
 
 	return cfg, nil
 }
@@ -91,6 +101,7 @@ func LoadEnvOnly(environ []string, overrides Overrides) (Config, error) {
 	if len(overrides.Channels) > 0 {
 		cfg.DefaultChannels = normalizeChannels(overrides.Channels)
 	}
+	applyOverrides(&cfg, overrides)
 
 	return cfg, nil
 }
@@ -268,6 +279,8 @@ func (c Config) RedactedString() string {
 		"emoji_url_template = " + quote(redactUnsafe(c.Features.EmojiURLTemplate)),
 		"emote_mode = " + quote(c.Features.EmoteMode),
 		"animation_mode = " + quote(c.Features.AnimationMode),
+		"debug_logging = " + strconv.FormatBool(c.Debug.Enabled),
+		"debug_log_path = " + quote(RedactDisplayValue(c.Debug.LogPath)),
 	}
 	return strings.Join(lines, "\n") + "\n"
 }
@@ -388,7 +401,20 @@ func applyEnv(cfg *Config, environ []string) {
 			cfg.Features.EmoteMode = value
 		case "TWI_ANIMATION_MODE":
 			cfg.Features.AnimationMode = value
+		case "TWI_DEBUG_LOG":
+			cfg.Debug.Enabled = parseBool(value, cfg.Debug.Enabled)
+		case "TWI_DEBUG_LOG_PATH":
+			cfg.Debug.LogPath = value
 		}
+	}
+}
+
+func applyOverrides(cfg *Config, overrides Overrides) {
+	if overrides.DebugLogSet {
+		cfg.Debug.Enabled = overrides.DebugLogEnabled
+	}
+	if strings.TrimSpace(overrides.DebugLogPath) != "" {
+		cfg.Debug.LogPath = overrides.DebugLogPath
 	}
 }
 
@@ -424,6 +450,10 @@ func applyKey(cfg *Config, key, value string) {
 		cfg.Features.EmoteMode = value
 	case "animation_mode":
 		cfg.Features.AnimationMode = value
+	case "debug_logging":
+		cfg.Debug.Enabled = parseBool(value, cfg.Debug.Enabled)
+	case "debug_log_path":
+		cfg.Debug.LogPath = value
 	}
 }
 

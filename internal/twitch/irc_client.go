@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -13,6 +14,8 @@ import (
 	"time"
 
 	irc "github.com/gempir/go-twitch-irc/v4"
+	"github.com/w0rxbend/twi/internal/auth"
+	"github.com/w0rxbend/twi/internal/debuglog"
 )
 
 const (
@@ -35,6 +38,7 @@ type IRCConfig struct {
 	Channels     []string
 	Buffer       int
 	Now          func() time.Time
+	DebugLogger  debuglog.Logger
 }
 
 // IRCClient adapts go-twitch-irc callbacks into twi's normalized event stream.
@@ -46,6 +50,7 @@ type IRCClient struct {
 	buffer   int
 	now      func() time.Time
 	refresh  oauthRefreshConfig
+	logger   debuglog.Logger
 	mu       sync.RWMutex
 
 	done      chan struct{}
@@ -81,6 +86,11 @@ func NewIRCClient(cfg IRCConfig) (*IRCClient, error) {
 	}
 
 	client := newIRCClient(username, token, channels)
+	logger := cfg.DebugLogger.WithSecrets(
+		auth.NewSecret(token),
+		auth.NewSecret(cfg.RefreshToken),
+		auth.NewSecret(cfg.ClientSecret),
+	)
 
 	return &IRCClient{
 		client:   client,
@@ -95,8 +105,10 @@ func NewIRCClient(cfg IRCConfig) (*IRCClient, error) {
 			RefreshToken: cfg.RefreshToken,
 			TokenURL:     cfg.TokenURL,
 			HTTPClient:   cfg.HTTPClient,
+			Logger:       logger,
 		},
-		done: make(chan struct{}),
+		logger: logger,
+		done:   make(chan struct{}),
 	}, nil
 }
 
@@ -106,6 +118,10 @@ func (c *IRCClient) Connect(ctx context.Context) (<-chan Event, error) {
 	}
 
 	events := make(chan Event, c.buffer)
+	c.logger.Log(ctx, "twitch.irc.connect.start",
+		slog.Int("channel_count", len(c.channels)),
+		slog.Int("buffer", c.buffer),
+	)
 	emit := func(event Event) {
 		select {
 		case events <- event:
@@ -123,10 +139,13 @@ func (c *IRCClient) Connect(ctx context.Context) (<-chan Event, error) {
 
 		err := c.connectWithAuthRefresh(ctx, emit, client)
 		if err == nil || errors.Is(err, irc.ErrClientDisconnected) {
+			c.logger.Log(ctx, "twitch.irc.connect.closed", slog.Bool("clean", true))
 			emit(NormalizeIRCDisconnect(nil, c.now()))
 			return
 		}
-		emit(NormalizeIRCDisconnect(credentialSafeIRCError(err), c.now()))
+		safeErr := credentialSafeIRCError(err)
+		c.logger.Log(ctx, "twitch.irc.connect.failed", slog.String("error", safeErr.Error()))
+		emit(NormalizeIRCDisconnect(safeErr, c.now()))
 	}()
 
 	return events, nil
@@ -176,11 +195,14 @@ func (c *IRCClient) connectWithAuthRefresh(ctx context.Context, emit func(Event)
 		At:     c.now(),
 		Reason: "Twitch IRC authentication failed; refreshing access token",
 	}})
+	c.logger.Log(ctx, "twitch.irc.auth_refresh.start")
 
 	token, refreshed, refreshErr := c.refresh.refresh(ctx)
 	if refreshErr != nil {
+		c.logger.Log(ctx, "twitch.irc.auth_refresh.failed", slog.String("error", redactIRCError(refreshErr.Error())))
 		return fmt.Errorf("refresh Twitch OAuth token after IRC auth failure: %w", refreshErr)
 	}
+	c.logger.Log(ctx, "twitch.irc.auth_refresh.succeeded", slog.Bool("refresh_token_updated", refreshed != c.refresh.RefreshToken))
 
 	c.mu.Lock()
 	c.token = token
@@ -198,6 +220,10 @@ func (c *IRCClient) Send(ctx context.Context, channel, text string) error {
 		return err
 	}
 	channel = normalizeIRCChannel(channel)
+	c.logger.Log(ctx, "twitch.irc.send",
+		slog.String("channel", channel),
+		slog.Int("text_length", len([]rune(text))),
+	)
 	if channel == "" {
 		return errors.New("missing Twitch channel")
 	}
@@ -213,6 +239,11 @@ func (c *IRCClient) Reply(ctx context.Context, channel, parentMessageID, text st
 		return err
 	}
 	channel = normalizeIRCChannel(channel)
+	c.logger.Log(ctx, "twitch.irc.reply",
+		slog.String("channel", channel),
+		slog.String("reply_to_message_id", parentMessageID),
+		slog.Int("text_length", len([]rune(text))),
+	)
 	if channel == "" {
 		return errors.New("missing Twitch channel")
 	}
@@ -262,6 +293,7 @@ func credentialSafeIRCError(err error) error {
 }
 
 func redactIRCError(value string) string {
+	value = auth.NewRedactor().Redact(value)
 	return ircOAuthTokenPattern.ReplaceAllString(value, "oauth:<redacted>")
 }
 
@@ -286,6 +318,7 @@ type oauthRefreshConfig struct {
 	RefreshToken string
 	TokenURL     string
 	HTTPClient   *http.Client
+	Logger       debuglog.Logger
 }
 
 type oauthRefreshResponse struct {
@@ -305,6 +338,8 @@ func (c oauthRefreshConfig) refresh(ctx context.Context) (string, string, error)
 	if endpoint == "" {
 		endpoint = defaultOAuthTokenURL
 	}
+	fields := debuglog.URLFields("token_url", endpoint)
+	c.Logger.Log(ctx, "twitch.oauth_refresh.request", fields...)
 	httpClient := c.HTTPClient
 	if httpClient == nil {
 		httpClient = http.DefaultClient
@@ -324,21 +359,25 @@ func (c oauthRefreshConfig) refresh(ctx context.Context) (string, string, error)
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
+		c.Logger.Log(ctx, "twitch.oauth_refresh.failed", slog.String("error", redactIRCError(err.Error())))
 		return "", "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		c.Logger.Log(ctx, "twitch.oauth_refresh.failed", slog.Int("http_status", resp.StatusCode))
 		return "", "", fmt.Errorf("twitch OAuth refresh returned HTTP %d", resp.StatusCode)
 	}
 
 	var decoded oauthRefreshResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		c.Logger.Log(ctx, "twitch.oauth_refresh.failed", slog.String("error", redactIRCError(err.Error())))
 		return "", "", err
 	}
 
 	accessToken := normalizeOAuthToken(decoded.AccessToken)
 	if accessToken == "" {
+		c.Logger.Log(ctx, "twitch.oauth_refresh.failed", slog.String("error", "missing access token"))
 		return "", "", errors.New("twitch OAuth refresh response did not include an access token")
 	}
 
@@ -346,6 +385,7 @@ func (c oauthRefreshConfig) refresh(ctx context.Context) (string, string, error)
 	if refreshToken == "" {
 		refreshToken = strings.TrimSpace(c.RefreshToken)
 	}
+	c.Logger.Log(ctx, "twitch.oauth_refresh.succeeded", slog.Bool("refresh_token_returned", strings.TrimSpace(decoded.RefreshToken) != ""))
 	return accessToken, refreshToken, nil
 }
 

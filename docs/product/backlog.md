@@ -8,17 +8,17 @@ Progress as of the initial swarm pass:
 - Done: Phase 0 requirements matrix, risk register, backlog, and six ADRs.
 - Done: Go module bootstrap, CLI shell, config precedence/redaction tests, normalized message model skeleton, Bubble Tea mock chat shell, module tool directives for `govulncheck`/`staticcheck`, Twitch IRC read adapter, the active-channel composer send queue, selected-message replies, `/me` action sends, and per-channel live routing.
 - Current status labels: mock chat is ready; multi-channel live IRC read/send,
-  multi-channel UX, diagnostics, inline image plumbing, OAuth login, and
-  Unix-only restrictive credential-file persistence are partial; setup can write
-  non-secret config and hand off to login; refresh-token persistence after IRC
-  reconnect and manual Kitty/Ghostty image validation are planned. Active live
-  IRC reconnect restart and per-channel local filters are implemented.
+  multi-channel UX, diagnostics, redacted debug logging, inline image plumbing,
+  OAuth login, and Unix-only restrictive credential-file persistence are
+  partial; setup can write non-secret config and hand off to login;
+  refresh-token persistence after IRC reconnect and manual Kitty/Ghostty image
+  validation are planned. Active live IRC reconnect restart and per-channel
+  local filters are implemented.
 - Credential rule: Twitch username/token values currently come from
   environment variables, the flat config file, or on supported Unix builds the
   private credential file; environment and flat config values take precedence
   over saved credentials, and CLI overrides cover channel and config path.
-- Remaining near-term work: debug logging, release packaging, and manual
-  terminal validation.
+- Remaining near-term work: release packaging and manual terminal validation.
 
 Each task is intended to fit one implementation loop. Agents should keep write scope to
 the listed files where possible and use fakes before network-dependent code.
@@ -623,11 +623,14 @@ Verification: Release dry run; container smoke; checksum validation.
 Risks: Terminal TUI behavior inside containers needs clear documentation.
 Follow-ups: Package manager manifests only after CLI stabilizes.
 
-Task: Add observability and debug logging controls.
+Task: Add observability and debug logging controls. Status: implemented for
+opt-in redacted JSON debug logs; richer support bundles remain future work.
 Owner lane: Platform engineer.
 Goal: Help users debug connection, asset, and render issues without leaking
 secrets or cluttering chat.
-Context: Diagnostics exist, but runtime logs/debug views are minimal.
+Context: Runtime debug logs now cover chat/login/doctor command phases, live
+transport events, sends, asset resolution/downloads, avatar lookup, and render
+batch outcomes with curated fields.
 Files likely touched: `internal/app`, `internal/config`, `internal/twitch`,
 `docs/development.md`, `docs/auth.md`.
 Implementation notes: Default to quiet. Redact credentials and raw OAuth-like
@@ -635,7 +638,9 @@ strings. Keep logs out of the main TUI unless explicitly requested.
 Acceptance criteria: Users can enable debug logs for auth/connect/assets with
 redacted output and no secrets in tests.
 Verification: Redaction tests; secret-pattern search; manual debug run.
-Risks: Logs can capture user chat content; document privacy implications.
+Risks: Logs can capture non-secret chat metadata such as channel names,
+usernames, message IDs, hostnames, counts, and timing; document privacy
+implications before support sharing.
 Follow-ups: Add structured bug-report bundle only after privacy review.
 
 ## Cross-Phase Rules

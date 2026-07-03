@@ -14,6 +14,10 @@ This document describes the configuration model for `twi`. The implemented parse
   selected feature modes, Twitch IRC reachability, terminal hints, Kitty graphics
   signals, and cache directory writability without printing token or client
   secret values.
+- Redacted structured debug logging is opt-in through flat config, environment,
+  or command flags for chat, login, and doctor. Debug records use curated fields
+  for auth, network, asset, render, send, and connection diagnostics rather
+  than raw transport structs or raw tag maps.
 - Multi-channel UX is partially shipped: per-channel history, unread counts, scroll, drafts, replies, sends, local view filters, keyboard sidebar, command palette, optional mouse interactions, and selected-message inspect are current behavior.
 - Inline terminal image support is partially shipped: bounded image decode/cell preparation, renderer cells, stable fallback rows, cache boundaries, standard emoji provider metadata, capability diagnostics, visible-row asset event scheduling, and default live resolver/downloader/preparer/renderer wiring exist; manual Kitty/Ghostty validation remains planned.
 - `twi setup` can create or update non-secret flat config values and hand off
@@ -28,7 +32,8 @@ This document describes the configuration model for `twi`. The implemented parse
 
 Effective config should be resolved in this order, highest priority first:
 
-1. CLI flags for `--config` and `--channel`.
+1. CLI flags for `--config`, `--channel`, `--debug-log`, and
+   `--debug-log-path`.
 2. Environment variables.
 3. Config file.
 4. Saved credential file values for empty credential fields on supported Unix builds.
@@ -154,6 +159,8 @@ Supported variables:
 | `TWI_EMOJI_URL_TEMPLATE` | No | Custom public emoji image URL template required when `TWI_EMOJI_PROVIDER=custom`. Use `{id}` for the normalized emoji asset key. Credential markers are rejected by the provider and redacted from `config show`. |
 | `TWI_EMOTE_MODE` | No | Twitch emote rendering mode. |
 | `TWI_ANIMATION_MODE` | No | Animation behavior. |
+| `TWI_DEBUG_LOG` | No | Enables redacted structured debug logging when set to a true boolean value. Defaults to disabled. |
+| `TWI_DEBUG_LOG_PATH` | No | Debug log file path. If omitted while logging is enabled, `twi` writes `debug.log` under the platform cache directory. Credential-shaped path values are redacted from config and diagnostic output. |
 
 ## Mode Values
 
@@ -214,6 +221,8 @@ emoji_provider = "twemoji"
 emoji_url_template = ""
 emote_mode = "text"
 animation_mode = "fast"
+debug_logging = false
+debug_log_path = ""
 ```
 
 Do not paste a real token into shared docs, commits, logs, or support issues.
@@ -236,6 +245,28 @@ twi doctor
 twi login
 twi setup
 ```
+
+Debug logging flags are available on commands that can produce runtime
+diagnostics:
+
+```sh
+twi chat --mock --channel demo --debug-log
+twi chat --channel somechannel --debug-log --debug-log-path /tmp/twi-debug.log
+twi login --debug-log
+twi doctor --debug-log
+```
+
+`--debug-log=false` explicitly disables logging for that command even if
+`TWI_DEBUG_LOG=true` or `debug_logging = true` is configured. Debug logs are
+JSON lines written to a private file opened with create mode `0600`; parent
+directories are created with `0700` when needed. Records redact OAuth access
+tokens, refresh tokens, client secrets, bearer authorization headers, callback
+codes/state, credential-shaped URL query values, and explicit config secrets.
+They also avoid raw `%+v`/`%#v` dumps of `ConnectionState`, `ChatMessage`,
+raw IRC events, transport events, send results, raw tag maps, source URLs, and
+transport errors. Review logs before sharing anyway because they can still
+include non-secret identifiers such as channel names, message IDs, usernames,
+event counts, and hostnames.
 
 `twi login` is implemented as a browser/local-callback OAuth flow with a
 `--dry-run` explanation path. Successful logins save credentials through the
@@ -309,6 +340,8 @@ Current behavior:
 - Load channel names from `--channel`, `TWI_DEFAULT_CHANNELS`, or config.
 - Load animation mode.
 - Load basic image fallback settings.
+- Load debug logging controls from config/env/CLI and write redacted JSON debug
+  logs when explicitly enabled.
 - Save successful `twi login` results through the restrictive credential-file
   fallback.
 - Create or update non-secret config with `twi setup`.
@@ -322,7 +355,8 @@ Future target:
 
 - Startup token validation with scope checks.
 - Optional OS keychain backend only after explicit platform support decisions.
-- Non-Unix no-follow and ACL hardening for the fallback credential file.
+- Secure non-Unix credential persistence through a native backend or exact
+  owner-only protections.
 - Full terminal image mode controls.
 - Cache sizing and pruning configuration.
 - Persisting refreshed tokens safely after OAuth refresh succeeds.

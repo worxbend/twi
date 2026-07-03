@@ -1,13 +1,17 @@
 package twitch
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/w0rxbend/twi/internal/debuglog"
 )
 
 func TestNewIRCClientValidatesRequiredConfigWithoutLeakingToken(t *testing.T) {
@@ -71,15 +75,60 @@ func TestNewIRCClientNormalizesChannelsAndCapabilities(t *testing.T) {
 }
 
 func TestCredentialSafeIRCErrorRedactsOAuthPattern(t *testing.T) {
-	err := credentialSafeIRCError(errors.New("server rejected oauth:secret-token"))
+	err := credentialSafeIRCError(errors.New("server rejected oauth:secret-token client_secret=client-secret"))
 	if err == nil {
 		t.Fatal("credentialSafeIRCError returned nil, want error")
 	}
-	if strings.Contains(err.Error(), "oauth:secret-token") {
+	if strings.Contains(err.Error(), "oauth:secret-token") || strings.Contains(err.Error(), "client-secret") {
 		t.Fatalf("error leaked token: %q", err.Error())
 	}
-	if !strings.Contains(err.Error(), "oauth:<redacted>") {
+	if !strings.Contains(err.Error(), "<redacted>") {
 		t.Fatalf("error = %q, want redacted token marker", err.Error())
+	}
+}
+
+func TestIRCClientDebugLogsSendFieldsWithoutMessageTextOrCredentials(t *testing.T) {
+	var logs bytes.Buffer
+	logger := debuglog.New(&logs, debuglog.Options{Enabled: true})
+	client, err := NewIRCClient(IRCConfig{
+		Username:     "viewer",
+		OAuthToken:   "oauth:configured-token",
+		RefreshToken: "refresh-secret",
+		ClientSecret: "client-secret",
+		Channels:     []string{"example"},
+		DebugLogger:  logger,
+	})
+	if err != nil {
+		t.Fatalf("NewIRCClient returned error: %v", err)
+	}
+
+	client.logger.Log(context.Background(), "twitch.irc.test_error", slog.String("error", "oauth:configured-token refresh-secret client-secret"))
+	client.refresh.Logger.Log(context.Background(), "twitch.oauth_refresh.test_error", slog.String("error", "oauth:configured-token refresh-secret client-secret"))
+	if err := client.Send(context.Background(), "example", "hello oauth:message-secret"); err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+	if err := client.Reply(context.Background(), "example", "parent-1", "reply refresh_token=reply-secret"); err != nil {
+		t.Fatalf("Reply returned error: %v", err)
+	}
+
+	output := logs.String()
+	for _, want := range []string{`"event":"twitch.irc.send"`, `"event":"twitch.irc.reply"`, `"channel":"example"`, `"reply_to_message_id":"parent-1"`, `"text_length":`} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("debug log missing %q:\n%s", want, output)
+		}
+	}
+	for _, forbidden := range []string{
+		"oauth:configured-token",
+		"configured-token",
+		"refresh-secret",
+		"client-secret",
+		"oauth:message-secret",
+		"message-secret",
+		"reply-secret",
+	} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("debug log leaked %q:\n%s", forbidden, output)
+		}
 	}
 }
 

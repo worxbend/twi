@@ -13,7 +13,7 @@
 
 `twi` is a terminal Twitch chat client with taste. It is keyboard-first, fast to launch, friendly to low-drama terminals, and allergic to leaking your OAuth token.
 
-The project is currently an MVP-shaped Go app: mock chat is ready without the network; live Twitch IRC read/send, diagnostics, multi-channel UX, inline image plumbing, OAuth login, setup, and Unix-only restrictive credential-file persistence are partially shipped; refresh-token persistence after IRC reconnect and manual Kitty/Ghostty image validation are still planned.
+The project is currently an MVP-shaped Go app: mock chat is ready without the network; live Twitch IRC read/send, diagnostics, redacted debug logging, multi-channel UX, inline image plumbing, OAuth login, setup, and Unix-only restrictive credential-file persistence are partially shipped; refresh-token persistence after IRC reconnect and manual Kitty/Ghostty image validation are still planned.
 
 ```text
         +---------------------------------------------+
@@ -125,7 +125,7 @@ docker run --rm -it \
   twi:local chat --channel somechannel
 ```
 
-Do not paste real tokens into commits, screenshots, issue comments, terminal recordings, or public support threads. `twi config show` and `twi doctor` redact secrets by design.
+Do not paste real tokens into commits, screenshots, issue comments, terminal recordings, or public support threads. `twi config show`, `twi doctor`, and opt-in debug logs redact secrets by design, but review debug files before sharing because they can still include non-secret IDs, channel names, usernames, and hostnames.
 
 ## What Works Today
 
@@ -135,6 +135,7 @@ Do not paste real tokens into commits, screenshots, issue comments, terminal rec
 | Multi-channel live IRC read/send | Partial | `twi chat --channel <channel> [--channel other]` can read, send, reply, and send `/me` actions for configured channels when env/config credentials, or Unix saved credentials, are present; broader live manual evidence remains future work. |
 | Config commands | Ready | `twi config show` prints effective flat config with secrets redacted; `twi config path` shows the default config path. |
 | Diagnostics | Partial | `twi doctor` checks config path, credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, username mismatch, Twitch IRC reachability, terminal hints, Kitty/Ghostty signals, cache writability/pruning, image capability, live image-stack readiness, and feature modes. |
+| Debug logging | Partial | Redacted JSON debug logs can be enabled with `debug_logging = true`, `TWI_DEBUG_LOG=true`, or `--debug-log` on chat, login, and doctor. Logs use curated fields for auth, transport, send, asset, and render diagnostics instead of raw struct or raw tag dumps. |
 | Avatar metadata | Partial | When live chat runs with `avatar_mode = "image"` plus Twitch API credentials, a writable cache, and Kitty-compatible image capability, visible author avatar URLs are batched through Helix Get Users, downloaded, prepared, and rendered through async asset events while initials remain stable on every failure path. |
 | Emote/badge metadata | Partial | Live startup can wire Helix-backed Twitch emote and badge metadata, the public downloader, disk cache, PNG preparer, and Kitty renderer behind config, credential, cache, and terminal gates while keeping compact badge labels and exact emote-token fallbacks stable. |
 | Login/setup | Partial | `twi setup` creates or updates non-secret flat config values and can hand off to `twi login`; on supported Unix builds, `twi login` can run the browser/local-callback OAuth flow or `--dry-run` explanation, validate returned tokens, and save them through the restrictive credential-file fallback without printing them. Non-Unix builds keep env/config credentials as the supported path. |
@@ -173,6 +174,7 @@ export TWI_ENABLE_MOUSE="true"
 export TWI_AVATAR_MODE="initials"
 export TWI_EMOJI_PROVIDER="twemoji"
 export TWI_EMOTE_MODE="text"
+export TWI_DEBUG_LOG="false"
 ```
 
 Or create the flat config file shown by:
@@ -203,7 +205,20 @@ emoji_provider = "twemoji"
 emoji_url_template = ""
 emote_mode = "text"
 animation_mode = "fast"
+debug_logging = false
+debug_log_path = ""
 ```
+
+For support diagnostics, enable redacted JSON logs explicitly:
+
+```sh
+twi chat --channel somechannel --debug-log
+twi login --debug-log --debug-log-path /tmp/twi-debug.log
+twi doctor --debug-log
+```
+
+When no path is provided, the log file is `debug.log` under the platform cache
+directory.
 
 Nested TOML tables are not implemented yet. Keep the file flat.
 
@@ -281,4 +296,4 @@ GOTOOLCHAIN=local GOCACHE=/tmp/twi-gocache GOMODCACHE=/tmp/twi-gomodcache go tes
 
 ## Project Direction
 
-Near-term work is focused on keeping the MVP sharp: redacted debug logging, release packaging, and manual terminal validation. The source of truth lives in the product docs under `docs/`.
+Near-term work is focused on keeping the MVP sharp: release packaging and manual terminal validation. The source of truth lives in the product docs under `docs/`.

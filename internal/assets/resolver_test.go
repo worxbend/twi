@@ -1,6 +1,7 @@
 package assets
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/w0rxbend/twi/internal/debuglog"
 	"github.com/w0rxbend/twi/internal/storage"
 	"github.com/w0rxbend/twi/internal/twitch"
 )
@@ -54,6 +56,36 @@ func TestResolverReturnsCacheHitWithoutLookupOrDownload(t *testing.T) {
 	}
 	if downloader.calls != 0 {
 		t.Fatalf("downloader calls = %d, want 0", downloader.calls)
+	}
+}
+
+func TestResolverDebugLogsSuppressUnsafeAssetIdentity(t *testing.T) {
+	var logs bytes.Buffer
+	resolver := &Resolver{
+		Logger: debuglog.New(&logs, debuglog.Options{Enabled: true}),
+	}
+
+	event := resolver.Resolve(context.Background(), Request{
+		ID: "req-unsafe",
+		Ref: twitch.AssetRef{
+			Kind: KindTwitchEmote,
+			ID:   "https://cdn.example/emote.png?access_token=source-secret",
+		},
+	})
+	if event.Kind != EventFailed {
+		t.Fatalf("event.Kind = %s, want failed", event.Kind)
+	}
+
+	output := logs.String()
+	for _, want := range []string{`"event":"asset.resolve.failed"`, `"asset_kind":"twitch_emote"`, `"asset_id":""`, `"asset_identity_unsafe":true`} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("debug log missing %q:\n%s", want, output)
+		}
+	}
+	for _, forbidden := range []string{"https://cdn.example", "emote.png", "source-secret", "access_token=source-secret"} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("debug log leaked %q:\n%s", forbidden, output)
+		}
 	}
 }
 

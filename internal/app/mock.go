@@ -16,6 +16,7 @@ import (
 	"github.com/w0rxbend/twi/internal/animation"
 	"github.com/w0rxbend/twi/internal/assets"
 	"github.com/w0rxbend/twi/internal/config"
+	"github.com/w0rxbend/twi/internal/debuglog"
 	"github.com/w0rxbend/twi/internal/render"
 	"github.com/w0rxbend/twi/internal/storage"
 	"github.com/w0rxbend/twi/internal/twitch"
@@ -50,6 +51,7 @@ type ClientOptions struct {
 	AssetKinds     map[string]bool
 	ImagePreparer  render.ImagePreparer
 	ImageRenderer  render.ImageRenderer
+	DebugLogger    debuglog.Logger
 }
 
 type fdWriter interface {
@@ -73,6 +75,7 @@ type mockShellModel struct {
 	assetKinds            map[string]bool
 	imagePreparer         render.ImagePreparer
 	imageRenderer         render.ImageRenderer
+	debugLogger           debuglog.Logger
 	incoming              []twitch.ChatMessage
 	nextIncoming          int
 	nextReveal            int
@@ -232,12 +235,21 @@ type reconnectCompletedMsg struct {
 // not an interactive terminal, it writes the initial Bubble Tea view and exits
 // so tests and redirected commands do not block waiting for keyboard input.
 func RunMock(w io.Writer, cfg config.Config) error {
+	return RunMockWithOptions(w, cfg, ClientOptions{})
+}
+
+// RunMockWithOptions starts the deterministic non-network mock chat shell with
+// optional app services and diagnostics. Non-interactive behavior matches
+// RunMock.
+func RunMockWithOptions(w io.Writer, cfg config.Config, opts ClientOptions) error {
 	channel := "mock"
 	if len(cfg.DefaultChannels) > 0 {
 		channel = cfg.DefaultChannels[0]
 	}
 
 	model := newMockShellModelWithCapability(channel, cfg, runtimeImageCapability(cfg))
+	model.debugLogger = opts.DebugLogger
+	model.debugAppStart("mock", len(configuredChannels(channel, cfg.DefaultChannels)))
 	if !isInteractiveTerminal(w) {
 		_, err := fmt.Fprintln(w, model.View())
 		return err
@@ -268,6 +280,7 @@ func RunClientWithOptions(w io.Writer, cfg config.Config, client ChatClient, opt
 	}
 
 	model := newLiveShellModelWithOptionsAndCapability(channel, cfg, client, opts, runtimeImageCapability(cfg))
+	model.debugAppStart("live", len(configuredChannels(channel, cfg.DefaultChannels)))
 	if !isInteractiveTerminal(w) {
 		_, err := fmt.Fprintln(w, model.View())
 		return err
@@ -369,6 +382,7 @@ func newLiveShellModelWithClockOptionsAndCapability(channel string, cfg config.C
 		assetKinds:            cloneAssetKinds(opts.AssetKinds),
 		imagePreparer:         opts.ImagePreparer,
 		imageRenderer:         opts.ImageRenderer,
+		debugLogger:           opts.DebugLogger,
 		avatarRequested:       make(map[string]bool),
 		assetRequested:        make(map[string]bool),
 		assetRetryAfter:       make(map[string]time.Time),
@@ -585,8 +599,10 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Detail:  "chat message stream closed",
 				At:      time.Now(),
 			})
+			m.debugConnectionState("app.message_stream.closed", m.activeChannelState().status)
 			return m, nil
 		}
+		m.debugChatMessage("app.message.received", msg.message)
 		var cmds []tea.Cmd
 		if revealCmd := m.enqueueMessage(msg.message); revealCmd != nil {
 			cmds = append(cmds, revealCmd)
@@ -603,10 +619,12 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					Detail:  "connection state stream closed",
 					At:      time.Now(),
 				})
+				m.debugConnectionState("app.connection_stream.closed", m.activeChannelState().status)
 			}
 			return m, nil
 		}
 		m.channels.applyConnectionState(msg.state)
+		m.debugConnectionState("app.connection_state.received", msg.state)
 		return m, m.nextConnectionStateCommand()
 	case composerSendCompletedMsg:
 		return m.completeComposerSend(msg)
@@ -630,12 +648,14 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(requests) == 0 || m.avatarResolver == nil {
 			return m, nil
 		}
+		m.debugAvatarLookupStart(len(requests))
 		m.markAvatarRequests(requests)
 		m.avatarLookupInFlight = true
 		return m, m.resolveAvatarCommand(requests)
 	case avatarLookupResolvedMsg:
 		m.avatarLookupInFlight = false
 		m.applyAvatarResults(msg.results)
+		m.debugAvatarLookupComplete(msg.results, msg.err)
 		m.clampScroll()
 		if msg.err != nil {
 			return m, nil
@@ -648,12 +668,14 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(requests) == 0 || m.assetResolver == nil || m.imageRenderer == nil {
 			return m, nil
 		}
+		m.debugAssetBatchStart(len(requests))
 		m.markAssetRequests(requests)
 		m.assetLookupInFlight = true
 		return m, m.resolveAssetsCommand(requests)
 	case assetPreparedBatchMsg:
 		m.assetLookupInFlight = false
 		m.applyAssetResults(msg.results)
+		m.debugAssetBatchComplete(msg.results)
 		m.refreshActiveRevealRows()
 		m.clampScroll()
 		return m.withAsyncAssetCommands(nil)
@@ -2300,6 +2322,7 @@ func (m *mockShellModel) queueComposerSend() (tea.Model, tea.Cmd) {
 	state.replyTo = nil
 	state.sendState = composerSendQueued
 	state.sendFeedback = fmt.Sprintf("queued for #%s", channel)
+	m.debugSendQueued(state.sendQueue[len(state.sendQueue)-1])
 	return *m, m.startNextComposerSend(state)
 }
 
@@ -2318,6 +2341,7 @@ func (m *mockShellModel) startNextComposerSend(state *channelState) tea.Cmd {
 	if next.Action {
 		state.sendFeedback = "sending action to #" + next.Channel
 	}
+	m.debugSendStart(next)
 	client := m.client
 	req := SendRequest{
 		Channel:          next.Channel,
@@ -2339,6 +2363,7 @@ func (m mockShellModel) completeComposerSend(msg composerSendCompletedMsg) (tea.
 
 	sent := *state.activeSend
 	state.activeSend = nil
+	m.debugSendComplete(sent, msg.result, msg.err)
 	if msg.err != nil {
 		state.sendState = composerSendFailed
 		state.sendFeedback = "failed: " + credentialSafeSendDetail(msg.err)

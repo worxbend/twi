@@ -10,7 +10,7 @@ This document summarizes the development workflow and architecture for `twi`. It
 - `govulncheck` and `staticcheck` are pinned as Go module tools.
 - Use Go modules only. Do not use GOPATH workflows.
 - Ready behavior: a deterministic non-network Bubble Tea mock shell, config path/show commands, and text/initials/Unicode/badge/emote-token fallback rendering.
-- Partially shipped behavior: multi-channel live Twitch IRC read/send with active-channel composer sends, selected-message replies and inspect diagnostics, `/me` action sends, keyboard-first channel sidebar, command palette, per-channel local message filters, optional mouse support, Twitch avatar metadata, Twitch emote/badge metadata resolution, standard emoji provider metadata, public image downloading, visible-row asset event integration, bounded PNG/JPEG/GIF image decode and cell preparation, inline image renderer plumbing, default live asset resolver/downloader/preparer/renderer wiring, and `twi doctor` diagnostics for credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, username mismatch, Twitch reachability, terminal hints, Kitty/Ghostty signals, cache writability, image capability, live image-stack readiness, and feature modes.
+- Partially shipped behavior: multi-channel live Twitch IRC read/send with active-channel composer sends, selected-message replies and inspect diagnostics, `/me` action sends, keyboard-first channel sidebar, command palette, per-channel local message filters, optional mouse support, Twitch avatar metadata, Twitch emote/badge metadata resolution, standard emoji provider metadata, public image downloading, visible-row asset event integration, bounded PNG/JPEG/GIF image decode and cell preparation, inline image renderer plumbing, default live asset resolver/downloader/preparer/renderer wiring, opt-in redacted JSON debug logging, and `twi doctor` diagnostics for credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, username mismatch, Twitch reachability, terminal hints, Kitty/Ghostty signals, cache writability, image capability, live image-stack readiness, and feature modes.
 - Partially shipped auth/setup behavior: `twi setup` writes non-secret config values and can hand off to login; on supported Unix builds, `twi login` runs a browser/local-callback OAuth flow with a `--dry-run` explanation path and saves returned tokens through the restrictive credential-file fallback without printing them. On non-Unix builds, the credential-file fallback is disabled and env/config credentials remain the supported path.
 - Planned behavior: refresh-token persistence after IRC reconnect and manual Kitty/Ghostty inline image validation.
 - Twitch username/token credentials currently come from environment variables, the flat config file, or on supported Unix builds the private credential file; environment and flat config values take precedence over saved credentials, and CLI flags currently override channels and config path only.
@@ -37,6 +37,7 @@ internal/theme reusable palettes and styles
 internal/storage cache for metadata and assets
 internal/assets asset resolution and image cache behavior
 internal/animation typed-in reveal scheduler and timing
+internal/debuglog redacted structured debug records
 ```
 
 Keep boundaries strict:
@@ -44,6 +45,9 @@ Keep boundaries strict:
 - UI should depend on internal interfaces, not Twitch library types.
 - Twitch/network code should not depend on Bubble Tea components.
 - Rendering should consume normalized messages and assets, not raw IRC strings.
+- Debug logging should use `internal/debuglog` and curated fields only; do not
+  log raw `ConnectionState`, `ChatMessage`, raw IRC events, transport events,
+  send results, raw tag maps, source URLs, or transport errors.
 - Animation should consume render rows/fragments, not raw strings; queue overflow completes the oldest active reveal immediately so callers can render it statically. App views also render new messages statically while the chat viewport is scrolled away from the bottom so off-screen traffic cannot grow a reveal backlog or shift the user's current page.
 - Image loading and network work must not block Bubble Tea `Update` or `View`; asset fallback rendering is pure row construction, and avatar metadata/cache plus visible asset preparation/rendering work flows through debounced commands that merge refs or prepared cells without changing fallback row widths. Permanent image preparation/render failures are recorded only with URL-free asset identity, safe downloaded-record metadata, optional payload identity, and cell dimensions; transient resolver, downloader, cache, filesystem, and context failures stay on the retry path.
 

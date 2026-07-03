@@ -20,6 +20,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/w0rxbend/twi/internal/debuglog"
 )
 
 func TestPublicImageDownloaderDownloadsSniffedPNGToSafePath(t *testing.T) {
@@ -72,6 +74,32 @@ func TestPublicImageDownloaderDownloadsSniffedPNGToSafePath(t *testing.T) {
 		t.Fatalf("downloaded bytes = %d bytes, want %d", len(got), len(body))
 	}
 	assertSafeDownloadPath(t, result.Path)
+}
+
+func TestPublicImageDownloaderDebugLogsRedactUnsafeSourceURL(t *testing.T) {
+	var logs bytes.Buffer
+	downloader := NewPublicImageDownloader(PublicImageDownloaderOptions{
+		Logger: debuglog.New(&logs, debuglog.Options{Enabled: true}),
+	})
+
+	_, err := downloader.Download(context.Background(), DownloadRequest{
+		URL: "https://cdn.example/images/emote.png?access_token=source-secret&client_secret=client-secret",
+	})
+	if err == nil {
+		t.Fatal("Download returned nil error, want unsafe source error")
+	}
+
+	output := logs.String()
+	for _, want := range []string{`"event":"asset.download.start"`, `"event":"asset.download.failed"`, `"source_url_scheme":"https"`, `"source_url_host":"cdn.example"`, `"source_url_has_credential_marker":true`} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("debug log missing %q:\n%s", want, output)
+		}
+	}
+	for _, forbidden := range []string{"source-secret", "client-secret", "emote.png?access_token"} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("debug log leaked %q:\n%s", forbidden, output)
+		}
+	}
 }
 
 func TestPublicImageDownloaderDownloadsSupportedSniffedFormats(t *testing.T) {

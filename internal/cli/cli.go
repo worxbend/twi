@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/w0rxbend/twi/internal/app"
 	"github.com/w0rxbend/twi/internal/assets"
 	"github.com/w0rxbend/twi/internal/config"
+	"github.com/w0rxbend/twi/internal/debuglog"
 	"github.com/w0rxbend/twi/internal/render"
 	"github.com/w0rxbend/twi/internal/storage"
 	"github.com/w0rxbend/twi/internal/twitch"
@@ -23,7 +25,7 @@ import (
 const usage = `twi is a terminal Twitch chat client.
 
 Usage:
-  twi chat [--channel name] [--mock]
+  twi chat [--channel name] [--mock] [--debug-log]
   twi config show
   twi config path
   twi doctor
@@ -51,13 +53,17 @@ Environment:
   TWI_EMOJI_URL_TEMPLATE
   TWI_EMOTE_MODE
   TWI_ANIMATION_MODE
+  TWI_DEBUG_LOG
+  TWI_DEBUG_LOG_PATH
 `
 
-var newLiveChatClient = func(ctx context.Context, cfg config.Config) (app.ChatClient, error) {
-	return app.NewRestartableLiveChatClient(ctx, liveIRCTransportFactory(cfg), 0)
+var newLiveChatClient = func(ctx context.Context, cfg config.Config, logger debuglog.Logger) (app.ChatClient, error) {
+	return app.NewRestartableLiveChatClientWithOptions(ctx, liveIRCTransportFactory(cfg, logger), 0, app.LiveChatClientOptions{
+		DebugLogger: logger,
+	})
 }
 
-func liveIRCTransportFactory(cfg config.Config) app.LiveChatTransportFactory {
+func liveIRCTransportFactory(cfg config.Config, logger debuglog.Logger) app.LiveChatTransportFactory {
 	return func(context.Context) (twitch.ChatClient, error) {
 		return twitch.NewIRCClient(twitch.IRCConfig{
 			Username:     cfg.Twitch.Username,
@@ -66,6 +72,7 @@ func liveIRCTransportFactory(cfg config.Config) app.LiveChatTransportFactory {
 			ClientID:     cfg.Twitch.ClientID,
 			ClientSecret: cfg.Twitch.ClientSecret,
 			Channels:     cfg.DefaultChannels,
+			DebugLogger:  logger,
 		})
 	}
 }
@@ -141,9 +148,11 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 	var channels channelFlags
 	var cfgPath string
 	var mock bool
+	var debugFlags debugFlagOptions
 	fs.Var(&channels, "channel", "Twitch channel to join; repeat for multiple channels")
 	fs.StringVar(&cfgPath, "config", "", "config file path")
 	fs.BoolVar(&mock, "mock", false, "run against the built-in mock chat source")
+	addDebugFlags(fs, &debugFlags)
 
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -153,6 +162,7 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 		ConfigPath: cfgPath,
 		Channels:   []string(channels),
 	}
+	applyDebugFlagOverrides(&overrides, debugFlags)
 	cfg, err := config.Load(os.Environ(), overrides)
 	if err != nil {
 		fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
@@ -163,10 +173,22 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if mock {
-		if err := app.RunMock(stdout, cfg); err != nil {
+		logger, closeLog, err := openDebugLogger(cfg)
+		if err != nil {
+			fmt.Fprintf(stderr, "open debug log: %s\n", config.RedactDisplayValue(err.Error()))
+			return 1
+		}
+		defer closeLog()
+		logger.Log(context.Background(), "cli.chat.start",
+			slog.Bool("mock", true),
+			slog.Int("channel_count", len(cfg.DefaultChannels)),
+		)
+		if err := app.RunMockWithOptions(stdout, cfg, app.ClientOptions{DebugLogger: logger}); err != nil {
+			logger.Log(context.Background(), "cli.chat.failed", slog.String("error", err.Error()))
 			fmt.Fprintf(stderr, "mock chat: %v\n", err)
 			return 1
 		}
+		logger.Log(context.Background(), "cli.chat.complete", slog.Bool("mock", true))
 		return 0
 	}
 
@@ -175,6 +197,16 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "load credentials: %s\n", config.RedactDisplayValue(status.Err.Error()))
 		return 1
 	}
+	logger, closeLog, err := openDebugLogger(cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "open debug log: %s\n", config.RedactDisplayValue(err.Error()))
+		return 1
+	}
+	defer closeLog()
+	logger.Log(context.Background(), "cli.chat.start",
+		slog.Bool("mock", false),
+		slog.Int("channel_count", len(cfg.DefaultChannels)),
+	)
 	if len(cfg.DefaultChannels) == 0 {
 		fmt.Fprintln(stderr, "no channel configured; pass --channel or set TWI_DEFAULT_CHANNELS")
 		return 2
@@ -184,15 +216,18 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	client, err := newLiveChatClient(context.Background(), cfg)
+	client, err := newLiveChatClient(context.Background(), cfg, logger)
 	if err != nil {
+		logger.Log(context.Background(), "cli.chat.failed", slog.String("error", err.Error()))
 		fmt.Fprintf(stderr, "start Twitch IRC chat: %v\n", err)
 		return 1
 	}
-	if err := runLiveChat(stdout, cfg, client, newLiveClientOptions(cfg)); err != nil {
+	if err := runLiveChat(stdout, cfg, client, withDebugLogger(newLiveClientOptions(cfg), logger)); err != nil {
+		logger.Log(context.Background(), "cli.chat.failed", slog.String("error", err.Error()))
 		fmt.Fprintf(stderr, "live chat: %v\n", err)
 		return 1
 	}
+	logger.Log(context.Background(), "cli.chat.complete", slog.Bool("mock", false))
 	return 0
 }
 
@@ -366,13 +401,16 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var cfgPath string
+	var debugFlags debugFlagOptions
 	fs.StringVar(&cfgPath, "config", "", "config file path")
+	addDebugFlags(fs, &debugFlags)
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
 	environ := os.Environ()
 	overrides := config.Overrides{ConfigPath: cfgPath}
+	applyDebugFlagOverrides(&overrides, debugFlags)
 	cfg, loadErr := config.Load(environ, overrides)
 	if loadErr != nil {
 		fallback, err := config.LoadEnvOnly(environ, overrides)
@@ -386,6 +424,13 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 	if credentialErr != nil {
 		credentialStatus.Err = credentialErr
 	}
+	logger, closeLog, err := openDebugLogger(cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "open debug log: %s\n", config.RedactDisplayValue(err.Error()))
+		return 1
+	}
+	defer closeLog()
+	logger.Log(context.Background(), "cli.doctor.start")
 
 	report := buildDoctorReport(context.Background(), cfg, loadErr)
 	if credentialStatus.Path != "" || credentialStatus.Present || credentialStatus.Err != nil {
@@ -395,6 +440,7 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 	for _, check := range report.Checks {
 		fmt.Fprintf(stdout, "[%s] %s: %s\n", check.Status, check.Name, check.Detail)
 	}
+	logger.Log(context.Background(), "cli.doctor.complete", slog.Int("check_count", len(report.Checks)))
 	return 0
 }
 

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"reflect"
@@ -10,7 +11,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/w0rxbend/twi/internal/auth"
 	"github.com/w0rxbend/twi/internal/config"
+	"github.com/w0rxbend/twi/internal/debuglog"
 	"github.com/w0rxbend/twi/internal/twitch"
 )
 
@@ -189,6 +192,135 @@ func TestLiveChatClientRedactsOAuthPatternInGenericErrors(t *testing.T) {
 	}
 	if !strings.Contains(got.Detail, "<redacted>") {
 		t.Fatalf("detail = %q, want redacted token marker", got.Detail)
+	}
+}
+
+func TestLiveChatDebugLogsUseSanitizedTransportEventFields(t *testing.T) {
+	var logs bytes.Buffer
+	logger := debuglog.New(&logs, debuglog.Options{
+		Enabled: true,
+		Secrets: []auth.Secret{
+			auth.NewSecret("plain-client-secret"),
+		},
+	})
+	transport := newFakeTwitchTransport(8)
+	client, err := NewLiveChatClientWithOptions(context.Background(), transport, 8, LiveChatClientOptions{DebugLogger: logger})
+	if err != nil {
+		t.Fatalf("NewLiveChatClientWithOptions returned error: %v", err)
+	}
+	defer client.Close()
+	<-client.ConnectionStates()
+
+	client.handleEvent(context.Background(), twitch.Event{
+		Kind: twitch.EventRaw,
+		Raw: twitch.RawEvent{
+			RawType: "GLOBALUSERSTATE",
+			Text:    "raw text with code=callback-code",
+			Raw:     "@badges=;oauth_token=oauth:raw-secret",
+			RawTags: map[string]string{
+				"authorization": "Bearer tag-secret",
+				"client_secret": "plain-client-secret",
+			},
+			TODO: "raw diagnostic TODO",
+		},
+		Err: errors.New("transport failed Authorization: Bearer bearer-secret access_token=query-secret client_secret=plain-client-secret"),
+	})
+	client.handleEvent(context.Background(), twitch.Event{
+		Kind: twitch.EventMessage,
+		Message: twitch.ChatMessage{
+			ID:          "msg-1",
+			Channel:     "example",
+			ChannelID:   "room-1",
+			AuthorLogin: "viewer",
+			AuthorID:    "42",
+			DisplayName: "Viewer",
+			Text:        "hello oauth:message-secret",
+			Type:        twitch.MessageTypeChat,
+			RawTags: map[string]string{
+				"oauth_token": "oauth:tag-secret",
+			},
+		},
+	})
+
+	output := logs.String()
+	for _, want := range []string{`"event":"twitch.event"`, `"kind":"raw"`, `"raw_tag_count":2`, `"raw_length":`, `"message_id":"msg-1"`, `"text_length":`} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("debug log missing %q:\n%s", want, output)
+		}
+	}
+	for _, forbidden := range []string{
+		"callback-code",
+		"oauth:raw-secret",
+		"raw-secret",
+		"tag-secret",
+		"plain-client-secret",
+		"bearer-secret",
+		"query-secret",
+		"oauth:message-secret",
+		"message-secret",
+		"RawTags",
+		"RawEvent",
+		"ChatMessage",
+	} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("debug log leaked %q:\n%s", forbidden, output)
+		}
+	}
+}
+
+func TestAppDebugLogsSanitizeConnectionStateAndSendResult(t *testing.T) {
+	var logs bytes.Buffer
+	logger := debuglog.New(&logs, debuglog.Options{
+		Enabled: true,
+		Secrets: []auth.Secret{
+			auth.NewSecret("explicit-send-secret"),
+		},
+	})
+	model := newLiveShellModelWithOptionsAndCapability("example", config.Default(), NewFakeChatClient(1), ClientOptions{DebugLogger: logger}, deterministicImageCapability(config.Default()))
+
+	state := ConnectionState{
+		Status:  ConnectionFailed,
+		Channel: "example",
+		Detail:  "failed with oauth:state-secret",
+		Err:     errors.New("connection failed client_secret=connection-secret"),
+		At:      time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC),
+	}
+	updated, _ := model.Update(chatClientConnectionStateMsg{state: state, ok: true})
+	model = updated.(mockShellModel)
+	model.activeChannelState().activeSend = &queuedComposerSend{
+		ID:      1,
+		Channel: "example",
+		Text:    "hello oauth:text-secret",
+		Draft:   "hello oauth:draft-secret",
+	}
+	model.completeComposerSend(composerSendCompletedMsg{
+		id:     1,
+		result: SendResult{MessageID: "message-1", Detail: "accepted access_token=result-secret"},
+		err:    errors.New("send failed refresh_token=explicit-send-secret"),
+	})
+
+	output := logs.String()
+	for _, want := range []string{`"event":"app.connection_state.received"`, `"status":"failed"`, `"event":"app.send.complete"`, `"message_id":"message-1"`, `"text_length":`} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("debug log missing %q:\n%s", want, output)
+		}
+	}
+	for _, forbidden := range []string{
+		"oauth:state-secret",
+		"state-secret",
+		"connection-secret",
+		"oauth:text-secret",
+		"text-secret",
+		"oauth:draft-secret",
+		"draft-secret",
+		"result-secret",
+		"explicit-send-secret",
+		"ConnectionState",
+		"SendResult",
+	} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("debug log leaked %q:\n%s", forbidden, output)
+		}
 	}
 }
 

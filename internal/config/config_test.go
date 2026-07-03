@@ -65,6 +65,51 @@ func TestLoadMouseFeatureFromEnvAndConfigShow(t *testing.T) {
 	}
 }
 
+func TestLoadDebugLoggingFromFileEnvAndOverrides(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := strings.Join([]string{
+		`debug_logging = false`,
+		`debug_log_path = "/tmp/file-debug.log"`,
+	}, "\n")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load([]string{
+		"TWI_DEBUG_LOG=true",
+		"TWI_DEBUG_LOG_PATH=/tmp/env-debug.log",
+	}, Overrides{ConfigPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Debug.Enabled {
+		t.Fatal("Debug.Enabled = false, want env override true")
+	}
+	if cfg.Debug.LogPath != "/tmp/env-debug.log" {
+		t.Fatalf("Debug.LogPath = %q, want env path", cfg.Debug.LogPath)
+	}
+
+	cfg, err = Load([]string{
+		"TWI_DEBUG_LOG=true",
+		"TWI_DEBUG_LOG_PATH=/tmp/env-debug.log",
+	}, Overrides{
+		ConfigPath:      path,
+		DebugLogSet:     true,
+		DebugLogEnabled: false,
+		DebugLogPath:    "/tmp/cli-debug.log",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Debug.Enabled {
+		t.Fatal("Debug.Enabled = true, want CLI override false")
+	}
+	if cfg.Debug.LogPath != "/tmp/cli-debug.log" {
+		t.Fatalf("Debug.LogPath = %q, want CLI path", cfg.Debug.LogPath)
+	}
+}
+
 func TestLoadEmojiProviderConfigAndRedactsUnsafeTemplate(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
@@ -123,6 +168,25 @@ func TestRedactedStringDoesNotLeakSecrets(t *testing.T) {
 	}
 	if strings.Count(output, redacted) != 5 {
 		t.Fatalf("redacted output = %q, want five redactions", output)
+	}
+}
+
+func TestRedactedStringIncludesDebugLoggingWithoutLeakingUnsafePath(t *testing.T) {
+	cfg := Default()
+	cfg.Debug.Enabled = true
+	cfg.Debug.LogPath = filepath.Join(t.TempDir(), "debug.log?code=debug-code-secret&client_secret=debug-client-secret")
+
+	output := cfg.RedactedString()
+
+	for _, want := range []string{`debug_logging = true`, `debug_log_path = "[redacted]"`} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("redacted output missing %q:\n%s", want, output)
+		}
+	}
+	for _, secret := range []string{"debug-code-secret", "debug-client-secret"} {
+		if strings.Contains(output, secret) {
+			t.Fatalf("redacted output leaked %q:\n%s", secret, output)
+		}
 	}
 }
 

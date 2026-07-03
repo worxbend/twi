@@ -18,6 +18,7 @@ import (
 	"github.com/w0rxbend/twi/internal/assets"
 	"github.com/w0rxbend/twi/internal/auth"
 	"github.com/w0rxbend/twi/internal/config"
+	"github.com/w0rxbend/twi/internal/debuglog"
 	"github.com/w0rxbend/twi/internal/render"
 	"github.com/w0rxbend/twi/internal/storage"
 	"github.com/w0rxbend/twi/internal/twitch"
@@ -28,11 +29,21 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
+	cacheDir, err := os.MkdirTemp("", "twi-cli-test-cache-")
+	if err != nil {
+		panic(err)
+	}
 	if err := os.Setenv("XDG_CONFIG_HOME", dir); err != nil {
 		panic(err)
 	}
+	if err := os.Setenv("XDG_CACHE_HOME", cacheDir); err != nil {
+		panic(err)
+	}
+	_ = os.Setenv("TWI_DEBUG_LOG", "")
+	_ = os.Setenv("TWI_DEBUG_LOG_PATH", "")
 	code := m.Run()
 	_ = os.RemoveAll(dir)
+	_ = os.RemoveAll(cacheDir)
 	os.Exit(code)
 }
 
@@ -44,13 +55,88 @@ func TestHelp(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0", code)
 	}
-	for _, want := range []string{"twi chat", "twi setup", "TWI_ENABLE_MOUSE", "TWI_EMOJI_PROVIDER", "TWI_EMOJI_URL_TEMPLATE"} {
+	for _, want := range []string{"twi chat", "twi setup", "TWI_ENABLE_MOUSE", "TWI_EMOJI_PROVIDER", "TWI_EMOJI_URL_TEMPLATE", "TWI_DEBUG_LOG"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("help output missing %q: %q", want, stdout.String())
 		}
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestChatDebugLogFlagWritesRedactedMockLog(t *testing.T) {
+	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:debug-access-secret")
+	t.Setenv("TWI_TWITCH_REFRESH_TOKEN", "debug-refresh-secret")
+	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "debug-client-secret")
+	logPath := filepath.Join(t.TempDir(), "debug.log")
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{
+		"chat",
+		"--mock",
+		"--channel", "example",
+		"--debug-log",
+		"--debug-log-path", logPath,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile debug log returned error: %v", err)
+	}
+	output := string(data)
+	for _, want := range []string{`"event":"cli.debug_log.opened"`, `"event":"cli.chat.start"`, `"event":"app.start"`, `"mock":true`} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("debug log missing %q:\n%s", want, output)
+		}
+	}
+	assertOutputDoesNotContain(t, output, "oauth:debug-access-secret", "debug-access-secret", "debug-refresh-secret", "debug-client-secret")
+}
+
+func TestDebugLogFlagCanDisableEnvLogging(t *testing.T) {
+	t.Setenv("TWI_DEBUG_LOG", "true")
+	logPath := filepath.Join(t.TempDir(), "debug.log")
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{
+		"chat",
+		"--mock",
+		"--channel", "example",
+		"--debug-log=false",
+		"--debug-log-path", logPath,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if _, err := os.Stat(logPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("debug log stat error = %v, want not exist", err)
+	}
+}
+
+func TestDebugLogRejectsExistingGroupReadableFile(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "debug.log")
+	if err := os.WriteFile(logPath, []byte("existing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{
+		"chat",
+		"--mock",
+		"--channel", "example",
+		"--debug-log",
+		"--debug-log-path", logPath,
+	}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("Run returned %d, want 1; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "open debug log") || !strings.Contains(stderr.String(), "private user-only") {
+		t.Fatalf("stderr missing private-permission failure: %q", stderr.String())
 	}
 }
 
@@ -434,6 +520,76 @@ func TestLoginCompletesFakeFlowSavesCredentialsWithoutPrintingTokens(t *testing.
 		}
 	}
 	assertOutputDoesNotContain(t, stdout.String()+stderr.String(),
+		"client-secret", "state-secret", "callback-code", "oauth:access-secret", "access-secret", "refresh-secret", "https://auth.example")
+}
+
+func TestLoginDebugLogRedactsOAuthFlowSecrets(t *testing.T) {
+	t.Setenv("TWI_TWITCH_CLIENT_ID", "client-id")
+	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
+	logPath := filepath.Join(t.TempDir(), "debug.log")
+
+	resetLoginTestHooks(t)
+	credentialStore := storage.NewMemoryCredentialStore()
+	newCredentialStore = func() (storage.CredentialStore, error) {
+		return credentialStore, nil
+	}
+	fakeFlow := auth.NewFakeLoginFlow()
+	fakeFlow.QueueBegin(auth.LoginChallenge{
+		AuthorizationURL: auth.NewSecret("https://auth.example/authorize?client_id=client-id&state=state-secret&client_secret=client-secret"),
+		State:            auth.NewSecret("state-secret"),
+		Scopes:           auth.RequiredChatScopes(),
+		ExpiresAt:        time.Now().Add(time.Minute),
+	}, nil)
+	fakeFlow.QueueComplete(auth.LoginResult{
+		Identity: auth.Identity{UserID: "42", Login: "viewer"},
+		Tokens: auth.TokenSet{
+			AccessToken:  auth.NewSecret("oauth:access-secret"),
+			RefreshToken: auth.NewSecret("refresh-secret"),
+			Scopes:       auth.RequiredChatScopes(),
+		},
+		Scopes: auth.RequiredChatScopes(),
+	}, nil)
+	newLoginFlow = func() auth.LoginFlow {
+		return fakeFlow
+	}
+	newLoginCallbackWaiter = func(string) (loginCallbackWaiter, error) {
+		return &fakeLoginCallbackWaiter{callback: auth.LoginCallback{
+			Code:  auth.NewSecret("callback-code"),
+			State: auth.NewSecret("state-secret"),
+		}}, nil
+	}
+	openLoginBrowser = func(context.Context, string) error {
+		return nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{
+		"login",
+		"--config", t.TempDir() + "/missing.toml",
+		"--debug-log",
+		"--debug-log-path", logPath,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile debug log returned error: %v", err)
+	}
+	output := string(data)
+	for _, want := range []string{
+		`"event":"cli.login.start"`,
+		`"event":"cli.login.begin_succeeded"`,
+		`"event":"cli.login.callback_received"`,
+		`"event":"cli.login.complete_succeeded"`,
+		`"event":"cli.login.save_succeeded"`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("debug log missing %q:\n%s", want, output)
+		}
+	}
+	assertOutputDoesNotContain(t, output,
 		"client-secret", "state-secret", "callback-code", "oauth:access-secret", "access-secret", "refresh-secret", "https://auth.example")
 }
 
@@ -829,7 +985,7 @@ func TestLiveChatConfiguredStartsClient(t *testing.T) {
 
 	var gotChannels []string
 	fake := app.NewFakeChatClient(1)
-	newLiveChatClient = func(_ context.Context, cfg config.Config) (app.ChatClient, error) {
+	newLiveChatClient = func(_ context.Context, cfg config.Config, _ debuglog.Logger) (app.ChatClient, error) {
 		gotChannels = append([]string(nil), cfg.DefaultChannels...)
 		return fake, nil
 	}
@@ -878,7 +1034,7 @@ func TestLiveChatEnvCredentialsIgnoreUnsupportedCredentialFileFallback(t *testin
 		return nil, fmt.Errorf("%w: credential-file fallback is disabled on non-Unix builds; use env/config; oauth:stored-secret", storage.ErrUnsupportedCredentialFilePlatform)
 	}
 	fake := app.NewFakeChatClient(1)
-	newLiveChatClient = func(context.Context, config.Config) (app.ChatClient, error) {
+	newLiveChatClient = func(context.Context, config.Config, debuglog.Logger) (app.ChatClient, error) {
 		return fake, nil
 	}
 	runLiveChat = func(stdout io.Writer, _ config.Config, client app.ChatClient, _ app.ClientOptions) error {
@@ -915,7 +1071,7 @@ func TestLiveChatConfiguredStartsClientWithMultipleChannels(t *testing.T) {
 	var gotFactoryChannels []string
 	var gotRunChannels []string
 	fake := app.NewFakeChatClient(1)
-	newLiveChatClient = func(_ context.Context, cfg config.Config) (app.ChatClient, error) {
+	newLiveChatClient = func(_ context.Context, cfg config.Config, _ debuglog.Logger) (app.ChatClient, error) {
 		gotFactoryChannels = append([]string(nil), cfg.DefaultChannels...)
 		return fake, nil
 	}
@@ -965,7 +1121,7 @@ func TestLiveChatConfiguredWiresImageStackWhenReady(t *testing.T) {
 	}()
 
 	fake := app.NewFakeChatClient(1)
-	newLiveChatClient = func(context.Context, config.Config) (app.ChatClient, error) {
+	newLiveChatClient = func(context.Context, config.Config, debuglog.Logger) (app.ChatClient, error) {
 		return fake, nil
 	}
 	var got app.ClientOptions
@@ -1175,6 +1331,48 @@ func TestDoctorDoesNotPrintSecrets(t *testing.T) {
 			t.Fatalf("doctor output leaked %q: %s", secret, stdout.String())
 		}
 	}
+}
+
+func TestDoctorDebugLogWritesRedactedCommandEvents(t *testing.T) {
+	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:doctor-access-secret")
+	t.Setenv("TWI_TWITCH_REFRESH_TOKEN", "doctor-refresh-secret")
+	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "doctor-client-secret")
+	logPath := filepath.Join(t.TempDir(), "debug.log")
+
+	oldBuildDoctorReport := buildDoctorReport
+	t.Cleanup(func() {
+		buildDoctorReport = oldBuildDoctorReport
+	})
+	buildDoctorReport = func(context.Context, config.Config, error) app.DoctorReport {
+		return app.DoctorReport{Checks: []app.DoctorCheck{{
+			Name:   "fixture",
+			Status: app.DoctorStatusOK,
+			Detail: "ok",
+		}}}
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{
+		"doctor",
+		"--config", t.TempDir() + "/missing.toml",
+		"--debug-log",
+		"--debug-log-path", logPath,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile debug log returned error: %v", err)
+	}
+	output := string(data)
+	for _, want := range []string{`"event":"cli.doctor.start"`, `"event":"cli.doctor.complete"`, `"check_count":1`} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("debug log missing %q:\n%s", want, output)
+		}
+	}
+	assertOutputDoesNotContain(t, output, "oauth:doctor-access-secret", "doctor-access-secret", "doctor-refresh-secret", "doctor-client-secret")
 }
 
 func TestDoctorWarnsWhenCredentialFileFallbackUnsupported(t *testing.T) {
