@@ -3,9 +3,11 @@ package app
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1956,6 +1958,41 @@ func TestLiveShellPermanentAssetFailureRetriesChangedPayloadIdentityAfterBackoff
 	}
 }
 
+func TestAssetRequestIDDeduplicatesBySafeIdentityAndDimensions(t *testing.T) {
+	ref := twitch.AssetRef{Kind: assets.KindTwitchEmote, ID: "25"}
+	id := assetRequestID(ref, "100", "example", 6, 1)
+	if id == "" {
+		t.Fatal("safe asset request ID is empty")
+	}
+	if got := assetRequestID(ref, "100", "example", 6, 1); got != id {
+		t.Fatalf("same safe identity and dimensions produced %q, want %q", got, id)
+	}
+	for _, other := range []string{
+		assetRequestID(ref, "100", "example", 8, 1),
+		assetRequestID(ref, "100", "example", 6, 2),
+		assetRequestID(ref, "200", "example", 6, 1),
+	} {
+		if other == "" {
+			t.Fatal("comparison asset request ID is empty")
+		}
+		if other == id {
+			t.Fatalf("different identity or dimensions produced duplicate ID %q", id)
+		}
+	}
+	for _, invalid := range []string{
+		assetRequestID(ref, "100", "example", 0, 1),
+		assetRequestID(ref, "100", "example", 6, 0),
+		assetRequestID(twitch.AssetRef{Kind: assets.KindTwitchEmote, ID: "../cache/asset.png"}, "", "example", 6, 1),
+	} {
+		if invalid != "" {
+			t.Fatalf("invalid request produced ID %q, want empty", invalid)
+		}
+	}
+	if !strings.Contains(id, "room:100") || !strings.Contains(id, "cells:6x1") {
+		t.Fatalf("request ID %q missing safe room identity or dimensions", id)
+	}
+}
+
 func TestAssetPermanentFailureKeyRejectsPathShapedState(t *testing.T) {
 	for _, ref := range []twitch.AssetRef{
 		{Kind: assets.KindTwitchEmote, ID: "/home/user/asset.png"},
@@ -2360,6 +2397,205 @@ func TestLiveShellAssetResolverOnlyRequestsVisibleHistory(t *testing.T) {
 		if strings.HasPrefix(request.Ref.ID, "hidden-") {
 			t.Fatalf("resolver requested hidden history asset %q; requests=%#v", request.Ref.ID, resolver.last)
 		}
+	}
+}
+
+func TestLiveShellAssetSchedulerDeduplicatesRepeatedVisibleRequestsAndKeepsViewPure(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.ImageMode = "normal"
+	cfg.Features.AvatarMode = "image"
+	cfg.Features.EmojiMode = "image"
+	cfg.Features.EmoteMode = "image"
+	resolver := &appFakeAssetResolver{}
+	renderer := &appFakeImageRenderer{}
+	model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
+		AssetResolver: resolver,
+		ImageRenderer: renderer,
+	})
+	for i := 0; i < 400; i++ {
+		model.activeChannelState().messages = append(model.activeChannelState().messages, assetEventMessage(fmt.Sprintf("repeat-%03d", i), "25", "😀"))
+	}
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 96, Height: 30})
+	model = updated.(mockShellModel)
+	updated, cmd := model.Update(assetLookupTickMsg{})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("assetLookupTick returned nil command, want one bounded resolver command")
+	}
+	if resolver.calls != 0 || renderer.calls != 0 {
+		t.Fatalf("update path performed asset work before command execution: resolver=%d renderer=%d", resolver.calls, renderer.calls)
+	}
+	if got, wantMax := len(model.assetRequested), 4; got > wantMax {
+		t.Fatalf("assetRequested entries = %d, want at most %d for repeated visible messages", got, wantMax)
+	}
+	_ = model.View()
+	if resolver.calls != 0 || renderer.calls != 0 {
+		t.Fatalf("view path performed asset work: resolver=%d renderer=%d", resolver.calls, renderer.calls)
+	}
+
+	batch := cmd().(assetPreparedBatchMsg)
+	if got, want := len(batch.results), 4; got != want {
+		t.Fatalf("prepared batch results = %d, want %d", got, want)
+	}
+	if got, want := len(resolver.last), 4; got != want {
+		t.Fatalf("resolver requests = %d, want %d: %#v", got, want, resolver.last)
+	}
+	for _, request := range resolver.last {
+		if !strings.Contains(request.ID, "cells:") {
+			t.Fatalf("request ID %q does not include cell dimensions", request.ID)
+		}
+	}
+}
+
+func TestLiveShellAssetSchedulerBoundsVisibleQueue(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmoteMode = "image"
+	resolver := &appFakeAssetResolver{}
+	renderer := &appFakeImageRenderer{}
+	model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
+		AssetResolver: resolver,
+		AssetKinds:    map[string]bool{assets.KindTwitchEmote: true},
+		ImageRenderer: renderer,
+	})
+	for i := 0; i < assetWorkQueueMax+8; i++ {
+		model.activeChannelState().messages = append(model.activeChannelState().messages, emoteOnlyAssetMessage(fmt.Sprintf("queued-%02d", i), fmt.Sprintf("emote-%02d", i)))
+	}
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 96, Height: assetWorkQueueMax + 12})
+	model = updated.(mockShellModel)
+	requests := model.pendingAssetRequests()
+	if got, want := len(requests), assetWorkQueueMax; got != want {
+		t.Fatalf("pending asset requests = %d, want queue bound %d", got, want)
+	}
+
+	updated, cmd := model.Update(assetLookupTickMsg{})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("assetLookupTick returned nil command, want bounded resolver command")
+	}
+	if got, want := len(model.assetRequested), assetWorkQueueMax; got != want {
+		t.Fatalf("assetRequested entries = %d, want %d", got, want)
+	}
+	batch := cmd().(assetPreparedBatchMsg)
+	if got, want := len(batch.results), assetWorkQueueMax; got != want {
+		t.Fatalf("prepared batch results = %d, want %d", got, want)
+	}
+	if got, want := len(resolver.last), assetWorkQueueMax; got != want {
+		t.Fatalf("resolver requests = %d, want %d", got, want)
+	}
+
+	updated, cmd = model.Update(batch)
+	model = updated.(mockShellModel)
+	if cmd == nil || !model.assetLookupScheduled {
+		t.Fatalf("remaining visible assets did not schedule the next bounded tick; scheduled=%v cmd=%#v", model.assetLookupScheduled, cmd)
+	}
+}
+
+func TestResolveAssetsCommandBoundsConcurrencyAndContext(t *testing.T) {
+	release := make(chan struct{})
+	resolver := &blockingAssetResolver{
+		entered: make(chan struct{}, assetWorkParallel+1),
+		release: release,
+	}
+	preparer := &deadlineTrackingImagePreparer{}
+	renderer := &deadlineTrackingImageRenderer{}
+	model := mockShellModel{
+		assetResolver: resolver,
+		imagePreparer: preparer,
+		imageRenderer: renderer,
+	}
+	requests := make([]assets.Request, assetWorkParallel+3)
+	for i := range requests {
+		ref := twitch.AssetRef{Kind: assets.KindTwitchEmote, ID: fmt.Sprintf("parallel-%02d", i)}
+		requests[i] = assets.Request{
+			ID:          assetRequestID(ref, "", "example", 6, 1),
+			Ref:         ref,
+			Channel:     "example",
+			Fallback:    "Kappa",
+			WidthCells:  6,
+			HeightCells: 1,
+		}
+	}
+
+	cmd := model.resolveAssetsCommand(requests)
+	done := make(chan tea.Msg, 1)
+	go func() {
+		done <- cmd()
+	}()
+	for i := 0; i < assetWorkParallel; i++ {
+		select {
+		case <-resolver.entered:
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for worker %d to enter resolver", i+1)
+		}
+	}
+	select {
+	case <-resolver.entered:
+		t.Fatalf("more than %d asset workers entered before release", assetWorkParallel)
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(release)
+
+	var msg tea.Msg
+	select {
+	case msg = <-done:
+	case <-time.After(time.Second):
+		t.Fatal("asset command did not finish after releasing workers")
+	}
+	batch := msg.(assetPreparedBatchMsg)
+	if got, want := len(batch.results), len(requests); got != want {
+		t.Fatalf("prepared batch results = %d, want %d", got, want)
+	}
+	calls, maxActive, deadlines := resolver.snapshot()
+	if calls != len(requests) {
+		t.Fatalf("resolver calls = %d, want %d", calls, len(requests))
+	}
+	if maxActive > assetWorkParallel {
+		t.Fatalf("resolver max concurrency = %d, want <= %d", maxActive, assetWorkParallel)
+	}
+	if deadlines != len(requests) {
+		t.Fatalf("resolver deadline count = %d, want %d", deadlines, len(requests))
+	}
+	if preparer.deadlineCount() != len(requests) {
+		t.Fatalf("preparer deadline count = %d, want %d", preparer.deadlineCount(), len(requests))
+	}
+	if renderer.deadlineCount() != len(requests) {
+		t.Fatalf("renderer deadline count = %d, want %d", renderer.deadlineCount(), len(requests))
+	}
+}
+
+func TestResolveAssetsCommandHonorsContextDeadline(t *testing.T) {
+	ref := twitch.AssetRef{Kind: assets.KindTwitchEmote, ID: "deadline"}
+	request := assets.Request{
+		ID:          assetRequestID(ref, "", "example", 6, 1),
+		Ref:         ref,
+		Channel:     "example",
+		Fallback:    "Kappa",
+		WidthCells:  6,
+		HeightCells: 1,
+	}
+	resolver := &deadlineBlockingAssetResolver{}
+	renderer := &appFakeImageRenderer{}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+
+	results := resolveAssetRequests(ctx, []assets.Request{request}, resolver, nil, renderer, nil)
+	if got, want := len(results), 1; got != want {
+		t.Fatalf("asset results = %d, want %d", got, want)
+	}
+	if got, want := results[0].event.Kind, assets.EventCanceled; got != want {
+		t.Fatalf("event kind = %s, want %s", got, want)
+	}
+	if !errors.Is(results[0].event.Err, context.DeadlineExceeded) {
+		t.Fatalf("event err = %v, want deadline exceeded", results[0].event.Err)
+	}
+	if !resolver.sawDeadline() {
+		t.Fatal("resolver context had no deadline")
+	}
+	if renderer.calls != 0 {
+		t.Fatalf("renderer calls = %d, want 0 after canceled resolve", renderer.calls)
 	}
 }
 
@@ -2928,6 +3164,21 @@ func assetEventMessage(id, emoteID, emojiText string) twitch.ChatMessage {
 	}
 }
 
+func emoteOnlyAssetMessage(id, emoteID string) twitch.ChatMessage {
+	return twitch.ChatMessage{
+		ID:          id,
+		Channel:     "example",
+		Timestamp:   time.Date(2026, 7, 2, 20, 0, 10, 0, time.UTC),
+		AuthorLogin: "viewer",
+		DisplayName: "viewer",
+		Type:        twitch.MessageTypeChat,
+		Fragments: []twitch.MessageFragment{
+			{Type: twitch.FragmentText, Text: "asset "},
+			{Type: twitch.FragmentEmote, Text: "Kappa", Ref: twitch.AssetRef{Kind: assets.KindTwitchEmote, ID: emoteID}},
+		},
+	}
+}
+
 func activeAssetEventMessage() twitch.ChatMessage {
 	return twitch.ChatMessage{
 		ID:          "active-asset",
@@ -3051,6 +3302,7 @@ func (f *appFakeAvatarResolver) ResolveAvatars(_ context.Context, requests []ass
 }
 
 type appFakeAssetResolver struct {
+	mu              sync.Mutex
 	calls           int
 	last            []assets.Request
 	fail            bool
@@ -3062,9 +3314,18 @@ type appFakeAssetResolver struct {
 }
 
 func (f *appFakeAssetResolver) Resolve(_ context.Context, request assets.Request) assets.Event {
+	f.mu.Lock()
 	f.calls++
 	f.last = append(f.last, request)
-	if f.fail {
+	fail := f.fail
+	path := f.path
+	sourceURL := f.sourceURL
+	payloadIdentity := f.payloadIdentity
+	mediaType := f.mediaType
+	fetchedAt := f.fetchedAt
+	f.mu.Unlock()
+
+	if fail {
 		return assets.Event{
 			Kind:      assets.EventFailed,
 			RequestID: request.ID,
@@ -3078,19 +3339,20 @@ func (f *appFakeAssetResolver) Resolve(_ context.Context, request assets.Request
 		Ref:       request.Ref,
 		Record: storage.AssetRecord{
 			Key:             storage.AssetKey{Kind: request.Ref.Kind, ID: request.Ref.ID},
-			Path:            firstNonEmptyString(f.path, "fake.png"),
-			SourceURL:       f.sourceURL,
-			PayloadIdentity: f.payloadIdentity,
-			MediaType:       firstNonEmptyString(f.mediaType, "image/png"),
+			Path:            firstNonEmptyString(path, "fake.png"),
+			SourceURL:       sourceURL,
+			PayloadIdentity: payloadIdentity,
+			MediaType:       firstNonEmptyString(mediaType, "image/png"),
 			WidthCells:      request.WidthCells,
 			HeightCells:     request.HeightCells,
-			FetchedAt:       f.fetchedAt,
+			FetchedAt:       fetchedAt,
 		},
 		At: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC),
 	}
 }
 
 type appFakeImageRenderer struct {
+	mu      sync.Mutex
 	calls   int
 	cells   map[render.ImageCellKey]string
 	records []storage.AssetRecord
@@ -3098,10 +3360,13 @@ type appFakeImageRenderer struct {
 }
 
 func (f *appFakeImageRenderer) RenderImage(_ context.Context, asset storage.AssetRecord, spec render.ImageSpec) (render.ImageCell, error) {
+	f.mu.Lock()
 	f.calls++
 	f.records = append(f.records, asset)
-	if f.err != nil {
-		return render.ImageCell{}, f.err
+	err := f.err
+	f.mu.Unlock()
+	if err != nil {
+		return render.ImageCell{}, err
 	}
 	key, _ := render.ImageCellKeyForRefInChannel(spec.Ref, spec.ChannelID, spec.Channel)
 	text := f.cells[key]
@@ -3123,6 +3388,7 @@ func (f *appFakeImageRenderer) RenderImage(_ context.Context, asset storage.Asse
 }
 
 type appFakeImagePreparer struct {
+	mu      sync.Mutex
 	calls   int
 	records []storage.AssetRecord
 	specs   []render.ImageSpec
@@ -3130,17 +3396,147 @@ type appFakeImagePreparer struct {
 }
 
 func (f *appFakeImagePreparer) PrepareImage(_ context.Context, asset storage.AssetRecord, spec render.ImageSpec) (storage.AssetRecord, error) {
+	f.mu.Lock()
 	f.calls++
 	f.records = append(f.records, asset)
 	f.specs = append(f.specs, spec)
-	if f.err != nil {
-		return storage.AssetRecord{}, f.err
+	err := f.err
+	f.mu.Unlock()
+	if err != nil {
+		return storage.AssetRecord{}, err
 	}
 	asset.Path = "prepared.png"
 	asset.MediaType = "image/png"
 	asset.WidthCells = spec.WidthCells
 	asset.HeightCells = spec.HeightCells
 	return asset, nil
+}
+
+type blockingAssetResolver struct {
+	mu        sync.Mutex
+	calls     int
+	active    int
+	maxActive int
+	deadlines int
+	entered   chan struct{}
+	release   <-chan struct{}
+}
+
+func (r *blockingAssetResolver) Resolve(ctx context.Context, request assets.Request) assets.Event {
+	r.mu.Lock()
+	r.calls++
+	r.active++
+	if r.active > r.maxActive {
+		r.maxActive = r.active
+	}
+	if _, ok := ctx.Deadline(); ok {
+		r.deadlines++
+	}
+	r.mu.Unlock()
+
+	select {
+	case r.entered <- struct{}{}:
+	case <-ctx.Done():
+	}
+	select {
+	case <-r.release:
+	case <-ctx.Done():
+	}
+
+	r.mu.Lock()
+	r.active--
+	r.mu.Unlock()
+
+	return assets.Event{
+		Kind:      assets.EventDownloaded,
+		RequestID: request.ID,
+		Ref:       request.Ref,
+		Record: storage.AssetRecord{
+			Key:         storage.AssetKey{Kind: request.Ref.Kind, ID: request.Ref.ID},
+			Path:        "fake.png",
+			MediaType:   "image/png",
+			WidthCells:  request.WidthCells,
+			HeightCells: request.HeightCells,
+		},
+		At: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC),
+	}
+}
+
+func (r *blockingAssetResolver) snapshot() (calls, maxActive, deadlines int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls, r.maxActive, r.deadlines
+}
+
+type deadlineBlockingAssetResolver struct {
+	mu       sync.Mutex
+	deadline bool
+}
+
+func (r *deadlineBlockingAssetResolver) Resolve(ctx context.Context, request assets.Request) assets.Event {
+	if _, ok := ctx.Deadline(); ok {
+		r.mu.Lock()
+		r.deadline = true
+		r.mu.Unlock()
+	}
+	<-ctx.Done()
+	return assets.Event{
+		Kind:      assets.EventCanceled,
+		RequestID: request.ID,
+		Ref:       request.Ref,
+		Err:       ctx.Err(),
+		At:        time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC),
+	}
+}
+
+func (r *deadlineBlockingAssetResolver) sawDeadline() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.deadline
+}
+
+type deadlineTrackingImagePreparer struct {
+	mu        sync.Mutex
+	deadlines int
+}
+
+func (p *deadlineTrackingImagePreparer) PrepareImage(ctx context.Context, asset storage.AssetRecord, spec render.ImageSpec) (storage.AssetRecord, error) {
+	p.mu.Lock()
+	if _, ok := ctx.Deadline(); ok {
+		p.deadlines++
+	}
+	p.mu.Unlock()
+	asset.Path = "prepared.png"
+	asset.MediaType = "image/png"
+	asset.WidthCells = spec.WidthCells
+	asset.HeightCells = spec.HeightCells
+	return asset, nil
+}
+
+func (p *deadlineTrackingImagePreparer) deadlineCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.deadlines
+}
+
+type deadlineTrackingImageRenderer struct {
+	mu        sync.Mutex
+	deadlines int
+}
+
+func (r *deadlineTrackingImageRenderer) RenderImage(ctx context.Context, _ storage.AssetRecord, spec render.ImageSpec) (render.ImageCell, error) {
+	r.mu.Lock()
+	if _, ok := ctx.Deadline(); ok {
+		r.deadlines++
+	}
+	r.mu.Unlock()
+	return render.ImageCell{Text: fitLine(spec.Fallback, spec.WidthCells), WidthCells: spec.WidthCells}, nil
+}
+
+func (r *deadlineTrackingImageRenderer) deadlineCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.deadlines
 }
 
 func preparedAssetForTest(ref twitch.AssetRef, text string, width int) assetPreparedMsg {
@@ -3167,7 +3563,15 @@ func requestKinds(requests []assets.Request) []string {
 			continue
 		}
 		seen[request.Ref.Kind] = true
-		kinds = append(kinds, request.Ref.Kind)
+	}
+	for _, kind := range []string{assets.KindAvatar, assets.KindBadge, assets.KindTwitchEmote, assets.KindEmoji} {
+		if seen[kind] {
+			kinds = append(kinds, kind)
+			delete(seen, kind)
+		}
+	}
+	for kind := range seen {
+		kinds = append(kinds, kind)
 	}
 	return kinds
 }

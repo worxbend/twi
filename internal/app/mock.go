@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -28,6 +29,9 @@ const (
 	mockRevealDelay   = 20 * time.Millisecond
 	avatarLookupDelay = 50 * time.Millisecond
 	assetLookupDelay  = 35 * time.Millisecond
+	assetWorkTimeout  = 10 * time.Second
+	assetWorkQueueMax = 24
+	assetWorkParallel = 4
 	assetFailureRetry = 5 * time.Minute
 	sidebarMinWidth   = 72
 	sidebarNormalSize = 18
@@ -1645,40 +1649,88 @@ func (m mockShellModel) resolveAssetsCommand(requests []assets.Request) tea.Cmd 
 	preparer := m.imagePreparer
 	renderer := m.imageRenderer
 	permanentFailures := cloneAssetPermanentFailures(m.assetPermanentFailure)
+	requests = boundedAssetRequests(requests, assetWorkQueueMax)
 	return func() tea.Msg {
-		results := make([]assetPreparedMsg, 0, len(requests))
-		for _, request := range requests {
-			ctx := context.Background()
-			event := resolver.Resolve(ctx, request)
-			spec := imageSpecFromAssetRequest(request, event)
-			result := assetPreparedMsg{event: event, spec: spec}
-			if event.Kind == assets.EventCacheHit || event.Kind == assets.EventDownloaded {
-				if key, ok := assetPermanentFailureKeyForEvent(event, spec); ok {
-					if _, failed := permanentFailures[key]; failed {
-						result.permanent = true
-						result.failureKey = key
-						results = append(results, result)
-						continue
-					}
-				}
-				record := event.Record
-				if preparer != nil {
-					prepared, err := preparer.PrepareImage(ctx, record, spec)
-					if err != nil {
-						result.err = err
-						results = append(results, result)
-						continue
-					}
-					record = prepared
-				}
-				cell, err := renderer.RenderImage(ctx, record, spec)
-				result.cell = cell
-				result.err = err
-			}
-			results = append(results, result)
-		}
+		results := resolveAssetRequests(context.Background(), requests, resolver, preparer, renderer, permanentFailures)
 		return assetPreparedBatchMsg{results: results}
 	}
+}
+
+func resolveAssetRequests(ctx context.Context, requests []assets.Request, resolver assets.EventResolver, preparer render.ImagePreparer, renderer render.ImageRenderer, permanentFailures map[assetPermanentFailureKey]struct{}) []assetPreparedMsg {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	requests = boundedAssetRequests(requests, assetWorkQueueMax)
+	if len(requests) == 0 {
+		return nil
+	}
+	results := make([]assetPreparedMsg, len(requests))
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for i := 0; i < assetWorkerCount(len(requests)); i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for index := range jobs {
+				results[index] = resolveAssetRequest(ctx, requests[index], resolver, preparer, renderer, permanentFailures)
+			}
+		}()
+	}
+	for i := range requests {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+	return results
+}
+
+func resolveAssetRequest(ctx context.Context, request assets.Request, resolver assets.EventResolver, preparer render.ImagePreparer, renderer render.ImageRenderer, permanentFailures map[assetPermanentFailureKey]struct{}) assetPreparedMsg {
+	workCtx, cancel := context.WithTimeout(ctx, assetWorkTimeout)
+	defer cancel()
+
+	event := resolver.Resolve(workCtx, request)
+	spec := imageSpecFromAssetRequest(request, event)
+	result := assetPreparedMsg{event: event, spec: spec}
+	if event.Kind != assets.EventCacheHit && event.Kind != assets.EventDownloaded {
+		return result
+	}
+	if key, ok := assetPermanentFailureKeyForEvent(event, spec); ok {
+		if _, failed := permanentFailures[key]; failed {
+			result.permanent = true
+			result.failureKey = key
+			return result
+		}
+	}
+	record := event.Record
+	if preparer != nil {
+		prepared, err := preparer.PrepareImage(workCtx, record, spec)
+		if err != nil {
+			result.err = err
+			return result
+		}
+		record = prepared
+	}
+	cell, err := renderer.RenderImage(workCtx, record, spec)
+	result.cell = cell
+	result.err = err
+	return result
+}
+
+func boundedAssetRequests(requests []assets.Request, limit int) []assets.Request {
+	if limit <= 0 || len(requests) <= limit {
+		return requests
+	}
+	return requests[:limit]
+}
+
+func assetWorkerCount(requestCount int) int {
+	if requestCount <= 0 {
+		return 0
+	}
+	if requestCount < assetWorkParallel {
+		return requestCount
+	}
+	return assetWorkParallel
 }
 
 func imageSpecFromAssetRequest(request assets.Request, event assets.Event) render.ImageSpec {
@@ -1729,6 +1781,7 @@ func (m mockShellModel) pendingAssetRequestsAt(now time.Time) ([]assets.Request,
 	seen := make(map[string]bool)
 	requests := []assets.Request{}
 	var nextRetry time.Time
+visibleMessages:
 	for _, message := range m.visibleAssetMessages() {
 		for _, row := range render.Rows(message, m.renderOptions(rowWidth)) {
 			for _, fragment := range row.Fragments {
@@ -1747,6 +1800,9 @@ func (m mockShellModel) pendingAssetRequestsAt(now time.Time) ([]assets.Request,
 				}
 				seen[request.ID] = true
 				requests = append(requests, request)
+				if len(requests) >= assetWorkQueueMax {
+					break visibleMessages
+				}
 			}
 		}
 	}
@@ -1762,17 +1818,20 @@ func (m mockShellModel) assetRequestForFragment(message twitch.ChatMessage, frag
 		return assets.Request{}, false
 	}
 	if _, ok := m.imageCells[key]; ok {
-		return assets.Request{}, false
+		if cell := m.imageCells[key]; cell.Text != "" && cell.WidthCells == fragment.Width() {
+			return assets.Request{}, false
+		}
 	}
+	widthCells := fragment.Width()
 	request := assets.Request{
-		ID:          assetRequestID(fragment.Ref, message.ChannelID, message.Channel),
+		ID:          assetRequestID(fragment.Ref, message.ChannelID, message.Channel, widthCells, 1),
 		Ref:         fragment.Ref,
 		Channel:     message.Channel,
 		ChannelID:   strings.TrimSpace(message.ChannelID),
 		UserID:      message.AuthorID,
 		UserLogin:   message.AuthorLogin,
 		Fallback:    fragment.Text,
-		WidthCells:  fragment.Width(),
+		WidthCells:  widthCells,
 		HeightCells: 1,
 	}
 	if request.ID == "" || request.WidthCells <= 0 {
@@ -1818,7 +1877,7 @@ func (m mockShellModel) visibleAssetMessages() []twitch.ChatMessage {
 	return m.visibleAvatarMessages()
 }
 
-func assetRequestID(ref twitch.AssetRef, channelID, channel string) string {
+func assetRequestID(ref twitch.AssetRef, channelID, channel string, dimensions ...int) string {
 	key, ok := render.ImageCellKeyForRefInChannel(ref, channelID, channel)
 	if !ok {
 		return ""
@@ -1826,10 +1885,22 @@ func assetRequestID(ref twitch.AssetRef, channelID, channel string) string {
 	if unsafeAssetStateIdentity(key.Kind) || unsafeAssetStateIdentity(key.ID) || unsafeAssetStateIdentity(key.ChannelIdentity) {
 		return ""
 	}
+	id := key.Kind + "\x00" + key.ID
 	if key.ChannelIdentity != "" {
-		return key.Kind + "\x00" + key.ChannelIdentity + "\x00" + key.ID
+		id = key.Kind + "\x00" + key.ChannelIdentity + "\x00" + key.ID
 	}
-	return key.Kind + "\x00" + key.ID
+	if len(dimensions) == 0 {
+		return id
+	}
+	width := dimensions[0]
+	height := 1
+	if len(dimensions) > 1 {
+		height = dimensions[1]
+	}
+	if width <= 0 || height <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s\x00cells:%dx%d", id, width, height)
 }
 
 func (m *mockShellModel) applyAssetResults(results []assetPreparedMsg) {
