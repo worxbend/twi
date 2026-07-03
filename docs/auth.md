@@ -61,9 +61,11 @@ The refresh request is sent to Twitch's OAuth token endpoint. The refreshed acce
 
 If refresh fails, the user-facing error remains redacted and tells you to verify username, OAuth token, and `chat:read`.
 
-## Planned Login Flow
+## OAuth Login Flow
 
-`twi login` should eventually provide an interactive setup flow. The preferred path is an OAuth device-code flow if Twitch supports the required scopes for this application. If not, the fallback is a local callback flow.
+`twi login` should eventually provide an interactive setup flow. The login
+command is still not wired, but the internal HTTP adapter for Twitch's
+authorization-code flow now exists behind the auth boundary.
 
 The internal login boundary now lives in `internal/auth`. It defines:
 
@@ -79,11 +81,27 @@ The internal login boundary now lives in `internal/auth`. It defines:
   when formatted; adapters must deliberately reveal them only for OAuth HTTP
   requests or test assertions.
 - `FakeLoginFlow` for unit tests.
+- `TwitchOAuthLoginFlow`, a context-aware authorization-code adapter that builds
+  Twitch authorization URLs, validates callback state, exchanges callback codes
+  for access and refresh tokens, validates the returned token through Twitch's
+  OAuth validation endpoint, checks that the validated token belongs to the
+  configured client ID, and returns token material only through typed `Secret`
+  fields.
 
-This boundary does not implement OAuth HTTP, wire the `twi login` command, or
-persist tokens. Those remain later tasks after the login redaction checkpoint.
-Any completed login returns tokens only through typed results, leaving storage
-decisions to the separate credential storage boundary.
+This boundary does not wire the `twi login` command or persist tokens. Those
+remain later tasks after the login redaction checkpoint. Any completed login
+returns tokens only through typed results, leaving storage decisions to the
+separate credential storage boundary.
+
+The adapter uses the MVP scopes by default:
+
+- `chat:read`
+- `chat:edit`
+
+It rejects missing, mismatched, expired, or duplicate OAuth state, denied
+authorization callbacks, Twitch token/validation errors, missing required
+scopes, client mismatches, context cancellation, and bounded request timeouts
+with redacted actionable errors.
 
 Future token storage should prefer:
 

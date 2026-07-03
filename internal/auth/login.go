@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"time"
 )
@@ -63,6 +64,23 @@ type LoginCallback struct {
 	ExpectedState    Secret
 	Error            string
 	ErrorDescription string
+}
+
+// LoginCallbackFromRequest extracts OAuth callback values from an HTTP request.
+// The returned code and state values are Secret values so accidental formatting
+// remains redacted.
+func LoginCallbackFromRequest(r *http.Request, expectedState Secret) LoginCallback {
+	callback := LoginCallback{ExpectedState: expectedState}
+	if r == nil || r.URL == nil {
+		return callback
+	}
+
+	query := r.URL.Query()
+	callback.Code = NewSecret(query.Get("code"))
+	callback.State = NewSecret(query.Get("state"))
+	callback.Error = strings.TrimSpace(query.Get("error"))
+	callback.ErrorDescription = strings.TrimSpace(query.Get("error_description"))
+	return callback
 }
 
 // Denied reports whether the callback contains a provider denial instead of an

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -83,6 +85,31 @@ func TestLoginCallbackDenied(t *testing.T) {
 	}
 	if (LoginCallback{Code: NewSecret("code")}).Denied() {
 		t.Fatal("Denied = true for callback with code")
+	}
+}
+
+func TestLoginCallbackFromRequestParsesCallbackValues(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/callback?code=callback-code&state=state-secret&error=access_denied&error_description=user+denied", nil)
+
+	callback := LoginCallbackFromRequest(request, NewSecret("expected-state"))
+	if callback.Code.Reveal() != "callback-code" {
+		t.Fatalf("code = %q, want callback-code", callback.Code.Reveal())
+	}
+	if callback.State.Reveal() != "state-secret" {
+		t.Fatalf("state = %q, want state-secret", callback.State.Reveal())
+	}
+	if callback.ExpectedState.Reveal() != "expected-state" {
+		t.Fatalf("expected state = %q, want expected-state", callback.ExpectedState.Reveal())
+	}
+	if callback.Error != "access_denied" || callback.ErrorDescription != "user denied" {
+		t.Fatalf("error fields = %q/%q, want provider denial", callback.Error, callback.ErrorDescription)
+	}
+
+	formatted := fmt.Sprintf("%+v %#v", callback, callback)
+	for _, raw := range []string{"callback-code", "state-secret", "expected-state"} {
+		if strings.Contains(formatted, raw) {
+			t.Fatalf("formatted callback leaked %q: %s", raw, formatted)
+		}
 	}
 }
 
