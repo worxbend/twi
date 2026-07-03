@@ -3077,8 +3077,11 @@ func TestCommandPaletteAndKeyboardShortcutsClearAndReconnect(t *testing.T) {
 	if got, want := client.ReconnectCount(), 1; got != want {
 		t.Fatalf("reconnect count = %d, want %d", got, want)
 	}
-	if got, want := model.activeChannelState().status.Status, ConnectionConnected; got != want {
+	if got, want := model.activeChannelState().status.Status, ConnectionConnecting; got != want {
 		t.Fatalf("status after reconnect completion = %q, want %q", got, want)
+	}
+	if !strings.Contains(model.activeChannelState().status.Detail, "waiting for Twitch IRC") {
+		t.Fatalf("status detail after reconnect completion = %q, want waiting feedback", model.activeChannelState().status.Detail)
 	}
 
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
@@ -3110,6 +3113,88 @@ func TestCommandPaletteAndKeyboardShortcutsClearAndReconnect(t *testing.T) {
 	if !strings.Contains(mockModel.activeChannelState().status.Detail, "unavailable") {
 		t.Fatalf("unsupported reconnect detail = %q, want unavailable guidance", mockModel.activeChannelState().status.Detail)
 	}
+}
+
+func TestReconnectPreservesChannelStateAndReportsFailureAndRepeatedRequests(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	cfg.DefaultChannels = []string{"alpha", "beta"}
+	client := NewFakeChatClient(1)
+	if err := client.QueueReconnectError(errors.New("dial failed for oauth:secret-token")); err != nil {
+		t.Fatalf("QueueReconnectError returned error: %v", err)
+	}
+	model := newLiveShellModelWithClock("alpha", cfg, client, nil)
+	alpha := model.channels.ensure("alpha")
+	beta := model.channels.ensure("beta")
+
+	alpha.messages = numberedMockMessages("alpha", 3)
+	alpha.composerText = "alpha draft"
+	alpha.replyTo = replyContextFromMessage(alpha.messages[1])
+	alpha.scrollOffset = 1
+	beforeReply := *alpha.replyTo
+	beta.messages = numberedMockMessages("beta", 2)
+	beta.composerText = "beta draft"
+	beta.unread = 2
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("ctrl+r returned nil command, want reconnect command")
+	}
+	if !model.reconnectInFlight {
+		t.Fatal("reconnectInFlight = false, want true")
+	}
+	if got, want := model.activeChannelState().status.Status, ConnectionReconnecting; got != want {
+		t.Fatalf("status after first reconnect request = %q, want %q", got, want)
+	}
+
+	updated, repeatedCmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	model = updated.(mockShellModel)
+	if repeatedCmd != nil {
+		t.Fatalf("repeated reconnect returned command %#v, want nil", repeatedCmd)
+	}
+	if !strings.Contains(model.activeChannelState().status.Detail, "already in progress") {
+		t.Fatalf("repeated reconnect detail = %q, want in-progress feedback", model.activeChannelState().status.Detail)
+	}
+	if got, want := client.ReconnectCount(), 0; got != want {
+		t.Fatalf("reconnect count before command executes = %d, want %d", got, want)
+	}
+
+	updated, _ = model.Update(cmd().(reconnectCompletedMsg))
+	model = updated.(mockShellModel)
+	if model.reconnectInFlight {
+		t.Fatal("reconnectInFlight after completion = true, want false")
+	}
+	if got, want := model.activeChannelState().status.Status, ConnectionFailed; got != want {
+		t.Fatalf("status after failed reconnect = %q, want %q", got, want)
+	}
+	detail := model.activeChannelState().status.Detail
+	if !strings.Contains(detail, "retry with ctrl+r") {
+		t.Fatalf("failed reconnect detail = %q, want retry guidance", detail)
+	}
+	if strings.Contains(detail, "oauth:secret-token") {
+		t.Fatalf("failed reconnect detail leaked token: %q", detail)
+	}
+
+	assertReconnectPreservedChannelState(t, model, beforeReply)
+
+	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("second ctrl+r returned nil command, want reconnect command")
+	}
+	updated, _ = model.Update(cmd().(reconnectCompletedMsg))
+	model = updated.(mockShellModel)
+	if got, want := client.ReconnectCount(), 2; got != want {
+		t.Fatalf("reconnect count after retry = %d, want %d", got, want)
+	}
+	if got, want := model.activeChannelState().status.Status, ConnectionConnecting; got != want {
+		t.Fatalf("status after successful reconnect = %q, want %q", got, want)
+	}
+	if !strings.Contains(model.activeChannelState().status.Detail, "waiting for Twitch IRC") {
+		t.Fatalf("status detail after successful reconnect = %q, want waiting feedback", model.activeChannelState().status.Detail)
+	}
+	assertReconnectPreservedChannelState(t, model, beforeReply)
 }
 
 func TestMockShellTinyWidthsDoNotExceedWindowWidth(t *testing.T) {
@@ -3232,6 +3317,37 @@ func driveRevealToCompletion(t *testing.T, model *mockShellModel, clock *appFake
 		clock.Add(mockRevealDelay)
 		updated, _ := model.Update(mockAnimationTickMsg{})
 		*model = updated.(mockShellModel)
+	}
+}
+
+func assertReconnectPreservedChannelState(t *testing.T, model mockShellModel, beforeReply composerReplyContext) {
+	t.Helper()
+
+	alpha := model.channels.states[channelKey("alpha")]
+	beta := model.channels.states[channelKey("beta")]
+	if alpha == nil || beta == nil {
+		t.Fatalf("channel states = %#v, want alpha and beta", model.channels.channelNames())
+	}
+	if got, want := len(alpha.messages), 3; got != want {
+		t.Fatalf("alpha history length = %d, want %d", got, want)
+	}
+	if got, want := len(beta.messages), 2; got != want {
+		t.Fatalf("beta history length = %d, want %d", got, want)
+	}
+	if got, want := alpha.composerText, "alpha draft"; got != want {
+		t.Fatalf("alpha composerText = %q, want %q", got, want)
+	}
+	if alpha.replyTo == nil || *alpha.replyTo != beforeReply {
+		t.Fatalf("alpha replyTo = %#v, want %#v", alpha.replyTo, beforeReply)
+	}
+	if got, want := alpha.scrollOffset, 1; got != want {
+		t.Fatalf("alpha scrollOffset = %d, want %d", got, want)
+	}
+	if got, want := beta.composerText, "beta draft"; got != want {
+		t.Fatalf("beta composerText = %q, want %q", got, want)
+	}
+	if got, want := beta.unread, 2; got != want {
+		t.Fatalf("beta unread = %d, want %d", got, want)
 	}
 }
 

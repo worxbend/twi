@@ -37,7 +37,8 @@ panel, and optional mouse controls are current app behavior. `twi setup` writes
 non-secret config values and can hand off to login. In the Linux container,
 `twi login` is an OAuth browser/callback flow that saves returned tokens
 through the restrictive credential-file fallback without printing them;
-refresh-token persistence after IRC reconnect and manual Kitty/Ghostty image validation are still planned. Live
+manual reconnect restarts the live IRC transport while preserving channel UI
+state. Refresh-token persistence after IRC reconnect and manual Kitty/Ghostty image validation are still planned. Live
 image asset wiring is current when config, credentials, cache, and terminal
 checks allow it.
 

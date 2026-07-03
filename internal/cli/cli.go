@@ -54,18 +54,20 @@ Environment:
 `
 
 var newLiveChatClient = func(ctx context.Context, cfg config.Config) (app.ChatClient, error) {
-	transport, err := twitch.NewIRCClient(twitch.IRCConfig{
-		Username:     cfg.Twitch.Username,
-		OAuthToken:   cfg.Twitch.OAuthToken,
-		RefreshToken: cfg.Twitch.RefreshToken,
-		ClientID:     cfg.Twitch.ClientID,
-		ClientSecret: cfg.Twitch.ClientSecret,
-		Channels:     cfg.DefaultChannels,
-	})
-	if err != nil {
-		return nil, err
+	return app.NewRestartableLiveChatClient(ctx, liveIRCTransportFactory(cfg), 0)
+}
+
+func liveIRCTransportFactory(cfg config.Config) app.LiveChatTransportFactory {
+	return func(context.Context) (twitch.ChatClient, error) {
+		return twitch.NewIRCClient(twitch.IRCConfig{
+			Username:     cfg.Twitch.Username,
+			OAuthToken:   cfg.Twitch.OAuthToken,
+			RefreshToken: cfg.Twitch.RefreshToken,
+			ClientID:     cfg.Twitch.ClientID,
+			ClientSecret: cfg.Twitch.ClientSecret,
+			Channels:     cfg.DefaultChannels,
+		})
 	}
-	return app.NewLiveChatClient(ctx, transport, 0)
 }
 
 var newLiveClientOptions = func(cfg config.Config) app.ClientOptions {

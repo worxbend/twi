@@ -159,9 +159,10 @@ func TestLiveChatClientTerminalFailureSurvivesEventStreamClose(t *testing.T) {
 	if got.Status != ConnectionFailed || !strings.Contains(got.Detail, "chat:read") {
 		t.Fatalf("terminal state = %#v, want actionable failure", got)
 	}
-	next, ok := <-client.ConnectionStates()
-	if ok {
+	select {
+	case next := <-client.ConnectionStates():
 		t.Fatalf("received extra state after terminal failure: %#v", next)
+	case <-time.After(20 * time.Millisecond):
 	}
 }
 
@@ -186,7 +187,7 @@ func TestLiveChatClientRedactsOAuthPatternInGenericErrors(t *testing.T) {
 	if strings.Contains(got.Detail, "oauth:secret-token") {
 		t.Fatalf("detail leaked token: %q", got.Detail)
 	}
-	if !strings.Contains(got.Detail, "oauth:<redacted>") {
+	if !strings.Contains(got.Detail, "<redacted>") {
 		t.Fatalf("detail = %q, want redacted token marker", got.Detail)
 	}
 }
@@ -272,6 +273,248 @@ func TestLiveChatClientSendActionUsesIRCActionText(t *testing.T) {
 	}
 	if got, want := sends[0].Text, "\x01ACTION waves at chat\x01"; got != want {
 		t.Fatalf("action wire text = %q, want %q", got, want)
+	}
+}
+
+func TestRestartableLiveChatClientReconnectClosesOldTransportBeforeCreatingNext(t *testing.T) {
+	factory := &fakeRestartTransportFactory{}
+	first := factory.queueTransport(newFakeTwitchTransport(4))
+	second := factory.queueTransport(newFakeTwitchTransport(4))
+
+	client, err := NewRestartableLiveChatClient(context.Background(), factory.newTransport, 8)
+	if err != nil {
+		t.Fatalf("NewRestartableLiveChatClient returned error: %v", err)
+	}
+	defer client.Close()
+
+	if got := <-client.ConnectionStates(); got.Status != ConnectionConnecting {
+		t.Fatalf("initial state = %#v, want connecting", got)
+	}
+	if !first.connectCalled() {
+		t.Fatal("first transport was not connected")
+	}
+
+	if err := client.Reconnect(context.Background()); err != nil {
+		t.Fatalf("Reconnect returned error: %v", err)
+	}
+	if !first.closedCalled() {
+		t.Fatal("first transport was not closed before reconnect completed")
+	}
+	if factory.createdBeforePreviousClose() {
+		t.Fatal("factory created a replacement transport before the previous transport was closed")
+	}
+	if !second.connectCalled() {
+		t.Fatal("second transport was not connected")
+	}
+
+	if got := <-client.ConnectionStates(); got.Status != ConnectionReconnecting || !strings.Contains(got.Detail, "manual reconnect") {
+		t.Fatalf("reconnect state = %#v, want manual reconnect feedback", got)
+	}
+
+	second.emit(twitch.Event{
+		Kind: twitch.EventConnection,
+		Connection: twitch.ConnectionEvent{
+			Type: twitch.ConnectionEventConnect,
+			At:   time.Date(2026, 7, 3, 9, 0, 0, 0, time.UTC),
+		},
+	})
+	if got := <-client.ConnectionStates(); got.Status != ConnectionConnected {
+		t.Fatalf("post-reconnect state = %#v, want connected from replacement transport", got)
+	}
+}
+
+func TestRestartableLiveChatClientReconnectFailureReportsRetryAndAllowsNextAttempt(t *testing.T) {
+	factory := &fakeRestartTransportFactory{}
+	first := factory.queueTransport(newFakeTwitchTransport(4))
+	factory.queueError(errors.New("dial failed access_token=secret-token&client_secret=super-secret"))
+	second := factory.queueTransport(newFakeTwitchTransport(4))
+
+	client, err := NewRestartableLiveChatClient(context.Background(), factory.newTransport, 8)
+	if err != nil {
+		t.Fatalf("NewRestartableLiveChatClient returned error: %v", err)
+	}
+	defer client.Close()
+	<-client.ConnectionStates()
+
+	err = client.Reconnect(context.Background())
+	if err == nil {
+		t.Fatal("Reconnect returned nil error, want factory failure")
+	}
+	if strings.Contains(err.Error(), "secret-token") || strings.Contains(err.Error(), "super-secret") {
+		t.Fatalf("Reconnect error leaked token: %q", err.Error())
+	}
+	if !first.closedCalled() {
+		t.Fatal("first transport was not closed before reconnect failure")
+	}
+	if got := <-client.ConnectionStates(); got.Status != ConnectionReconnecting {
+		t.Fatalf("first reconnect state = %#v, want reconnecting", got)
+	}
+	got := <-client.ConnectionStates()
+	if got.Status != ConnectionFailed || !strings.Contains(got.Detail, "retry with ctrl+r") {
+		t.Fatalf("failure state = %#v, want retry guidance", got)
+	}
+	if strings.Contains(got.Detail, "secret-token") || strings.Contains(got.Detail, "super-secret") {
+		t.Fatalf("failure state leaked token: %q", got.Detail)
+	}
+	_, err = client.Send(context.Background(), SendRequest{Channel: "example", Text: "hello"})
+	if !errors.Is(err, ErrLiveChatDisconnected) {
+		t.Fatalf("Send error after failed reconnect = %v, want %v", err, ErrLiveChatDisconnected)
+	}
+
+	if err := client.Reconnect(context.Background()); err != nil {
+		t.Fatalf("second Reconnect returned error: %v", err)
+	}
+	if !second.connectCalled() {
+		t.Fatal("second transport was not connected after retry")
+	}
+}
+
+func TestRestartableLiveChatClientReconnectHonorsCanceledContext(t *testing.T) {
+	factory := &fakeRestartTransportFactory{}
+	first := factory.queueTransport(newFakeTwitchTransport(4))
+
+	client, err := NewRestartableLiveChatClient(context.Background(), factory.newTransport, 8)
+	if err != nil {
+		t.Fatalf("NewRestartableLiveChatClient returned error: %v", err)
+	}
+	defer client.Close()
+	<-client.ConnectionStates()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err = client.Reconnect(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Reconnect error = %v, want %v", err, context.Canceled)
+	}
+	if first.closedCalled() {
+		t.Fatal("canceled reconnect closed the active transport")
+	}
+	if got, want := factory.calls(), 1; got != want {
+		t.Fatalf("factory calls = %d, want %d", got, want)
+	}
+}
+
+func TestRestartableLiveChatClientReconnectCancellationClosesUnconnectedReplacement(t *testing.T) {
+	first := newFakeTwitchTransport(4)
+	second := newFakeTwitchTransport(4)
+	var (
+		mu     sync.Mutex
+		calls  int
+		cancel context.CancelFunc
+	)
+	factory := func(context.Context) (twitch.ChatClient, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		if calls == 1 {
+			return first, nil
+		}
+		cancel()
+		return second, nil
+	}
+
+	client, err := NewRestartableLiveChatClient(context.Background(), factory, 8)
+	if err != nil {
+		t.Fatalf("NewRestartableLiveChatClient returned error: %v", err)
+	}
+	defer client.Close()
+	<-client.ConnectionStates()
+
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	cancel = cancelFunc
+	err = client.Reconnect(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Reconnect error = %v, want %v", err, context.Canceled)
+	}
+	if !first.closedCalled() {
+		t.Fatal("first transport was not closed before canceled replacement")
+	}
+	if !second.closedCalled() {
+		t.Fatal("replacement transport was not closed after cancellation")
+	}
+	if second.connectCalled() {
+		t.Fatal("replacement transport connected after reconnect context was canceled")
+	}
+}
+
+func TestRestartableLiveChatClientReconnectCancellationClosesBlockingConnect(t *testing.T) {
+	first := newFakeTwitchTransport(4)
+	second := newBlockingConnectTransport()
+	var (
+		mu    sync.Mutex
+		calls int
+	)
+	factory := func(context.Context) (twitch.ChatClient, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		if calls == 1 {
+			return first, nil
+		}
+		return second, nil
+	}
+
+	client, err := NewRestartableLiveChatClient(context.Background(), factory, 8)
+	if err != nil {
+		t.Fatalf("NewRestartableLiveChatClient returned error: %v", err)
+	}
+	defer client.Close()
+	<-client.ConnectionStates()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.Reconnect(ctx)
+	}()
+	<-second.connectEntered
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Reconnect error = %v, want %v", err, context.Canceled)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Reconnect did not return after context cancellation")
+	}
+	if !first.closedCalled() {
+		t.Fatal("first transport was not closed before blocking replacement")
+	}
+	if !second.closedCalled() {
+		t.Fatal("blocking replacement transport was not closed after cancellation")
+	}
+}
+
+func TestRestartableLiveChatClientRejectsRepeatedReconnectWhileInProgress(t *testing.T) {
+	factory := &fakeRestartTransportFactory{}
+	factory.queueTransport(newFakeTwitchTransport(4))
+	second := factory.queueTransport(newFakeTwitchTransport(4))
+	block := make(chan struct{})
+	entered := make(chan struct{})
+	factory.blockCall(2, entered, block)
+
+	client, err := NewRestartableLiveChatClient(context.Background(), factory.newTransport, 8)
+	if err != nil {
+		t.Fatalf("NewRestartableLiveChatClient returned error: %v", err)
+	}
+	defer client.Close()
+	<-client.ConnectionStates()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.Reconnect(context.Background())
+	}()
+	<-entered
+
+	if err := client.Reconnect(context.Background()); !errors.Is(err, ErrReconnectInProgress) {
+		t.Fatalf("second Reconnect error = %v, want %v", err, ErrReconnectInProgress)
+	}
+	close(block)
+	if err := <-errCh; err != nil {
+		t.Fatalf("first Reconnect returned error: %v", err)
+	}
+	if !second.connectCalled() {
+		t.Fatal("blocked reconnect did not connect replacement transport after release")
 	}
 }
 
@@ -543,6 +786,12 @@ func (t *fakeTwitchTransport) connectCalled() bool {
 	return t.connected
 }
 
+func (t *fakeTwitchTransport) closedCalled() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.closed
+}
+
 func (t *fakeTwitchTransport) sendsSent() []SendRequest {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -557,4 +806,149 @@ func (t *fakeTwitchTransport) repliesSent() []SendRequest {
 	out := make([]SendRequest, len(t.replies))
 	copy(out, t.replies)
 	return out
+}
+
+type blockingConnectTransport struct {
+	connectEntered chan struct{}
+	closedCh       chan struct{}
+	closeOnce      sync.Once
+
+	mu     sync.Mutex
+	closed bool
+}
+
+func newBlockingConnectTransport() *blockingConnectTransport {
+	return &blockingConnectTransport{
+		connectEntered: make(chan struct{}),
+		closedCh:       make(chan struct{}),
+	}
+}
+
+func (t *blockingConnectTransport) Connect(ctx context.Context) (<-chan twitch.Event, error) {
+	close(t.connectEntered)
+	select {
+	case <-t.closedCh:
+		return nil, ErrLiveChatClientClosed
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (t *blockingConnectTransport) Send(context.Context, string, string) error {
+	return nil
+}
+
+func (t *blockingConnectTransport) Reply(context.Context, string, string, string) error {
+	return nil
+}
+
+func (t *blockingConnectTransport) Close() error {
+	t.closeOnce.Do(func() {
+		t.mu.Lock()
+		t.closed = true
+		t.mu.Unlock()
+		close(t.closedCh)
+	})
+	return nil
+}
+
+func (t *blockingConnectTransport) closedCalled() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.closed
+}
+
+type fakeRestartTransportFactory struct {
+	mu                          sync.Mutex
+	results                     []fakeFactoryResult
+	created                     []*fakeTwitchTransport
+	callsValue                  int
+	createdBeforePreviousClosed bool
+	blockedCalls                map[int]fakeFactoryBlock
+}
+
+type fakeFactoryResult struct {
+	transport *fakeTwitchTransport
+	err       error
+}
+
+type fakeFactoryBlock struct {
+	entered chan<- struct{}
+	release <-chan struct{}
+}
+
+func (f *fakeRestartTransportFactory) queueTransport(transport *fakeTwitchTransport) *fakeTwitchTransport {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.results = append(f.results, fakeFactoryResult{transport: transport})
+	return transport
+}
+
+func (f *fakeRestartTransportFactory) queueError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.results = append(f.results, fakeFactoryResult{err: err})
+}
+
+func (f *fakeRestartTransportFactory) blockCall(call int, entered chan<- struct{}, release <-chan struct{}) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.blockedCalls == nil {
+		f.blockedCalls = make(map[int]fakeFactoryBlock)
+	}
+	f.blockedCalls[call] = fakeFactoryBlock{entered: entered, release: release}
+}
+
+func (f *fakeRestartTransportFactory) newTransport(ctx context.Context) (twitch.ChatClient, error) {
+	f.mu.Lock()
+	f.callsValue++
+	call := f.callsValue
+	block := f.blockedCalls[call]
+	f.mu.Unlock()
+
+	if block.entered != nil {
+		close(block.entered)
+	}
+	if block.release != nil {
+		select {
+		case <-block.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.created) > 0 {
+		previous := f.created[len(f.created)-1]
+		if previous != nil && !previous.closedCalled() {
+			f.createdBeforePreviousClosed = true
+		}
+	}
+	if len(f.results) == 0 {
+		return nil, errors.New("missing queued transport")
+	}
+	result := f.results[0]
+	f.results = f.results[1:]
+	if result.err != nil {
+		return nil, result.err
+	}
+	transport := result.transport
+	if transport == nil {
+		return nil, errors.New("missing queued transport")
+	}
+	f.created = append(f.created, transport)
+	return transport, nil
+}
+
+func (f *fakeRestartTransportFactory) createdBeforePreviousClose() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.createdBeforePreviousClosed
+}
+
+func (f *fakeRestartTransportFactory) calls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.callsValue
 }

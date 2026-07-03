@@ -296,6 +296,10 @@ Twitch IRC exposes connect, reconnect, and disconnect callbacks for the
 connection, not for each joined channel. `twi` copies those connection-level
 states onto the configured channel states; channel-specific notices and chat
 messages still route by their normalized channel names.
+Manual reconnect (`ctrl+r` or the command palette) restarts the live IRC source
+by closing the active transport before creating the replacement, while keeping
+per-channel history, drafts, reply selection, scroll, and unread state in the
+TUI model.
 
 ## Current vs Future Behavior
 

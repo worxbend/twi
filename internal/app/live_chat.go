@@ -4,30 +4,50 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/w0rxbend/twi/internal/auth"
 	"github.com/w0rxbend/twi/internal/twitch"
 )
 
 const defaultLiveChatBuffer = 128
 
-var oauthTokenPattern = regexp.MustCompile(`(?i)oauth:[^\s]+`)
+var credentialRedactor = auth.NewRedactor()
 
 // LiveChatClient adapts the transport-level Twitch chat client into the
 // app-facing ChatClient interface consumed by the Bubble Tea model.
 type LiveChatClient struct {
-	transport twitch.ChatClient
-	messages  chan twitch.ChatMessage
-	states    chan ConnectionState
-	done      chan struct{}
-	closed    chan struct{}
-	closeOnce sync.Once
+	factory LiveChatTransportFactory
+	baseCtx context.Context
+
+	messages chan twitch.ChatMessage
+	states   chan ConnectionState
+	done     chan struct{}
+	closed   chan struct{}
+
+	mu           sync.RWMutex
+	session      *liveChatSession
+	closedFlag   bool
+	reconnecting bool
+	lifecycleMu  sync.Mutex
+	closeOnce    sync.Once
 }
 
 var _ ChatClient = (*LiveChatClient)(nil)
+
+// LiveChatTransportFactory creates a fresh Twitch chat transport for a live
+// chat session. It is called once for initial connection and again for each
+// manual reconnect restart.
+type LiveChatTransportFactory func(context.Context) (twitch.ChatClient, error)
+
+var (
+	ErrReconnectUnavailable = errors.New("manual reconnect unavailable for this chat source")
+	ErrReconnectInProgress  = errors.New("manual reconnect already in progress")
+	ErrLiveChatClientClosed = errors.New("live chat client closed")
+	ErrLiveChatDisconnected = errors.New("live chat client disconnected; reconnect with ctrl+r")
+)
 
 func NewLiveChatClient(ctx context.Context, transport twitch.ChatClient, buffer int) (*LiveChatClient, error) {
 	if ctx == nil {
@@ -36,16 +56,36 @@ func NewLiveChatClient(ctx context.Context, transport twitch.ChatClient, buffer 
 	if transport == nil {
 		return nil, errors.New("missing Twitch chat transport")
 	}
+	factory := func(context.Context) (twitch.ChatClient, error) {
+		return transport, nil
+	}
+	return newLiveChatClient(ctx, nil, factory, buffer)
+}
+
+// NewRestartableLiveChatClient creates a live client whose Reconnect method
+// tears down the active transport and starts a fresh transport from factory.
+func NewRestartableLiveChatClient(ctx context.Context, factory LiveChatTransportFactory, buffer int) (*LiveChatClient, error) {
+	if factory == nil {
+		return nil, errors.New("missing Twitch chat transport factory")
+	}
+	return newLiveChatClient(ctx, factory, factory, buffer)
+}
+
+func newLiveChatClient(ctx context.Context, reconnectFactory, initialFactory LiveChatTransportFactory, buffer int) (*LiveChatClient, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if buffer <= 0 {
 		buffer = defaultLiveChatBuffer
 	}
 
 	client := &LiveChatClient{
-		transport: transport,
-		messages:  make(chan twitch.ChatMessage, buffer),
-		states:    make(chan ConnectionState, buffer),
-		done:      make(chan struct{}),
-		closed:    make(chan struct{}),
+		factory:  reconnectFactory,
+		baseCtx:  ctx,
+		messages: make(chan twitch.ChatMessage, buffer),
+		states:   make(chan ConnectionState, buffer),
+		done:     make(chan struct{}),
+		closed:   make(chan struct{}),
 	}
 	client.emitState(ctx, ConnectionState{
 		Status: ConnectionConnecting,
@@ -53,7 +93,7 @@ func NewLiveChatClient(ctx context.Context, transport twitch.ChatClient, buffer 
 		At:     time.Now(),
 	})
 
-	events, err := transport.Connect(ctx)
+	session, err := client.newSession(ctx, initialFactory)
 	if err != nil {
 		safeErr := errors.New(credentialSafeDetail(err))
 		client.emitState(ctx, ConnectionState{
@@ -68,7 +108,8 @@ func NewLiveChatClient(ctx context.Context, transport twitch.ChatClient, buffer 
 		return nil, safeErr
 	}
 
-	go client.bridge(ctx, events)
+	client.setSession(session)
+	go client.bridge(session)
 	return client, nil
 }
 
@@ -84,6 +125,10 @@ func (c *LiveChatClient) Send(ctx context.Context, req SendRequest) (SendResult,
 	if err := ctx.Err(); err != nil {
 		return SendResult{}, err
 	}
+	transport, err := c.currentTransport()
+	if err != nil {
+		return SendResult{}, err
+	}
 	text := strings.TrimSpace(req.Text)
 	if text == "" {
 		return SendResult{}, errors.New("message text cannot be empty")
@@ -92,12 +137,12 @@ func (c *LiveChatClient) Send(ctx context.Context, req SendRequest) (SendResult,
 		text = actionWireText(text)
 	}
 	if req.ReplyToMessageID != "" {
-		if err := c.transport.Reply(ctx, req.Channel, req.ReplyToMessageID, text); err != nil {
+		if err := transport.Reply(ctx, req.Channel, req.ReplyToMessageID, text); err != nil {
 			return SendResult{}, errors.New(credentialSafeSendDetail(err))
 		}
 		return SendResult{AcceptedAt: time.Now()}, nil
 	}
-	if err := c.transport.Send(ctx, req.Channel, text); err != nil {
+	if err := transport.Send(ctx, req.Channel, text); err != nil {
 		return SendResult{}, errors.New(credentialSafeSendDetail(err))
 	}
 	return SendResult{AcceptedAt: time.Now()}, nil
@@ -110,49 +155,272 @@ func actionWireText(text string) string {
 func (c *LiveChatClient) Close() error {
 	var err error
 	c.closeOnce.Do(func() {
+		c.lifecycleMu.Lock()
+		c.mu.Lock()
+		c.closedFlag = true
+		session := c.session
+		c.session = nil
 		close(c.done)
-		err = c.transport.Close()
-		<-c.closed
+		c.mu.Unlock()
+		err = session.stop(true)
+		c.lifecycleMu.Unlock()
+		close(c.messages)
+		close(c.states)
+		close(c.closed)
 	})
 	return err
 }
 
-func (c *LiveChatClient) bridge(ctx context.Context, events <-chan twitch.Event) {
-	defer close(c.closed)
-	defer close(c.messages)
-	defer close(c.states)
+func (c *LiveChatClient) Reconnect(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if c.factory == nil {
+		return ErrReconnectUnavailable
+	}
+	if !c.lifecycleMu.TryLock() {
+		return ErrReconnectInProgress
+	}
+	defer c.lifecycleMu.Unlock()
+
+	if err := c.ensureOpen(); err != nil {
+		return err
+	}
+	c.setReconnecting(true)
+	defer c.setReconnecting(false)
+
+	c.emitState(ctx, ConnectionState{
+		Status: ConnectionReconnecting,
+		Detail: "manual reconnect restarting Twitch IRC",
+		At:     time.Now(),
+	})
+
+	old := c.swapSession(nil)
+	if err := old.stop(true); err != nil {
+		return errors.New(credentialSafeDetail(err))
+	}
+	if err := ctx.Err(); err != nil {
+		c.emitState(context.Background(), ConnectionState{
+			Status: ConnectionFailed,
+			Detail: "manual reconnect canceled; retry with ctrl+r",
+			Err:    err,
+			At:     time.Now(),
+		})
+		return err
+	}
+
+	session, err := c.newSession(ctx, c.factory)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			c.emitState(context.Background(), ConnectionState{
+				Status: ConnectionFailed,
+				Detail: "manual reconnect canceled; retry with ctrl+r",
+				Err:    err,
+				At:     time.Now(),
+			})
+			return err
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			c.emitState(context.Background(), ConnectionState{
+				Status: ConnectionFailed,
+				Detail: "manual reconnect timed out; retry with ctrl+r",
+				Err:    err,
+				At:     time.Now(),
+			})
+			return err
+		}
+		safeErr := errors.New(credentialSafeDetail(err))
+		c.emitState(ctx, ConnectionState{
+			Status: ConnectionFailed,
+			Detail: "manual reconnect failed: " + safeErr.Error() + "; retry with ctrl+r",
+			Err:    safeErr,
+			At:     time.Now(),
+		})
+		return safeErr
+	}
+	if err := c.ensureOpen(); err != nil {
+		_ = session.stop(true)
+		return err
+	}
+	c.setSession(session)
+	go c.bridge(session)
+	return nil
+}
+
+func (c *LiveChatClient) bridge(session *liveChatSession) {
+	defer close(session.done)
 
 	terminalStateSeen := false
 	for {
 		select {
-		case event, ok := <-events:
+		case event, ok := <-session.events:
+			if session.suppressed() {
+				return
+			}
 			if !ok {
 				if terminalStateSeen {
 					return
 				}
-				c.emitState(ctx, ConnectionState{
+				c.emitState(session.ctx, ConnectionState{
 					Status: ConnectionDisconnected,
 					Detail: "Twitch IRC connection closed",
 					At:     time.Now(),
 				})
 				return
 			}
-			c.handleEvent(ctx, event)
+			c.handleEvent(session.ctx, event)
 			if isTerminalEvent(event) {
 				terminalStateSeen = true
 			}
-		case <-ctx.Done():
-			c.emitState(ctx, ConnectionState{
-				Status: ConnectionClosed,
-				Detail: "chat session canceled",
-				Err:    ctx.Err(),
-				At:     time.Now(),
-			})
+		case <-session.ctx.Done():
+			if !session.suppressed() {
+				c.emitState(context.Background(), ConnectionState{
+					Status: ConnectionClosed,
+					Detail: "chat session canceled",
+					Err:    session.ctx.Err(),
+					At:     time.Now(),
+				})
+			}
 			return
 		case <-c.done:
 			return
 		}
 	}
+}
+
+func (c *LiveChatClient) newSession(ctx context.Context, factory LiveChatTransportFactory) (*liveChatSession, error) {
+	if factory == nil {
+		return nil, ErrReconnectUnavailable
+	}
+	transport, err := factory(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if transport == nil {
+		return nil, errors.New("missing Twitch chat transport")
+	}
+	if err := ctx.Err(); err != nil {
+		_ = transport.Close()
+		return nil, err
+	}
+	sessionCtx, cancel := context.WithCancel(c.baseCtx)
+	session := &liveChatSession{
+		ctx:       sessionCtx,
+		cancel:    cancel,
+		transport: transport,
+		done:      make(chan struct{}),
+	}
+	events, err := connectTransport(ctx, sessionCtx, transport)
+	if err != nil {
+		cancel()
+		_ = transport.Close()
+		return nil, err
+	}
+	session.events = events
+	return session, nil
+}
+
+type connectResult struct {
+	events <-chan twitch.Event
+	err    error
+}
+
+func connectTransport(ctx, sessionCtx context.Context, transport twitch.ChatClient) (<-chan twitch.Event, error) {
+	resultCh := make(chan connectResult, 1)
+	go func() {
+		events, err := transport.Connect(sessionCtx)
+		resultCh <- connectResult{events: events, err: err}
+	}()
+
+	select {
+	case result := <-resultCh:
+		return result.events, result.err
+	case <-ctx.Done():
+		_ = transport.Close()
+		return nil, ctx.Err()
+	}
+}
+
+func (c *LiveChatClient) currentTransport() (twitch.ChatClient, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.closedFlag {
+		return nil, ErrLiveChatClientClosed
+	}
+	if c.session == nil || c.session.transport == nil {
+		if c.reconnecting {
+			return nil, ErrReconnectInProgress
+		}
+		return nil, ErrLiveChatDisconnected
+	}
+	return c.session.transport, nil
+}
+
+func (c *LiveChatClient) ensureOpen() error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.closedFlag {
+		return ErrLiveChatClientClosed
+	}
+	return nil
+}
+
+func (c *LiveChatClient) setSession(session *liveChatSession) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.session = session
+}
+
+func (c *LiveChatClient) swapSession(session *liveChatSession) *liveChatSession {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	old := c.session
+	c.session = session
+	return old
+}
+
+func (c *LiveChatClient) setReconnecting(reconnecting bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.reconnecting = reconnecting
+}
+
+type liveChatSession struct {
+	ctx       context.Context
+	cancel    context.CancelFunc
+	transport twitch.ChatClient
+	events    <-chan twitch.Event
+	done      chan struct{}
+
+	mu                 sync.RWMutex
+	suppressCloseState bool
+}
+
+func (s *liveChatSession) stop(suppressCloseState bool) error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	if suppressCloseState {
+		s.suppressCloseState = true
+	}
+	s.mu.Unlock()
+	s.cancel()
+	err := s.transport.Close()
+	<-s.done
+	return err
+}
+
+func (s *liveChatSession) suppressed() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.suppressCloseState
 }
 
 func (c *LiveChatClient) handleEvent(ctx context.Context, event twitch.Event) {
@@ -330,22 +598,24 @@ func credentialSafeDetail(err error) string {
 	if err == nil {
 		return ""
 	}
-	lower := strings.ToLower(oauthTokenPattern.ReplaceAllString(err.Error(), ""))
+	redacted := redactCredentialText(err.Error())
+	lower := strings.ToLower(redacted)
 	if strings.Contains(lower, "auth") || strings.Contains(lower, "login") || strings.Contains(lower, "scope") {
 		return "Twitch IRC authentication failed; verify username, OAuth token, and chat:read scope"
 	}
-	return redactCredentialText(err.Error())
+	return redacted
 }
 
 func credentialSafeSendDetail(err error) string {
 	if err == nil {
 		return ""
 	}
-	lower := strings.ToLower(oauthTokenPattern.ReplaceAllString(err.Error(), ""))
+	redacted := redactCredentialText(err.Error())
+	lower := strings.ToLower(redacted)
 	if strings.Contains(lower, "auth") || strings.Contains(lower, "login") || strings.Contains(lower, "scope") || strings.Contains(lower, "permission") {
 		return "Twitch IRC send failed; verify username, OAuth token, and chat:edit scope"
 	}
-	return redactCredentialText(err.Error())
+	return redacted
 }
 
 func detailOrFallback(value, fallback string) string {
@@ -357,7 +627,7 @@ func detailOrFallback(value, fallback string) string {
 }
 
 func redactCredentialText(value string) string {
-	return oauthTokenPattern.ReplaceAllString(value, "oauth:<redacted>")
+	return credentialRedactor.Redact(value)
 }
 
 func nonEmptyStrings(values ...string) []string {

@@ -11,13 +11,14 @@ Progress as of the initial swarm pass:
   multi-channel UX, diagnostics, inline image plumbing, OAuth login, and
   Unix-only restrictive credential-file persistence are partial; setup can write
   non-secret config and hand off to login; refresh-token persistence after IRC
-  reconnect and manual Kitty/Ghostty image validation are planned.
+  reconnect and manual Kitty/Ghostty image validation are planned. Active live
+  IRC reconnect restart is implemented.
 - Credential rule: Twitch username/token values currently come from
   environment variables, the flat config file, or on supported Unix builds the
   private credential file; environment and flat config values take precedence
   over saved credentials, and CLI overrides cover channel and config path.
-- Remaining near-term work: reconnect hardening, filters, debug logging,
-  release packaging, and manual terminal validation.
+- Remaining near-term work: filters, debug logging, release packaging, and
+  manual terminal validation.
 
 Each task is intended to fit one implementation loop. Agents should keep write scope to
 the listed files where possible and use fakes before network-dependent code.
@@ -513,10 +514,10 @@ Acceptance criteria: Palette can trigger common actions; inspect panel shows
 safe metadata for selected messages.
 Verification: Redaction tests; key-binding tests; snapshot tests.
 Risks: Debug views can accidentally expose sensitive data if not filtered.
-Follow-ups: Add copy/export only after a security pass. Full live reconnect
-restart behavior remains future transport work; T028 only requests reconnect
-through an optional app-side capability and reports unavailable for clients
-without that capability.
+Follow-ups: Add copy/export only after a security pass. Live reconnect restart
+is now implemented for the CLI's IRC source through the optional app-side
+capability, while clients without that capability still report reconnect as
+unavailable.
 
 ### Phase 5: Login, Setup, And Secure Storage
 

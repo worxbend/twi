@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -352,6 +353,15 @@ func (m *mockShellModel) clearLocalChat() {
 
 func (m *mockShellModel) requestReconnect() tea.Cmd {
 	channel := m.activeChannelName()
+	if m.reconnectInFlight {
+		m.channels.applyConnectionState(ConnectionState{
+			Status:  ConnectionReconnecting,
+			Channel: channel,
+			Detail:  "manual reconnect already in progress",
+			At:      time.Now(),
+		})
+		return nil
+	}
 	client, ok := m.client.(reconnectingChatClient)
 	if !ok {
 		state := m.activeChannelState().status
@@ -364,6 +374,7 @@ func (m *mockShellModel) requestReconnect() tea.Cmd {
 		m.channels.applyConnectionState(state)
 		return nil
 	}
+	m.reconnectInFlight = true
 	m.channels.applyConnectionState(ConnectionState{
 		Status:  ConnectionReconnecting,
 		Channel: channel,
@@ -379,24 +390,57 @@ func (m *mockShellModel) requestReconnect() tea.Cmd {
 }
 
 func (m *mockShellModel) completeReconnect(msg reconnectCompletedMsg) {
+	m.reconnectInFlight = false
 	channel := msg.channel
 	if channel == "" {
 		channel = m.activeChannelName()
 	}
 	if msg.err != nil {
+		if errors.Is(msg.err, ErrReconnectUnavailable) {
+			state := m.channels.ensure(channel).status
+			state.Channel = channel
+			if state.Status == "" {
+				state.Status = ConnectionDisconnected
+			}
+			state.Detail = "manual reconnect unavailable for this chat source"
+			state.Err = msg.err
+			state.At = time.Now()
+			m.channels.applyConnectionState(state)
+			return
+		}
+		if errors.Is(msg.err, ErrReconnectInProgress) {
+			m.channels.applyConnectionState(ConnectionState{
+				Status:  ConnectionReconnecting,
+				Channel: channel,
+				Detail:  "manual reconnect already in progress",
+				Err:     msg.err,
+				At:      time.Now(),
+			})
+			return
+		}
+		if errors.Is(msg.err, context.Canceled) {
+			m.channels.applyConnectionState(ConnectionState{
+				Status:  ConnectionDisconnected,
+				Channel: channel,
+				Detail:  "manual reconnect canceled; retry with ctrl+r",
+				Err:     msg.err,
+				At:      time.Now(),
+			})
+			return
+		}
 		m.channels.applyConnectionState(ConnectionState{
 			Status:  ConnectionFailed,
 			Channel: channel,
-			Detail:  credentialSafeDetail(msg.err),
+			Detail:  "manual reconnect failed: " + credentialSafeDetail(msg.err) + "; retry with ctrl+r",
 			Err:     msg.err,
 			At:      time.Now(),
 		})
 		return
 	}
 	m.channels.applyConnectionState(ConnectionState{
-		Status:  ConnectionConnected,
+		Status:  ConnectionConnecting,
 		Channel: channel,
-		Detail:  "manual reconnect completed",
+		Detail:  "manual reconnect started; waiting for Twitch IRC",
 		At:      time.Now(),
 	})
 }

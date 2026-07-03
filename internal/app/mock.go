@@ -81,6 +81,7 @@ type mockShellModel struct {
 	helpExpanded          bool
 	inspectOpen           bool
 	palette               commandPaletteState
+	reconnectInFlight     bool
 	nextSend              int
 	revealTickScheduled   bool
 	avatarLookupScheduled bool
