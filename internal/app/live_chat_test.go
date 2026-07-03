@@ -105,6 +105,38 @@ func TestLiveChatClientBridgesTransportEvents(t *testing.T) {
 	}
 }
 
+func TestLiveNoticeRawTagsMatchErrorFilter(t *testing.T) {
+	transport := newFakeTwitchTransport(4)
+	client, err := NewLiveChatClient(context.Background(), transport, 4)
+	if err != nil {
+		t.Fatalf("NewLiveChatClient returned error: %v", err)
+	}
+	defer client.Close()
+	<-client.ConnectionStates()
+
+	transport.emit(twitch.Event{
+		Kind: twitch.EventNotice,
+		Notice: twitch.Notice{
+			Channel: "example",
+			ID:      "routine_notice",
+			Text:    "Twitch notice",
+			RawTags: map[string]string{"msg-id": "login_failed"},
+		},
+	})
+
+	got := <-client.Messages()
+	if got.RawTags["msg-id"] != "login_failed" {
+		t.Fatalf("notice raw tags = %#v, want msg-id propagated", got.RawTags)
+	}
+	if !messageMatchesFilter(got, messageFilterErrors, "") {
+		t.Fatalf("notice message did not match error filter from raw tags: %#v", got)
+	}
+	if strings.Contains(strings.ToLower(got.Text), "failed") {
+		t.Fatalf("notice text %q contains failure marker; want raw-tag-only match", got.Text)
+	}
+	<-client.ConnectionStates()
+}
+
 func TestLiveChatClientAuthErrorsAreActionableAndRedacted(t *testing.T) {
 	transport := newFakeTwitchTransport(2)
 	client, err := NewLiveChatClient(context.Background(), transport, 2)

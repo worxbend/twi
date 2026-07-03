@@ -3173,6 +3173,26 @@ func TestMockShellKeyboardMessageFiltersPreserveChannelState(t *testing.T) {
 	}
 }
 
+func TestMockShellComposerFocusedNumbersDoNotToggleMessageFilters(t *testing.T) {
+	model := newMockShellModel("example", config.Default())
+	model.focus = mockFocusComposer
+
+	for _, r := range []rune{'1', '2', '3', '4', '0'} {
+		updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		model = updated.(mockShellModel)
+		if cmd != nil {
+			t.Fatalf("composer numeric key %q returned command %#v, want nil", r, cmd)
+		}
+	}
+
+	if got, want := model.activeChannelState().composerText, "12340"; got != want {
+		t.Fatalf("composer text after numeric input = %q, want %q", got, want)
+	}
+	if model.activeChannelState().messageFilters.active() {
+		t.Fatalf("message filters after composer numeric input = %q, want none", model.activeChannelState().messageFilters.summary())
+	}
+}
+
 func TestCommandPaletteTogglesAndResetsMessageFilters(t *testing.T) {
 	model := newMockShellModel("example", config.Default())
 	model.activeChannelState().messages = filterTestMessages("example")
@@ -3224,6 +3244,56 @@ func TestCommandPaletteTogglesAndResetsMessageFilters(t *testing.T) {
 	for _, want := range []string{"ordinary viewer chatter", "vip update", "slow mode enabled", "connection failed"} {
 		if !strings.Contains(chatRows, want) {
 			t.Fatalf("reset chat missing %q:\n%s", want, chatRows)
+		}
+	}
+}
+
+func TestMessageFilterTogglesPreserveActiveSendQueueAndFeedback(t *testing.T) {
+	client := NewFakeChatClient(2)
+	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
+	model.activeChannelState().messages = filterTestMessages("example")
+	model.focus = mockFocusComposer
+	model.activeChannelState().composerText = "first message"
+
+	updated, firstCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if firstCmd == nil {
+		t.Fatal("first Enter returned nil command, want active send command")
+	}
+	model.activeChannelState().composerText = "second message"
+	updated, secondCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if secondCmd != nil {
+		t.Fatalf("second Enter returned command %#v while first send active, want queued only", secondCmd)
+	}
+
+	before := model.activeChannelState()
+	if before.activeSend == nil || len(before.sendQueue) != 1 {
+		t.Fatalf("send setup active=%#v queue=%#v, want one active and one queued", before.activeSend, before.sendQueue)
+	}
+	activeID := before.activeSend.ID
+	activeText := before.activeSend.Text
+	queuedID := before.sendQueue[0].ID
+	queuedText := before.sendQueue[0].Text
+	sendState := before.sendState
+	sendFeedback := before.sendFeedback
+
+	model.focus = mockFocusChat
+	for _, r := range []rune{'1', '1'} {
+		updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		model = updated.(mockShellModel)
+		if cmd != nil {
+			t.Fatalf("filter toggle %q returned command %#v without asset services, want nil", r, cmd)
+		}
+		after := model.activeChannelState()
+		if after.activeSend == nil || after.activeSend.ID != activeID || after.activeSend.Text != activeText {
+			t.Fatalf("activeSend after filter toggle %q = %#v, want id=%d text=%q", r, after.activeSend, activeID, activeText)
+		}
+		if len(after.sendQueue) != 1 || after.sendQueue[0].ID != queuedID || after.sendQueue[0].Text != queuedText {
+			t.Fatalf("sendQueue after filter toggle %q = %#v, want id=%d text=%q", r, after.sendQueue, queuedID, queuedText)
+		}
+		if after.sendState != sendState || after.sendFeedback != sendFeedback {
+			t.Fatalf("send status after filter toggle %q = %q/%q, want %q/%q", r, after.sendState, after.sendFeedback, sendState, sendFeedback)
 		}
 	}
 }
@@ -3293,6 +3363,45 @@ func TestMessageFiltersArePerChannelAcrossSwitching(t *testing.T) {
 	model = updated.(mockShellModel)
 	if !model.activeChannelState().messageFilters.enabled(messageFilterRoles) {
 		t.Fatalf("beta filters after alpha reset = %q, want roles still active", model.activeChannelState().messageFilters.summary())
+	}
+}
+
+func TestMessageFiltersLimitVisibleAssetScheduling(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmoteMode = "image"
+	resolver := &appFakeAssetResolver{}
+	renderer := &appFakeImageRenderer{}
+	model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
+		AssetResolver: resolver,
+		AssetKinds:    map[string]bool{assets.KindTwitchEmote: true},
+		ImageRenderer: renderer,
+	})
+	hidden := emoteOnlyAssetMessage("hidden-asset", "111")
+	hidden.Text = "ordinary asset message"
+	visible := emoteOnlyAssetMessage("visible-role-asset", "222")
+	visible.Text = "vip asset message"
+	visible.Badges = []twitch.Badge{{SetID: "vip", ID: "1"}}
+	model.activeChannelState().messages = []twitch.ChatMessage{hidden, visible}
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	model = updated.(mockShellModel)
+	if cmd == nil || !model.assetLookupScheduled {
+		t.Fatalf("role filter toggle did not schedule visible asset work; scheduled=%v cmd=%#v", model.assetLookupScheduled, cmd)
+	}
+	requests := model.pendingAssetRequests()
+	if len(requests) != 1 || requests[0].Ref.ID != "222" {
+		t.Fatalf("filtered pending asset requests = %#v, want only visible role emote 222", requests)
+	}
+
+	updated, cmd = model.Update(assetLookupTickMsg{})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("assetLookupTick returned nil command, want resolver command for filtered visible asset")
+	}
+	_ = cmd().(assetPreparedBatchMsg)
+	if len(resolver.last) != 1 || resolver.last[0].Ref.ID != "222" {
+		t.Fatalf("resolver requests = %#v, want only visible role emote 222", resolver.last)
 	}
 }
 
