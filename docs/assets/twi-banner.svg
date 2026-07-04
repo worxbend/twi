@@ -23,7 +23,7 @@
   <rect x="80" y="266" width="312" height="18" rx="9" fill="#22d3ee"/>
   <text x="640" y="142" font-family="Inter, Arial, sans-serif" font-size="82" font-weight="900" fill="#f8fafc">twi</text>
   <text x="640" y="196" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="700" fill="#e0f2fe">terminal Twitch chat, no browser circus</text>
-  <text x="640" y="242" font-family="Inter, Arial, sans-serif" font-size="25" fill="#cbd5e1">Mock mode. Live IRC. Docker-ready. Secrets redacted.</text>
+  <text x="640" y="242" font-family="Inter, Arial, sans-serif" font-size="25" fill="#cbd5e1">Mock mode. Live IRC. Dockerfile. Secrets redacted.</text>
   <rect x="640" y="270" width="164" height="42" rx="10" fill="#22d3ee"/>
   <text x="722" y="299" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="800" fill="#082f49">go run</text>
   <rect x="824" y="270" width="154" height="42" rx="10" fill="#a78bfa"/>
