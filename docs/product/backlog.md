@@ -21,8 +21,10 @@ Progress as of the initial swarm pass:
   environment variables, the flat config file, or saved credentials on
   supported platforms; environment and flat config values take precedence over
   saved credentials, and CLI overrides cover channel and config path.
-- Remaining near-term work: post-release auth-storage validation for supported
-  credential stores.
+- Remaining validation limits are environment-dependent: credentialed Twitch
+  release checks, exact Docker CLI smokes on a Docker-enabled host, native
+  Windows-host Credential Manager smoke evidence, and manual Kitty/Ghostty
+  inline image drawing.
 
 Each task is intended to fit one implementation loop. Agents should keep write scope to
 the listed files where possible and use fakes before network-dependent code.
