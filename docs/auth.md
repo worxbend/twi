@@ -272,7 +272,7 @@ credential persistence is disabled and points to env/config credentials.
 
 Current `twi doctor` behavior:
 
-- Reports the credential file as loaded, missing, or failed.
+- Reports the selected credential store as loaded, missing, or failed.
 - Reports Twitch username, OAuth token, client ID, and client secret as
   `present` or `missing`.
 - Reports missing username or OAuth token as warnings because mock mode and
