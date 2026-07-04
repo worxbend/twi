@@ -1,0 +1,54 @@
+name: Release Dry Run
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  artifacts:
+    name: Build release artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GOTOOLCHAIN: auto
+      TERM: xterm-256color
+      XDG_CONFIG_HOME: ${{ runner.temp }}/twi-config
+      XDG_CACHE_HOME: ${{ runner.temp }}/twi-cache
+      TWI_TWITCH_USERNAME: ""
+      TWI_TWITCH_OAUTH_TOKEN: ""
+      TWI_TWITCH_REFRESH_TOKEN: ""
+      TWI_TWITCH_CLIENT_ID: ""
+      TWI_TWITCH_CLIENT_SECRET: ""
+      TWITCH_USERNAME: ""
+      TWITCH_ACCESS_TOKEN: ""
+      TWITCH_REFRESH_TOKEN: ""
+      TWITCH_CLIENT_ID: ""
+      TWITCH_CLIENT_SECRET: ""
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Prepare isolated app directories
+        run: mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
+
+      - name: Build and smoke release artifacts
+        run: scripts/release-dry-run.sh --out "$RUNNER_TEMP/twi-release"
+
+      - name: Upload dry-run artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: twi-release-dry-run
+          path: ${{ runner.temp }}/twi-release/
+          if-no-files-found: error

@@ -14,6 +14,17 @@ The image uses a multi-stage build:
 - `debian:bookworm-slim` runs the static binary as a non-root `twi` user.
 - CA certificates are copied into the runtime image for Twitch IRC over TLS.
 
+For the release packaging path, prefer the repository dry-run:
+
+```sh
+scripts/release-dry-run.sh --out /tmp/twi-release --image twi:local
+```
+
+It derives the Go version from `go.mod`, builds release binaries and checksums,
+builds this Docker image, and smokes help, doctor, and mock chat with credential
+environment variables cleared and host config isolated. See
+[Release Packaging](release.md).
+
 ## Run Mock Chat
 
 Mock chat is ready today and does not need Twitch credentials or network access.

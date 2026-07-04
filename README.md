@@ -54,6 +54,17 @@ go run ./cmd/twi doctor
 docker run --rm twi:local doctor
 ```
 
+Run the credential-free release packaging dry-run:
+
+```sh
+scripts/release-dry-run.sh --out /tmp/twi-release --image twi:local
+```
+
+The dry-run builds trimmed binaries for the supported target matrix, writes
+SHA-256 checksums, builds the Docker image, and smokes help, doctor, and mock
+chat with local config and Twitch credentials isolated. More detail:
+[Release Packaging](docs/release.md).
+
 ## Live Twitch Chat
 
 Live mode needs a Twitch login, an IRC OAuth token, and at least one channel. Repeat `--channel` to join multiple Twitch IRC channels. The token needs `chat:read`; sending from the composer also needs `chat:edit`. Username/token credentials can come from environment variables, the flat config file, or on Unix builds the private credential file created by `twi login`. Environment and flat config values take precedence over saved credentials. CLI flags currently override channels and config path, not username or token values.
@@ -249,6 +260,10 @@ For live Docker runs, put real values only in your local ignored `.env`, pass cr
 
 More detail: [Docker Guide](docs/docker.md).
 
+Release binary and container packaging is covered by
+[Release Packaging](docs/release.md). The release dry-run is a separate
+manual/tag workflow, not part of the default pull-request gate.
+
 ## Developer Commands
 
 The default CI quality gate runs this same credential-free command set from a
@@ -296,6 +311,7 @@ GOTOOLCHAIN=local GOCACHE=/tmp/twi-gocache GOMODCACHE=/tmp/twi-gomodcache go tes
 
 - [Quickstart](docs/quickstart.md)
 - [Docker Guide](docs/docker.md)
+- [Release Packaging](docs/release.md)
 - [Authentication](docs/auth.md)
 - [Configuration](docs/config.md)
 - [Development](docs/development.md)

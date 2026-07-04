@@ -17,6 +17,12 @@ temp
 *.test
 .env
 .env.*
+.local
+config.toml
+credentials.json
+*credentials*.json
+screenshots
+recordings
 Dockerfile
 compose.yaml
 docs

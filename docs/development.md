@@ -109,6 +109,19 @@ Docker build/runtime checks, and Kitty/Ghostty inline-image validation are
 manual or release-specific checks. Replace `origin/main` with the PR base branch
 when needed; use plain `git diff --check` for uncommitted local changes.
 
+Release artifact packaging is intentionally separate from the pull-request gate:
+
+```sh
+scripts/release-dry-run.sh --out /tmp/twi-release --image twi:local
+```
+
+That dry-run builds the supported trimmed binary matrix, emits and verifies
+SHA-256 checksums, builds the Docker image, and smokes help, doctor, and mock
+chat with temporary config/cache directories and Twitch credential environment
+variables cleared. The GitHub release dry-run workflow runs the same script only
+on manual dispatch or `v*` tag pushes. See [release.md](release.md) for the
+automated versus manual release check split.
+
 Task-specific smoke and metadata checks used by recent iterations:
 
 ```sh
