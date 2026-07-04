@@ -49,8 +49,9 @@ non-secret config values and can hand off to login. In the Linux container,
 `twi login` is an OAuth browser/callback flow that saves returned tokens
 through the restrictive credential-file fallback without printing them;
 manual reconnect restarts the live IRC transport while preserving channel UI
-state. Refresh-token persistence after IRC reconnect and manual Kitty/Ghostty
-image validation are still planned or environment-dependent. Live image asset
+state. Refresh-token persistence after IRC reconnect is current when the
+supported credential store is available; manual Kitty/Ghostty image validation
+is still environment-dependent. Live image asset
 wiring is current when config, credentials, cache, and terminal checks allow
 it.
 
@@ -86,7 +87,7 @@ docker compose run --rm live
 
 `compose.yaml` reads `TWITCH_*` variables from your shell or local `.env`. Keep real secrets out of tracked files. If `TWITCH_ACCESS_TOKEN` does not include the `oauth:` prefix, `twi` adds it before opening Twitch IRC.
 
-When `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, and `TWITCH_REFRESH_TOKEN` are set, live chat will try one in-memory token refresh if Twitch IRC rejects the access token during login.
+When `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, and `TWITCH_REFRESH_TOKEN` are set, live chat will try one token refresh if Twitch IRC rejects the access token during login. In Linux containers with a writable private config mount, refreshed tokens can be saved through the Unix credential file; if saving is unavailable or fails, the refreshed tokens stay in memory for the current chat process and a redacted warning is shown.
 
 ## Run Doctor
 

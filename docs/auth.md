@@ -65,7 +65,12 @@ When live Twitch IRC login fails with an authentication error, `twi` tries one O
 - Client ID.
 - Client secret.
 
-The refresh request is sent to Twitch's OAuth token endpoint. The refreshed access token and refresh token are kept in memory for the current process only; they are not written back to `.env` or the config file yet.
+The refresh request is sent to Twitch's OAuth token endpoint. On supported Unix
+builds, the refreshed access token and refresh token are saved through the
+private credential store. If the credential store is unavailable or saving
+fails, live chat keeps using the refreshed tokens in memory for the current
+process and reports a redacted warning with next-step guidance. Refresh never
+writes token material back to `.env` or the flat config file automatically.
 
 If refresh fails, the user-facing error remains redacted and tells you to verify username, OAuth token, and `chat:read`.
 
@@ -111,8 +116,9 @@ The command requests the MVP scopes by default:
 
 On supported Unix builds, the command saves successful login results through
 the restrictive credential file fallback. On non-Unix builds, the command stops
-before opening the browser because the file fallback is disabled until
-platform-specific ACL and reparse-point/no-follow protections are implemented.
+before opening the browser because the file fallback is disabled. Windows saved
+credentials are planned through native Credential Manager rather than a
+credential file.
 Environment variables and flat config values still take precedence when
 present, so remove duplicates from shell profiles, `.env`, or `config.toml`
 after confirming saved credentials work.
@@ -176,8 +182,10 @@ is the explicit storage-owned reveal path for access and refresh tokens. Do not
 use it for logs, diagnostics, screenshots, snapshots, or user-facing output.
 
 No OS keychain backend is implemented today. The interface is shaped so one can
-be added later after dependency, platform, and support tradeoffs are explicit,
-but users should not expect keychain behavior from the current binary.
+be added later after dependency, platform, and support tradeoffs are explicit.
+[ADR 0007](adr/0007-use-windows-credential-manager-for-non-unix-credentials.md)
+selects native Windows Credential Manager for the future Windows backend, but
+users should not expect keychain behavior from the current binary.
 
 The credential-file fallback is supported only on Go `unix` builds today,
 including Linux and macOS. It is a separate local credential file under the
@@ -204,12 +212,13 @@ fallback implementation:
 Windows and other non-Unix builds do not have this file fallback enabled. The
 current binary does not enforce Windows owner-only ACLs, DACL inheritance
 rules, or reparse-point/no-follow protections for credential files, and it does
-not pretend that Unix `0700`/`0600` mode semantics apply there. On those
-platforms, `twi chat`, `twi config show`, and `twi doctor` continue to work
-with environment variables and the flat config file; `twi doctor` reports the
-disabled file fallback as a warning. `twi login` reports a redacted actionable
-error before starting OAuth so tokens are not obtained without a supported
-persistence path.
+not pretend that Unix `0700`/`0600` mode semantics apply there. The selected
+future Windows path is native Windows Credential Manager, not a JSON credential
+file. Until that backend is implemented, `twi chat`, `twi config show`, and
+`twi doctor` continue to work with environment variables and the flat config
+file; `twi doctor` reports the disabled file fallback as a warning. `twi login`
+reports a redacted actionable error before starting OAuth so tokens are not
+obtained without a supported persistence path.
 
 The fallback JSON format is versioned. Version 1 records only Twitch OAuth
 credential material and safe identity metadata:
@@ -233,11 +242,13 @@ credential material and safe identity metadata:
 ```
 
 Migration is explicit only. `twi` does not silently copy secrets from
-environment variables or the flat config file into credential storage. `twi
-login` saves credentials only after a successful user-authorized OAuth login;
-`twi setup --login` is an explicit handoff to that same login/storage boundary.
-Remove duplicate secrets from shell profiles, `.env`, or `config.toml` if you
-no longer want those sources to take precedence.
+environment variables or the flat config file into credential storage during
+setup or config loading. `twi login` saves credentials after a successful
+user-authorized OAuth login; live IRC auth refresh saves only newly refreshed
+tokens after Twitch has accepted the configured refresh flow. `twi setup
+--login` is an explicit handoff to the login/storage boundary. Remove
+duplicate secrets from shell profiles, `.env`, or `config.toml` if you no
+longer want those sources to take precedence.
 
 Refresh tokens should be used when available and appropriate for the selected OAuth flow.
 

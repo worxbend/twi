@@ -13,7 +13,7 @@
 
 `twi` is a terminal Twitch chat client with taste. It is keyboard-first, fast to launch, friendly to low-drama terminals, and allergic to leaking your OAuth token.
 
-The project is currently an MVP-shaped Go app: mock chat is ready without the network; live Twitch IRC read/send, diagnostics, redacted debug logging, multi-channel UX, inline image plumbing, OAuth login, setup, and Unix-only restrictive credential-file persistence are partially shipped. Release binary/container packaging is available through the dry-run workflow. Refresh-token persistence after IRC reconnect, secure non-Unix credential persistence, credentialed Twitch release validation, and manual Kitty/Ghostty image validation remain planned or environment-dependent. Current manual terminal evidence is recorded in [docs/manual-validation.md](docs/manual-validation.md).
+The project is currently an MVP-shaped Go app: mock chat is ready without the network; live Twitch IRC read/send, diagnostics, redacted debug logging, multi-channel UX, inline image plumbing, OAuth login, setup, and Unix-only restrictive credential-file persistence are partially shipped. Release binary/container packaging is available through the dry-run workflow. Secure non-Unix credential persistence, credentialed Twitch release validation, and manual Kitty/Ghostty image validation remain planned or environment-dependent. Current manual terminal evidence is recorded in [docs/manual-validation.md](docs/manual-validation.md).
 
 ```text
         +---------------------------------------------+
@@ -112,7 +112,7 @@ export TWITCH_CLIENT_SECRET="<client secret from Twitch>"
 export TWITCH_REFRESH_TOKEN="<refresh token from Twitch>"
 ```
 
-If Twitch IRC rejects the access token during login, `twi` will try one in-memory OAuth refresh and reconnect when `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, and `TWITCH_REFRESH_TOKEN` are also configured. It does not write the refreshed token back to disk yet.
+If Twitch IRC rejects the access token during login, `twi` will try one OAuth refresh and reconnect when `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, and `TWITCH_REFRESH_TOKEN` are also configured. On supported Unix builds, refreshed access and refresh tokens are saved through the private credential store. If saving is unsupported or fails, `twi` keeps the refreshed tokens in memory for the current chat session and reports a redacted warning.
 
 ### OAuth Login Command
 
@@ -138,7 +138,7 @@ Use the bounded noninteractive smoke path when you only want to check command wi
 go run ./cmd/twi login --dry-run
 ```
 
-The file fallback is Unix-only today. It stores a separate private `credentials.json` under a `0700` platform config directory, creates the file with `0600` permissions, rejects symlinked credential paths, and opens existing files with no-follow protection. Existing credential files or directories with different modes are rejected instead of reused. Windows and other non-Unix builds do not claim equivalent ACL or reparse-point guarantees, so the file fallback is disabled there. No OS keychain backend is implemented yet. If you keep duplicate credentials in environment variables or `config.toml`, those sources still win until you remove them.
+The file fallback is Unix-only today. It stores a separate private `credentials.json` under a `0700` platform config directory, creates the file with `0600` permissions, rejects symlinked credential paths, and opens existing files with no-follow protection. Existing credential files or directories with different modes are rejected instead of reused. Windows and other non-Unix builds do not claim equivalent ACL or reparse-point guarantees, so the file fallback is disabled there. [ADR 0007](docs/adr/0007-use-windows-credential-manager-for-non-unix-credentials.md) selects native Windows Credential Manager for future Windows persistence, but that backend is not implemented yet. If you keep duplicate credentials in environment variables or `config.toml`, those sources still win until you remove them.
 
 Docker version:
 
@@ -269,10 +269,12 @@ claimed:
   do not replace the final Docker check.
 - Kitty/Ghostty inline image drawing is not claimed until a compatible graphics
   terminal session is recorded in [docs/manual-validation.md](docs/manual-validation.md).
-- Refreshed IRC tokens are kept in memory for the current process and are not
-  persisted yet.
-- Non-Unix builds do not have a secure credential-file backend or OS keychain
-  backend yet.
+- Refreshed IRC tokens are persisted only when the supported credential store
+  is available; otherwise they remain in memory for the current process with a
+  redacted warning.
+- Windows saved-credential persistence is designed to use native Credential
+  Manager, but that backend is not implemented yet; other non-Unix platforms
+  stay deferred.
 - Package-manager manifests, signing, notarization, registry publishing, and
   SBOM/provenance are post-release work.
 

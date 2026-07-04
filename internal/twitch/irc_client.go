@@ -39,19 +39,58 @@ type IRCConfig struct {
 	Buffer       int
 	Now          func() time.Time
 	DebugLogger  debuglog.Logger
+	// OnOAuthRefresh is called after a successful auth refresh and before the
+	// replacement IRC session connects. Callback errors are reported as
+	// redacted warnings and do not prevent reconnect with the refreshed token.
+	OnOAuthRefresh func(context.Context, OAuthRefresh) error
+}
+
+// OAuthRefresh describes refreshed Twitch OAuth credentials produced while
+// recovering from an IRC authentication failure.
+type OAuthRefresh struct {
+	AccessToken         auth.Secret
+	RefreshToken        auth.Secret
+	TokenType           string
+	Scopes              []auth.Scope
+	ExpiresAt           time.Time
+	RefreshedAt         time.Time
+	RefreshTokenUpdated bool
+}
+
+// Redactor returns an auth redactor configured with refreshed token material.
+func (r OAuthRefresh) Redactor() auth.Redactor {
+	return auth.NewRedactor(r.AccessToken, r.RefreshToken)
+}
+
+type ircSession interface {
+	Connect() error
+	Disconnect() error
+	Say(channel, text string)
+	Reply(channel, parentMsgID, text string)
+	OnConnect(func())
+	OnPrivateMessage(func(irc.PrivateMessage))
+	OnNoticeMessage(func(irc.NoticeMessage))
+	OnUserNoticeMessage(func(irc.UserNoticeMessage))
+	OnRoomStateMessage(func(irc.RoomStateMessage))
+	OnClearChatMessage(func(irc.ClearChatMessage))
+	OnClearMessage(func(irc.ClearMessage))
+	OnUserStateMessage(func(irc.UserStateMessage))
+	OnReconnectMessage(func(irc.ReconnectMessage))
+	OnUnsetMessage(func(irc.RawMessage))
 }
 
 // IRCClient adapts go-twitch-irc callbacks into twi's normalized event stream.
 type IRCClient struct {
-	client   *irc.Client
-	username string
-	token    string
-	channels []string
-	buffer   int
-	now      func() time.Time
-	refresh  oauthRefreshConfig
-	logger   debuglog.Logger
-	mu       sync.RWMutex
+	client         ircSession
+	username       string
+	token          string
+	channels       []string
+	buffer         int
+	now            func() time.Time
+	refresh        oauthRefreshConfig
+	logger         debuglog.Logger
+	onOAuthRefresh func(context.Context, OAuthRefresh) error
+	mu             sync.RWMutex
 
 	done      chan struct{}
 	closeOnce sync.Once
@@ -107,8 +146,9 @@ func NewIRCClient(cfg IRCConfig) (*IRCClient, error) {
 			HTTPClient:   cfg.HTTPClient,
 			Logger:       logger,
 		},
-		logger: logger,
-		done:   make(chan struct{}),
+		logger:         logger,
+		onOAuthRefresh: cfg.OnOAuthRefresh,
+		done:           make(chan struct{}),
 	}, nil
 }
 
@@ -151,7 +191,7 @@ func (c *IRCClient) Connect(ctx context.Context) (<-chan Event, error) {
 	return events, nil
 }
 
-func registerIRCHandlers(client *irc.Client, emit func(Event), now func() time.Time) {
+func registerIRCHandlers(client ircSession, emit func(Event), now func() time.Time) {
 	client.OnConnect(func() {
 		emit(NormalizeIRCConnect(now()))
 	})
@@ -184,7 +224,7 @@ func registerIRCHandlers(client *irc.Client, emit func(Event), now func() time.T
 	})
 }
 
-func (c *IRCClient) connectWithAuthRefresh(ctx context.Context, emit func(Event), client *irc.Client) error {
+func (c *IRCClient) connectWithAuthRefresh(ctx context.Context, emit func(Event), client ircSession) error {
 	err := client.Connect()
 	if !errors.Is(err, irc.ErrLoginAuthenticationFailed) || !c.refresh.available() {
 		return err
@@ -197,19 +237,28 @@ func (c *IRCClient) connectWithAuthRefresh(ctx context.Context, emit func(Event)
 	}})
 	c.logger.Log(ctx, "twitch.irc.auth_refresh.start")
 
-	token, refreshed, refreshErr := c.refresh.refresh(ctx)
+	refreshedAt := c.now().UTC()
+	refreshed, refreshErr := c.refresh.refresh(ctx, refreshedAt)
 	if refreshErr != nil {
 		c.logger.Log(ctx, "twitch.irc.auth_refresh.failed", slog.String("error", redactIRCError(refreshErr.Error())))
 		return fmt.Errorf("refresh Twitch OAuth token after IRC auth failure: %w", refreshErr)
 	}
-	c.logger.Log(ctx, "twitch.irc.auth_refresh.succeeded", slog.Bool("refresh_token_updated", refreshed != c.refresh.RefreshToken))
+	c.logger.Log(ctx, "twitch.irc.auth_refresh.succeeded", slog.Bool("refresh_token_updated", refreshed.RefreshTokenUpdated))
 
+	oldToken := c.token
+	oldRefreshToken := c.refresh.RefreshToken
+	token := refreshed.AccessToken.Reveal()
+	refreshToken := refreshed.RefreshToken.Reveal()
 	c.mu.Lock()
 	c.token = token
-	c.refresh.RefreshToken = refreshed
+	c.refresh.RefreshToken = refreshToken
 	next := newIRCClient(c.username, token, c.channels)
 	c.client = next
 	c.mu.Unlock()
+
+	if err := c.persistOAuthRefresh(ctx, refreshed, oldToken, oldRefreshToken, emit); err != nil {
+		c.logger.Log(ctx, "twitch.irc.auth_refresh.persistence_failed", slog.String("error", err.Error()))
+	}
 
 	registerIRCHandlers(next, emit, c.now)
 	return next.Connect()
@@ -269,17 +318,49 @@ func (c *IRCClient) Close() error {
 	return err
 }
 
-func (c *IRCClient) currentClient() *irc.Client {
+func (c *IRCClient) currentClient() ircSession {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.client
 }
 
-func newIRCClient(username, token string, channels []string) *irc.Client {
+var newIRCClient = func(username, token string, channels []string) ircSession {
 	client := irc.NewClient(username, token)
 	client.Capabilities = []string{irc.TagsCapability, irc.CommandsCapability}
 	client.Join(channels...)
 	return client
+}
+
+func (c *IRCClient) persistOAuthRefresh(ctx context.Context, refreshed OAuthRefresh, oldToken, oldRefreshToken string, emit func(Event)) error {
+	if c.onOAuthRefresh == nil {
+		return nil
+	}
+	err := c.onOAuthRefresh(ctx, refreshed)
+	if err == nil {
+		c.logger.Log(ctx, "twitch.irc.auth_refresh.persistence_succeeded")
+		return nil
+	}
+	warning := c.refreshPersistenceWarning(err, refreshed, oldToken, oldRefreshToken)
+	emit(Event{Kind: EventConnection, Connection: ConnectionEvent{
+		Type:   ConnectionEventReconnect,
+		At:     c.now(),
+		Reason: warning,
+	}})
+	return errors.New(warning)
+}
+
+func (c *IRCClient) refreshPersistenceWarning(err error, refreshed OAuthRefresh, oldToken, oldRefreshToken string) string {
+	redactor := auth.NewRedactor(
+		auth.NewSecret(oldToken),
+		auth.NewSecret(oldRefreshToken),
+		auth.NewSecret(c.token),
+		auth.NewSecret(c.refresh.RefreshToken),
+		auth.NewSecret(c.refresh.ClientSecret),
+		refreshed.AccessToken,
+		refreshed.RefreshToken,
+	)
+	detail := redactIRCError(redactor.Redact(err.Error()))
+	return "warning: Twitch IRC refreshed OAuth credentials but could not save them (" + detail + "); using refreshed credentials in memory for this chat session only. Run `twi login` on a supported platform or update env/config credentials before the next session."
 }
 
 func credentialSafeIRCError(err error) error {
@@ -322,9 +403,11 @@ type oauthRefreshConfig struct {
 }
 
 type oauthRefreshResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	TokenType    string `json:"token_type"`
+	AccessToken  string   `json:"access_token"`
+	RefreshToken string   `json:"refresh_token"`
+	TokenType    string   `json:"token_type"`
+	ExpiresIn    int      `json:"expires_in"`
+	Scopes       []string `json:"scope"`
 }
 
 func (c oauthRefreshConfig) available() bool {
@@ -333,7 +416,7 @@ func (c oauthRefreshConfig) available() bool {
 		strings.TrimSpace(c.RefreshToken) != ""
 }
 
-func (c oauthRefreshConfig) refresh(ctx context.Context) (string, string, error) {
+func (c oauthRefreshConfig) refresh(ctx context.Context, refreshedAt time.Time) (OAuthRefresh, error) {
 	endpoint := strings.TrimSpace(c.TokenURL)
 	if endpoint == "" {
 		endpoint = defaultOAuthTokenURL
@@ -353,32 +436,32 @@ func (c oauthRefreshConfig) refresh(ctx context.Context) (string, string, error)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", "", err
+		return OAuthRefresh{}, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		c.Logger.Log(ctx, "twitch.oauth_refresh.failed", slog.String("error", redactIRCError(err.Error())))
-		return "", "", err
+		return OAuthRefresh{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		c.Logger.Log(ctx, "twitch.oauth_refresh.failed", slog.Int("http_status", resp.StatusCode))
-		return "", "", fmt.Errorf("twitch OAuth refresh returned HTTP %d", resp.StatusCode)
+		return OAuthRefresh{}, fmt.Errorf("twitch OAuth refresh returned HTTP %d", resp.StatusCode)
 	}
 
 	var decoded oauthRefreshResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
 		c.Logger.Log(ctx, "twitch.oauth_refresh.failed", slog.String("error", redactIRCError(err.Error())))
-		return "", "", err
+		return OAuthRefresh{}, err
 	}
 
 	accessToken := normalizeOAuthToken(decoded.AccessToken)
 	if accessToken == "" {
 		c.Logger.Log(ctx, "twitch.oauth_refresh.failed", slog.String("error", "missing access token"))
-		return "", "", errors.New("twitch OAuth refresh response did not include an access token")
+		return OAuthRefresh{}, errors.New("twitch OAuth refresh response did not include an access token")
 	}
 
 	refreshToken := strings.TrimSpace(decoded.RefreshToken)
@@ -386,7 +469,21 @@ func (c oauthRefreshConfig) refresh(ctx context.Context) (string, string, error)
 		refreshToken = strings.TrimSpace(c.RefreshToken)
 	}
 	c.Logger.Log(ctx, "twitch.oauth_refresh.succeeded", slog.Bool("refresh_token_returned", strings.TrimSpace(decoded.RefreshToken) != ""))
-	return accessToken, refreshToken, nil
+	if refreshedAt.IsZero() {
+		refreshedAt = time.Now().UTC()
+	}
+	result := OAuthRefresh{
+		AccessToken:         auth.NewSecret(accessToken),
+		RefreshToken:        auth.NewSecret(refreshToken),
+		TokenType:           strings.TrimSpace(decoded.TokenType),
+		Scopes:              auth.Scopes(decoded.Scopes...),
+		RefreshedAt:         refreshedAt,
+		RefreshTokenUpdated: strings.TrimSpace(decoded.RefreshToken) != "" && refreshToken != strings.TrimSpace(c.RefreshToken),
+	}
+	if decoded.ExpiresIn > 0 {
+		result.ExpiresAt = refreshedAt.Add(time.Duration(decoded.ExpiresIn) * time.Second)
+	}
+	return result, nil
 }
 
 func normalizeOAuthToken(value string) string {

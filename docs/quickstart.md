@@ -105,7 +105,8 @@ private `credentials.json` under a `0700` platform config directory with `0600`
 file permissions, symlink rejection, and no-follow file opens. On Windows and
 other non-Unix builds, the file fallback is disabled because owner-only ACL and
 reparse-point/no-follow guarantees are not implemented; use environment
-variables or a private flat config file there. No OS keychain backend is
+variables or a private flat config file there. Native Windows Credential
+Manager is selected for future Windows saved credentials, but it is not
 implemented yet.
 
 Environment variable setup:
@@ -134,7 +135,7 @@ docker run --rm -it \
 
 The app also accepts the older canonical names `TWI_TWITCH_USERNAME` and `TWI_TWITCH_OAUTH_TOKEN`. If you use `TWITCH_ACCESS_TOKEN` without the `oauth:` prefix, `twi` adds the prefix before opening Twitch IRC.
 
-If `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, and `TWITCH_REFRESH_TOKEN` are set, `twi` tries one in-memory token refresh when Twitch IRC rejects the access token during login. It does not write the refreshed token back to `.env` yet.
+If `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, and `TWITCH_REFRESH_TOKEN` are set, `twi` tries one token refresh when Twitch IRC rejects the access token during login. On supported Unix builds, refreshed tokens are saved through the private credential store. If saving is unavailable or fails, `twi` keeps the refreshed tokens in memory for the current chat session and reports a redacted warning. It does not write refreshed tokens back to `.env`.
 
 ## 5. Use A Config File Instead
 

@@ -985,7 +985,7 @@ func TestLiveChatConfiguredStartsClient(t *testing.T) {
 
 	var gotChannels []string
 	fake := app.NewFakeChatClient(1)
-	newLiveChatClient = func(_ context.Context, cfg config.Config, _ debuglog.Logger) (app.ChatClient, error) {
+	newLiveChatClient = func(_ context.Context, cfg config.Config, _ debuglog.Logger, _ credentialLoadStatus) (app.ChatClient, error) {
 		gotChannels = append([]string(nil), cfg.DefaultChannels...)
 		return fake, nil
 	}
@@ -1034,7 +1034,7 @@ func TestLiveChatEnvCredentialsIgnoreUnsupportedCredentialFileFallback(t *testin
 		return nil, fmt.Errorf("%w: credential-file fallback is disabled on non-Unix builds; use env/config; oauth:stored-secret", storage.ErrUnsupportedCredentialFilePlatform)
 	}
 	fake := app.NewFakeChatClient(1)
-	newLiveChatClient = func(context.Context, config.Config, debuglog.Logger) (app.ChatClient, error) {
+	newLiveChatClient = func(context.Context, config.Config, debuglog.Logger, credentialLoadStatus) (app.ChatClient, error) {
 		return fake, nil
 	}
 	runLiveChat = func(stdout io.Writer, _ config.Config, client app.ChatClient, _ app.ClientOptions) error {
@@ -1057,6 +1057,120 @@ func TestLiveChatEnvCredentialsIgnoreUnsupportedCredentialFileFallback(t *testin
 	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "oauth:secret-token", "secret-token", "stored-secret")
 }
 
+func TestPersistRefreshedIRCCredentialsSavesThroughStoreWithEffectiveConfig(t *testing.T) {
+	store := storage.NewMemoryCredentialStore()
+	base := storage.CredentialRecord{
+		UserID:       "old-user-id",
+		Login:        "old_viewer",
+		DisplayName:  "OldViewer",
+		ClientID:     "old-client-id",
+		AccessToken:  auth.NewSecret("oauth:old-access-token"),
+		RefreshToken: auth.NewSecret("old-refresh-token"),
+		TokenType:    "bearer",
+		Scopes:       []auth.Scope{auth.ScopeChatRead},
+		UpdatedAt:    time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC),
+	}
+	refreshedAt := time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
+	cfg := config.Default()
+	cfg.Twitch.Username = "env_viewer"
+	cfg.Twitch.ClientID = "env-client-id"
+	cfg.Twitch.OAuthToken = "oauth:configured-access-token"
+	cfg.Twitch.RefreshToken = "configured-refresh-token"
+
+	err := persistRefreshedIRCCredentials(context.Background(), cfg, credentialLoadStatus{
+		Store:   store,
+		Present: true,
+		Record:  base,
+	}, twitch.OAuthRefresh{
+		AccessToken:  auth.NewSecret("oauth:new-access-token"),
+		RefreshToken: auth.NewSecret("new-refresh-token"),
+		TokenType:    "bearer",
+		Scopes:       auth.RequiredChatScopes(),
+		ExpiresAt:    refreshedAt.Add(time.Hour),
+		RefreshedAt:  refreshedAt,
+	})
+	if err != nil {
+		t.Fatalf("persistRefreshedIRCCredentials returned error: %v", err)
+	}
+
+	saves := store.SavedRecords()
+	if len(saves) != 1 {
+		t.Fatalf("saved records = %d, want 1", len(saves))
+	}
+	got := saves[0]
+	if got.Login != "env_viewer" || got.ClientID != "env-client-id" {
+		t.Fatalf("saved effective identity = (%q, %q), want env/config values", got.Login, got.ClientID)
+	}
+	if got.UserID != "" || got.DisplayName != "" {
+		t.Fatalf("stale identity metadata = (%q, %q), want cleared after login change", got.UserID, got.DisplayName)
+	}
+	if got.AccessToken.Reveal() != "oauth:new-access-token" || got.RefreshToken.Reveal() != "new-refresh-token" {
+		t.Fatalf("saved tokens = (%q, %q), want refreshed tokens", got.AccessToken.Reveal(), got.RefreshToken.Reveal())
+	}
+	if got.TokenType != "bearer" || !got.ExpiresAt.Equal(refreshedAt.Add(time.Hour)) || !got.UpdatedAt.Equal(refreshedAt) {
+		t.Fatalf("saved token metadata = %#v, want refreshed token metadata", got)
+	}
+	if gotScopes := strings.Join(auth.ScopeValues(got.Scopes), ","); gotScopes != "chat:read,chat:edit" {
+		t.Fatalf("saved scopes = %q, want chat scopes", gotScopes)
+	}
+}
+
+func TestPersistRefreshedIRCCredentialsUnavailableAndFailureErrorsAreRedacted(t *testing.T) {
+	cfg := config.Default()
+	cfg.Twitch.Username = "viewer"
+	cfg.Twitch.ClientID = "client-id"
+	cfg.Twitch.OAuthToken = "oauth:configured-access-token"
+	cfg.Twitch.RefreshToken = "configured-refresh-token"
+	cfg.Twitch.ClientSecret = "configured-client-secret"
+	refreshed := twitch.OAuthRefresh{
+		AccessToken:  auth.NewSecret("oauth:new-access-token"),
+		RefreshToken: auth.NewSecret("new-refresh-token"),
+		RefreshedAt:  time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC),
+	}
+
+	for _, tc := range []struct {
+		name   string
+		status credentialLoadStatus
+		want   string
+	}{
+		{
+			name: "unsupported platform",
+			status: credentialLoadStatus{
+				Err: fmt.Errorf("%w: credential-file fallback disabled; use env/config; oauth:stored-secret refresh_token=stored-refresh client_secret=stored-client-secret", storage.ErrUnsupportedCredentialFilePlatform),
+			},
+			want: "credential store unavailable",
+		},
+		{
+			name: "save failure",
+			status: credentialLoadStatus{
+				Store: saveFailCredentialStore{err: errors.New("cannot write oauth:new-access-token refresh_token=new-refresh-token client_secret=configured-client-secret")},
+			},
+			want: "save refreshed credentials",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := persistRefreshedIRCCredentials(context.Background(), cfg, tc.status, refreshed)
+			if err == nil {
+				t.Fatal("persistRefreshedIRCCredentials returned nil error, want failure")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %q, want %q", err.Error(), tc.want)
+			}
+			assertOutputDoesNotContain(t, err.Error(),
+				"configured-access-token",
+				"configured-refresh-token",
+				"configured-client-secret",
+				"new-access-token",
+				"new-refresh-token",
+				"stored-secret",
+				"stored-refresh",
+				"stored-client-secret",
+				"oauth:new-access-token",
+			)
+		})
+	}
+}
+
 func TestLiveChatConfiguredStartsClientWithMultipleChannels(t *testing.T) {
 	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
@@ -1071,7 +1185,7 @@ func TestLiveChatConfiguredStartsClientWithMultipleChannels(t *testing.T) {
 	var gotFactoryChannels []string
 	var gotRunChannels []string
 	fake := app.NewFakeChatClient(1)
-	newLiveChatClient = func(_ context.Context, cfg config.Config, _ debuglog.Logger) (app.ChatClient, error) {
+	newLiveChatClient = func(_ context.Context, cfg config.Config, _ debuglog.Logger, _ credentialLoadStatus) (app.ChatClient, error) {
 		gotFactoryChannels = append([]string(nil), cfg.DefaultChannels...)
 		return fake, nil
 	}
@@ -1121,7 +1235,7 @@ func TestLiveChatConfiguredWiresImageStackWhenReady(t *testing.T) {
 	}()
 
 	fake := app.NewFakeChatClient(1)
-	newLiveChatClient = func(context.Context, config.Config, debuglog.Logger) (app.ChatClient, error) {
+	newLiveChatClient = func(context.Context, config.Config, debuglog.Logger, credentialLoadStatus) (app.ChatClient, error) {
 		return fake, nil
 	}
 	var got app.ClientOptions

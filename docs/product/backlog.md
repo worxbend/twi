@@ -11,18 +11,18 @@ Progress as of the initial swarm pass:
   multi-channel UX, diagnostics, redacted debug logging, inline image plumbing,
   OAuth login, setup, release binary/container packaging, and Unix-only
   restrictive credential-file persistence are partial or current for their
-  documented paths. Refresh-token persistence after IRC reconnect, secure
-  non-Unix credential persistence, credentialed Twitch release validation, and
-  manual Kitty/Ghostty image validation remain planned or environment-dependent.
+  documented paths, including refreshed-token persistence through the supported
+  credential store. Windows saved-credential persistence through native
+  Credential Manager, credentialed Twitch release validation, and manual
+  Kitty/Ghostty image validation remain planned or environment-dependent.
   Active live IRC reconnect restart and per-channel local filters are
   implemented.
 - Credential rule: Twitch username/token values currently come from
   environment variables, the flat config file, or on supported Unix builds the
   private credential file; environment and flat config values take precedence
   over saved credentials, and CLI overrides cover channel and config path.
-- Remaining near-term work: final release-candidate validation in a
-  Docker-enabled environment, plus post-release auth-storage hardening for
-  refreshed-token persistence and non-Unix credential support.
+- Remaining near-term work: post-release auth-storage hardening for Windows
+  Credential Manager support.
 
 Each task is intended to fit one implementation loop. Agents should keep write scope to
 the listed files where possible and use fakes before network-dependent code.
@@ -538,9 +538,9 @@ Goal: Let users validate Twitch OAuth credentials without manually pasting
 tokens into terminal output.
 Context: On supported Unix builds, the CLI wires `twi login` to a
 browser/local-callback flow and saves successful login results through the
-restrictive credential-file fallback. Non-Unix builds disable the file fallback
-until ACL and reparse-point/no-follow behavior is implemented. Setup can hand
-off to this same login/storage path.
+restrictive credential-file fallback. Non-Unix builds disable the file fallback;
+Windows saved credentials are planned through native Credential Manager instead
+of a JSON credential file. Setup can hand off to this same login/storage path.
 Files likely touched: `internal/cli`, `internal/config`, `internal/twitch`,
 `docs/auth.md`, `docs/quickstart.md`.
 Implementation notes: The implemented flow requests only required scopes first:
@@ -566,10 +566,10 @@ Files likely touched: `internal/storage`, `internal/config`, `internal/cli`,
 `docs/auth.md`, `docs/config.md`.
 Implementation notes: Implement the fallback file on Unix builds with exact
 `0700` directory and `0600` file permissions before advertising saved login
-credentials. Keep env/config compatibility. Disable non-Unix fallback behavior
-unless ACL and reparse-point/no-follow behavior is implemented. Do not claim OS
-keychain support unless a backend is actually implemented and platform behavior
-is documented.
+credentials. Keep env/config compatibility. Disable non-Unix fallback behavior.
+For Windows, implement native Credential Manager support before advertising
+saved credentials. Do not claim OS keychain support unless a backend is
+actually implemented and platform behavior is documented.
 Acceptance criteria: On supported Unix builds, `twi login` can save credentials
 through the boundary; fallback files are never group/world-accessible; config
 output, doctor, and errors stay redacted. Non-Unix builds do not imply Unix mode

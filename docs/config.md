@@ -130,8 +130,8 @@ map Unix `0700`/`0600` semantics onto Windows. On those platforms, use
 environment variables or a private flat config file for Twitch credentials.
 `twi doctor` reports the disabled fallback as a warning, and `twi login` exits
 with a redacted actionable error before opening the browser. No OS keychain
-backend is implemented today; the storage interface only leaves room for one
-after platform support is designed and documented.
+backend is implemented today; [ADR 0007](adr/0007-use-windows-credential-manager-for-non-unix-credentials.md)
+selects native Windows Credential Manager as the future Windows backend.
 
 ## Environment Variables
 
@@ -141,12 +141,12 @@ Supported variables:
 | --- | --- | --- |
 | `TWI_TWITCH_USERNAME` | No | Twitch login for IRC auth. |
 | `TWI_TWITCH_OAUTH_TOKEN` | Yes | Twitch IRC OAuth token with `chat:read` for live reads and `chat:edit` for composer sends. |
-| `TWI_TWITCH_REFRESH_TOKEN` | Yes | Refresh token used for one in-memory OAuth refresh after live IRC auth failure. |
+| `TWI_TWITCH_REFRESH_TOKEN` | Yes | Refresh token used for one OAuth refresh after live IRC auth failure. Refreshed tokens are saved through the supported credential store when available; otherwise they stay in memory for the current process with a warning. |
 | `TWI_TWITCH_CLIENT_ID` | Usually no | Twitch app client ID for Helix/API calls. |
 | `TWI_TWITCH_CLIENT_SECRET` | Yes | Client secret used by `twi login` and in-memory OAuth refresh. |
 | `TWITCH_USERNAME` | No | Dotenv alias for Twitch login. Canonical `TWI_TWITCH_USERNAME` wins if both are set. |
 | `TWITCH_ACCESS_TOKEN` | Yes | Dotenv alias for OAuth token. A missing `oauth:` prefix is added for IRC use. Canonical `TWI_TWITCH_OAUTH_TOKEN` wins if both are set. |
-| `TWITCH_REFRESH_TOKEN` | Yes | Dotenv alias for refresh token. Used for one in-memory OAuth refresh after live IRC auth failure. |
+| `TWITCH_REFRESH_TOKEN` | Yes | Dotenv alias for refresh token. Used for one OAuth refresh after live IRC auth failure. Refreshed tokens are saved through the supported credential store when available; otherwise they stay in memory for the current process with a warning. |
 | `TWITCH_CLIENT_ID` | Usually no | Dotenv alias for client ID. |
 | `TWITCH_CLIENT_SECRET` | Yes | Dotenv alias for client secret. |
 | `TWI_DEFAULT_CHANNELS` | No | Default channel list. |
@@ -350,6 +350,9 @@ Current behavior:
   logs when explicitly enabled.
 - Save successful `twi login` results through the restrictive credential-file
   fallback.
+- Persist refreshed live IRC OAuth tokens through the supported credential
+  store after auth refresh succeeds, with in-memory fallback and a redacted
+  warning when saving is unavailable or fails.
 - Create or update non-secret config with `twi setup`.
 - Install live image asset services for allowed avatar, badge, emote, and emoji
   kinds when config, credentials, cache, and terminal checks pass.
@@ -360,9 +363,9 @@ Current behavior:
 Future target:
 
 - Startup token validation with scope checks.
-- Optional OS keychain backend only after explicit platform support decisions.
-- Secure non-Unix credential persistence through a native backend or exact
-  owner-only protections.
+- Windows saved-credential persistence through native Windows Credential
+  Manager, after the backend and tests from ADR 0007 are implemented.
+- Continued deferral for other non-Unix credential persistence until a target
+  platform has an explicit native backend or exact owner-only protections.
 - Full terminal image mode controls.
 - Cache sizing and pruning configuration.
-- Persisting refreshed tokens safely after OAuth refresh succeeds.

@@ -15,6 +15,7 @@ import (
 
 	"github.com/w0rxbend/twi/internal/app"
 	"github.com/w0rxbend/twi/internal/assets"
+	"github.com/w0rxbend/twi/internal/auth"
 	"github.com/w0rxbend/twi/internal/config"
 	"github.com/w0rxbend/twi/internal/debuglog"
 	"github.com/w0rxbend/twi/internal/render"
@@ -57,13 +58,13 @@ Environment:
   TWI_DEBUG_LOG_PATH
 `
 
-var newLiveChatClient = func(ctx context.Context, cfg config.Config, logger debuglog.Logger) (app.ChatClient, error) {
-	return app.NewRestartableLiveChatClientWithOptions(ctx, liveIRCTransportFactory(cfg, logger), 0, app.LiveChatClientOptions{
+var newLiveChatClient = func(ctx context.Context, cfg config.Config, logger debuglog.Logger, credentialStatus credentialLoadStatus) (app.ChatClient, error) {
+	return app.NewRestartableLiveChatClientWithOptions(ctx, liveIRCTransportFactory(cfg, logger, credentialStatus), 0, app.LiveChatClientOptions{
 		DebugLogger: logger,
 	})
 }
 
-func liveIRCTransportFactory(cfg config.Config, logger debuglog.Logger) app.LiveChatTransportFactory {
+func liveIRCTransportFactory(cfg config.Config, logger debuglog.Logger, credentialStatus credentialLoadStatus) app.LiveChatTransportFactory {
 	return func(context.Context) (twitch.ChatClient, error) {
 		return twitch.NewIRCClient(twitch.IRCConfig{
 			Username:     cfg.Twitch.Username,
@@ -73,6 +74,9 @@ func liveIRCTransportFactory(cfg config.Config, logger debuglog.Logger) app.Live
 			ClientSecret: cfg.Twitch.ClientSecret,
 			Channels:     cfg.DefaultChannels,
 			DebugLogger:  logger,
+			OnOAuthRefresh: func(ctx context.Context, refreshed twitch.OAuthRefresh) error {
+				return persistRefreshedIRCCredentials(ctx, cfg, credentialStatus, refreshed)
+			},
 		})
 	}
 }
@@ -112,6 +116,8 @@ type credentialLoadStatus struct {
 	Path    string
 	Present bool
 	Err     error
+	Store   storage.CredentialStore
+	Record  storage.CredentialRecord
 }
 
 // Run executes the command line entrypoint. It returns a process exit code.
@@ -216,7 +222,7 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	client, err := newLiveChatClient(context.Background(), cfg, logger)
+	client, err := newLiveChatClient(context.Background(), cfg, logger, status)
 	if err != nil {
 		logger.Log(context.Background(), "cli.chat.failed", slog.String("error", err.Error()))
 		fmt.Fprintf(stderr, "start Twitch IRC chat: %v\n", err)
@@ -458,6 +464,7 @@ func applyStoredCredentials(ctx context.Context, cfg *config.Config) (credential
 	status := credentialLoadStatus{}
 	if store != nil {
 		status.Path = credentialStorePath(store)
+		status.Store = store
 	}
 	if err != nil {
 		status.Err = err
@@ -480,6 +487,7 @@ func applyStoredCredentials(ctx context.Context, cfg *config.Config) (credential
 	}
 	status.Present = ok
 	if ok {
+		status.Record = record.Clone()
 		applyCredentialRecord(cfg, record)
 	}
 	return status, nil
@@ -508,6 +516,65 @@ func applyCredentialRecord(cfg *config.Config, record storage.CredentialRecord) 
 	if strings.TrimSpace(cfg.Twitch.ClientID) == "" {
 		cfg.Twitch.ClientID = strings.TrimSpace(record.ClientID)
 	}
+}
+
+func persistRefreshedIRCCredentials(ctx context.Context, cfg config.Config, status credentialLoadStatus, refreshed twitch.OAuthRefresh) error {
+	redactor := auth.NewRedactor(
+		auth.NewSecret(cfg.Twitch.OAuthToken),
+		auth.NewSecret(cfg.Twitch.RefreshToken),
+		auth.NewSecret(cfg.Twitch.ClientSecret),
+		status.Record.AccessToken,
+		status.Record.RefreshToken,
+		refreshed.AccessToken,
+		refreshed.RefreshToken,
+	)
+	if status.Store == nil {
+		if status.Err != nil {
+			return fmt.Errorf("credential store unavailable: %s", redactor.Redact(status.Err.Error()))
+		}
+		return errors.New("credential store unavailable")
+	}
+
+	record := refreshedCredentialRecord(cfg, status.Record, refreshed)
+	if err := status.Store.SaveCredentials(ctx, record); err != nil {
+		return fmt.Errorf("save refreshed credentials: %s", redactor.Redact(err.Error()))
+	}
+	return nil
+}
+
+func refreshedCredentialRecord(cfg config.Config, base storage.CredentialRecord, refreshed twitch.OAuthRefresh) storage.CredentialRecord {
+	record := base.Clone()
+	if login := strings.TrimSpace(cfg.Twitch.Username); login != "" {
+		if record.Login != "" && !strings.EqualFold(record.Login, login) {
+			record.UserID = ""
+			record.DisplayName = ""
+		}
+		record.Login = login
+	}
+	if clientID := strings.TrimSpace(cfg.Twitch.ClientID); clientID != "" {
+		record.ClientID = clientID
+	}
+	record.AccessToken = refreshed.AccessToken
+	record.RefreshToken = refreshed.RefreshToken
+	if strings.TrimSpace(refreshed.TokenType) != "" {
+		record.TokenType = strings.TrimSpace(refreshed.TokenType)
+	} else if strings.TrimSpace(record.TokenType) == "" {
+		record.TokenType = "bearer"
+	}
+	if len(refreshed.Scopes) > 0 {
+		record.Scopes = append([]auth.Scope(nil), refreshed.Scopes...)
+	} else if len(record.Scopes) == 0 {
+		record.Scopes = auth.RequiredChatScopes()
+	}
+	if !refreshed.ExpiresAt.IsZero() {
+		record.ExpiresAt = refreshed.ExpiresAt
+	}
+	if !refreshed.RefreshedAt.IsZero() {
+		record.UpdatedAt = refreshed.RefreshedAt.UTC()
+	} else {
+		record.UpdatedAt = time.Now().UTC()
+	}
+	return record
 }
 
 func normalizeIRCOAuthToken(value string) string {
