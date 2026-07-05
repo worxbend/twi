@@ -17,8 +17,8 @@ jobs:
     env:
       GOTOOLCHAIN: auto
       TERM: xterm-256color
-      XDG_CONFIG_HOME: ${{ runner.temp }}/twi-config
-      XDG_CACHE_HOME: ${{ runner.temp }}/twi-cache
+      XDG_CONFIG_HOME: /tmp/twi-config
+      XDG_CACHE_HOME: /tmp/twi-cache
       TWI_TWITCH_USERNAME: ""
       TWI_TWITCH_OAUTH_TOKEN: ""
       TWI_TWITCH_REFRESH_TOKEN: ""
