@@ -1,4 +1,4 @@
-name: Release Dry Run
+name: Release
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
       - "v*"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   artifacts:
@@ -44,7 +44,7 @@ jobs:
         run: mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
 
       - name: Build and smoke release artifacts
-        run: scripts/release-dry-run.sh --out "$RUNNER_TEMP/twi-release"
+        run: scripts/release-dry-run.sh --out "$RUNNER_TEMP/twi-release" --targets "linux/amd64 linux/arm64" --skip-docker
 
       - name: Upload dry-run artifacts
         uses: actions/upload-artifact@v4
@@ -52,3 +52,23 @@ jobs:
           name: twi-release-dry-run
           path: ${{ runner.temp }}/twi-release/
           if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          release_dir="$RUNNER_TEMP/twi-release"
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" \
+              --title "twi $RELEASE_TAG" \
+              --notes "Automated release for $RELEASE_TAG with Linux amd64 and arm64 binaries."
+          fi
+          gh release upload "$RELEASE_TAG" \
+            "$release_dir/twi_linux_amd64" \
+            "$release_dir/twi_linux_amd64.sha256" \
+            "$release_dir/twi_linux_arm64" \
+            "$release_dir/twi_linux_arm64.sha256" \
+            --clobber

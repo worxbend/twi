@@ -82,17 +82,31 @@ into the image.
 
 ## Automated Checks
 
-The local script and `.github/workflows/release.yml` perform these checks:
+The local script and `.github/workflows/release.yml` share the same binary
+packaging path:
 
 - Build trimmed binaries for the supported target matrix.
 - Write and verify SHA-256 checksum files.
 - Smoke the native binary with `twi --help`, `twi doctor`, and
   `twi chat --mock --channel example`.
-- Build the Docker image from the repository Dockerfile.
-- Smoke the image with `twi --help`, `twi doctor`, and mock chat.
 
-The workflow is triggered by `workflow_dispatch` or `v*` tag pushes. It uploads
-the dry-run artifacts as a workflow artifact. It is not a pull-request trigger.
+The full local dry-run also builds the Docker image from the repository
+Dockerfile and smokes the image with `twi --help`, `twi doctor`, and mock chat.
+The GitHub Actions release workflow publishes only Linux amd64 and arm64 binary
+assets.
+
+The workflow is triggered by `workflow_dispatch` or `v*` tag pushes. Manual
+dispatch builds Linux amd64 and arm64 artifacts and uploads them as a workflow
+artifact. A `v*` tag push also creates the matching GitHub Release when needed
+and uploads these release assets, replacing same-named assets if the workflow is
+rerun:
+
+- `twi_linux_amd64`
+- `twi_linux_amd64.sha256`
+- `twi_linux_arm64`
+- `twi_linux_arm64.sha256`
+
+It is not a pull-request trigger.
 
 ## Secret Handling
 
