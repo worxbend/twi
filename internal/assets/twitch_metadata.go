@@ -85,7 +85,7 @@ func (r *TwitchMetadataResolver) ResolveMessageRefs(ctx context.Context, msg twi
 		if ref.Kind == "" {
 			ref.Kind = KindTwitchEmote
 		}
-		if ref.ID == "" {
+		if ref.ID == "" && strings.TrimSpace(ref.URL) == "" {
 			ref.ID = strings.TrimSpace(fragment.Text)
 		}
 		metadata, err := r.LookupMetadata(ctx, MetadataRequest{Ref: ref, ChannelID: channelID})
@@ -103,7 +103,7 @@ func (r *TwitchMetadataResolver) ResolveMessageRefs(ctx context.Context, msg twi
 		if ref.Kind == "" {
 			ref.Kind = KindTwitchEmote
 		}
-		if ref.ID == "" {
+		if ref.ID == "" && strings.TrimSpace(ref.URL) == "" {
 			ref.ID = emote.ID
 		}
 		metadata, err := r.LookupMetadata(ctx, MetadataRequest{Ref: ref, ChannelID: channelID})
@@ -120,6 +120,20 @@ func (r *TwitchMetadataResolver) ResolveMessageRefs(ctx context.Context, msg twi
 }
 
 func (r *TwitchMetadataResolver) lookupEmote(ctx context.Context, ref twitch.AssetRef, channelID string) (Metadata, error) {
+	if strings.TrimSpace(ref.URL) != "" {
+		metadata := directEmoteMetadata(ref)
+		if metadata.URL == "" {
+			return Metadata{Ref: metadata.Ref}, nil
+		}
+		key := CacheKey(metadata.Ref)
+		if key.ID == "" {
+			return metadata, ctx.Err()
+		}
+		if err := r.putMetadata(ctx, key, metadata); err != nil {
+			return Metadata{}, err
+		}
+		return metadata, ctx.Err()
+	}
 	key := CacheKey(ref)
 	if key.ID == "" {
 		return Metadata{Ref: ref}, nil
@@ -285,6 +299,37 @@ func emoteMetadata(emote twitch.EmoteMetadata) Metadata {
 		WidthCells:  2,
 		HeightCells: 1,
 	}
+}
+
+func directEmoteMetadata(ref twitch.AssetRef) Metadata {
+	cleanURL, id, ok := normalizeDirectTwitchEmoteURL(ref.URL)
+	if !ok {
+		ref.URL = ""
+		return Metadata{Ref: ref}
+	}
+	if strings.TrimSpace(ref.ID) == "" {
+		ref.ID = id
+	}
+	ref.URL = cleanURL
+	return Metadata{
+		Ref:         ref,
+		URL:         cleanURL,
+		MediaType:   mediaTypeForURL(cleanURL, "image/png"),
+		WidthCells:  2,
+		HeightCells: 1,
+	}
+}
+
+func normalizeDirectTwitchEmoteURL(raw string) (cleanURL, id string, ok bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || containsCredentialMarker(raw) {
+		return "", "", false
+	}
+	cleanURL, id, ok = twitch.StaticEmoteCDNURL(raw)
+	if !ok || unsafeAssetKeyPart(id) {
+		return "", "", false
+	}
+	return cleanURL, id, true
 }
 
 func badgeMetadata(badge twitch.BadgeMetadata) Metadata {

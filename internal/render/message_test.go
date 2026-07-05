@@ -126,6 +126,30 @@ func TestRowsSnapshotNarrowWrapping(t *testing.T) {
 	}
 }
 
+func TestRowsPreserveFullUsernameWhenNarrow(t *testing.T) {
+	msg := twitch.ChatMessage{
+		Timestamp:   time.Date(2026, 7, 1, 20, 0, 0, 0, time.Local),
+		DisplayName: "exceptionally_long_viewer_name",
+		Type:        twitch.MessageTypeChat,
+		Text:        "hello chat",
+	}
+
+	rows := Rows(msg, DefaultOptions(18))
+	plain := rowsToPlain(rows)
+	joined := strings.Join(plain, "")
+	if !strings.Contains(joined, "exceptionally_long_viewer_name") {
+		t.Fatalf("rows truncated username\nrows: %#v", plain)
+	}
+	if !strings.Contains(strings.ReplaceAll(joined, " ", ""), ":hellochat") {
+		t.Fatalf("rows missing message content\nrows: %#v", plain)
+	}
+	for _, row := range rows {
+		if row.Width() > 18 {
+			t.Fatalf("row width = %d, want <= 18: %q", row.Width(), row.Plain())
+		}
+	}
+}
+
 func TestRowsUseEmoteTokenFallbacksWithoutFragments(t *testing.T) {
 	msg := twitch.ChatMessage{
 		Timestamp:   time.Date(2026, 7, 1, 20, 0, 0, 0, time.Local),
@@ -141,6 +165,34 @@ func TestRowsUseEmoteTokenFallbacksWithoutFragments(t *testing.T) {
 	}
 	if !hasKind(rows, FragmentEmoteFallback) {
 		t.Fatalf("rows missing %s fragment: %#v", FragmentEmoteFallback, rows)
+	}
+}
+
+func TestRowsDeriveEmoteFragmentIDFromTwitchCDNURL(t *testing.T) {
+	rawURL := "https://static-cdn.jtvnw.net/emoticons/v2/emotesv2_299397e0339249f8a1b50f0affb044d8/default/dark/1.0#e=0"
+	msg := twitch.ChatMessage{
+		Timestamp:   time.Date(2026, 7, 1, 20, 0, 0, 0, time.Local),
+		DisplayName: "viewer",
+		Type:        twitch.MessageTypeChat,
+		Fragments: []twitch.MessageFragment{
+			{Type: twitch.FragmentText, Text: "sent "},
+			{Type: twitch.FragmentEmote, Text: "Party", Ref: twitch.AssetRef{Kind: "twitch_emote", URL: rawURL}},
+		},
+	}
+	opts := DefaultOptions(80)
+	opts.Assets = FallbackAssetOptions()
+
+	rows := Rows(msg, opts)
+
+	emote, ok := firstKind(rows, FragmentEmoteFallback)
+	if !ok {
+		t.Fatalf("rows missing emote fragment: %#v", rows)
+	}
+	if got, want := emote.Ref.ID, "emotesv2_299397e0339249f8a1b50f0affb044d8"; got != want {
+		t.Fatalf("emote ref ID = %q, want %q", got, want)
+	}
+	if got := emote.Ref.URL; got != rawURL {
+		t.Fatalf("emote ref URL = %q, want original fragment URL %q", got, rawURL)
 	}
 }
 
@@ -314,7 +366,7 @@ func TestRowsImageOffAndAutoUnsupportedKeepTextFallbacksStable(t *testing.T) {
 	offFeatures.ImageMode = "off"
 	offDecision := DecideImageCapabilities(offFeatures, DetectTerminalImageSignals([]string{"TERM=xterm-kitty", "KITTY_WINDOW_ID=42", "COLORTERM=truecolor"}), true)
 
-	want := []string{"[VF] 20:00 [moderator] view...: Kappa 😀"}
+	want := []string{"[VF] 20:00 [moderator] viewer_fan: Kappa 😀"}
 	for _, decision := range []ImageCapabilityDecision{unsupportedDecision, offDecision} {
 		opts := DefaultOptions(80)
 		opts.Assets = decision.AssetOptions()

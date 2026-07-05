@@ -84,6 +84,13 @@ go run ./cmd/twi doctor
 docker run --rm twi:local doctor
 ```
 
+In a Kitty/Ghostty-compatible graphics terminal, probe inline image drawing
+without Twitch credentials:
+
+```sh
+go run ./cmd/twi image-smoke
+```
+
 Run the credential-free release packaging dry-run:
 
 ```sh
@@ -160,7 +167,13 @@ export TWI_TWITCH_CLIENT_SECRET="<client secret from Twitch>"
 go run ./cmd/twi login
 ```
 
-By default it opens a browser and listens on `http://127.0.0.1:17643/oauth/twitch/callback`; register that redirect URI on the Twitch app or pass `--redirect-uri` for another localhost HTTP callback. On supported Unix platforms, success validates the returned token, saves it through the private credential store, and prints only identity/scope/storage status. Non-Unix builds stop before opening the browser and direct users to environment variables or a private flat config file. The command does not print access tokens, refresh tokens, callback codes, OAuth state, authorization URLs, or client secrets.
+By default it opens a browser and listens on `http://127.0.0.1:17643/oauth/twitch/callback`; register that redirect URI on the Twitch app or pass `--redirect-uri` for another localhost HTTP callback. For example, if the Twitch app is registered with `http://localhost:1337/api/connect/twitch/callback`, run:
+
+```sh
+go run ./cmd/twi login --redirect-uri http://localhost:1337/api/connect/twitch/callback
+```
+
+On supported Unix platforms, success validates the returned token, saves it through the private credential store, and prints only identity/scope/storage status. Non-Unix builds stop before opening the browser and direct users to environment variables or a private flat config file. The command does not print access tokens, refresh tokens, callback codes, OAuth state, authorization URLs, or client secrets.
 
 Use the bounded noninteractive smoke path when you only want to check command wiring:
 
@@ -191,10 +204,10 @@ Do not paste real tokens into commits, screenshots, issue comments, terminal rec
 | Diagnostics | Ready | `twi doctor` checks config path, credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, username mismatch, Twitch IRC reachability, terminal hints, Kitty/Ghostty signals, cache writability/pruning, image capability, live image-stack readiness, and feature modes. Live chat also preflights token validation before IRC startup when validation is reachable. |
 | Debug logging | Ready | Redacted JSON debug logs can be enabled with `debug_logging = true`, `TWI_DEBUG_LOG=true`, or `--debug-log` on chat, login, and doctor. Logs use curated fields for auth, transport, send, asset, and render diagnostics instead of raw struct or raw tag dumps. |
 | Avatar metadata | Partial | When live chat runs with `avatar_mode = "image"` plus Twitch API credentials, a writable cache, and Kitty-compatible image capability, visible author avatar URLs are batched through Helix Get Users, downloaded, prepared, and rendered through async asset events while initials remain stable on every failure path. |
-| Emote/badge metadata | Partial | Live startup can wire Helix-backed Twitch emote and badge metadata, the public downloader, disk cache, PNG preparer, and Kitty renderer behind config, credential, cache, and terminal gates while keeping compact badge labels and exact emote-token fallbacks stable. |
+| Emote/badge metadata | Partial | Live startup can wire Twitch IRC fragment CDN URLs for emotes, Helix-backed fallback emote/badge metadata, the public downloader, disk cache, PNG preparer, and Kitty renderer behind config, cache, credential, and terminal gates while keeping compact badge labels and exact emote-token fallbacks stable. |
 | Login/setup | Partial | `twi setup` creates or updates non-secret flat config values and can hand off to `twi login`; on supported Unix builds, `twi login` saves through the restrictive credential-file fallback. Non-Unix builds keep env/config credentials as the supported path. |
 | Multi-channel UX | Partial | Messages, unread counts, scroll, drafts, replies, sends, and local view filters are per-channel. Normal and wide terminals show a keyboard-first channel sidebar with connection indicators, unread counts, and filter markers; `ctrl+p` opens a keyboard command palette for common actions, panel toggles, channel switching, local filters, local clear, and live reconnect restart. Optional mouse support can scroll chat, click channels, focus the composer, and select messages. Twitch `USERNOTICE` events such as raids carry normalized event IDs; when the relevant chat is not active, the terminal is blurred, or another panel has focus, `twi` attempts a desktop system notification, falls back to a terminal bell, and shows a status-line notification summary. Selected messages can be inspected in a redacted diagnostics panel even when filters hide them from the chat view. Narrow terminals collapse channel state into the status line. Twitch IRC connect/reconnect/disconnect callbacks are connection-level and are shown on configured channel states rather than as independent per-channel transport events. Manual reconnect tears down the active live IRC transport before creating a fresh one while preserving per-channel UI state. |
-| Inline terminal images | Partial | Live startup installs the concrete resolver/downloader/disk-cache/emoji-provider/Twitch-metadata/preparer/Kitty-renderer stack only when config, credentials for Twitch-backed assets, cache writability, and terminal capability allow it. Disabled, unsupported, missing-dependency, degraded, resolver failure, downloader failure, preparation failure, and render failure paths keep initials, badge labels, emote tokens, and Unicode emoji fallbacks. Manual Kitty/Ghostty validation remains pending. |
+| Inline terminal images | Partial | Live startup installs the concrete resolver/downloader/disk-cache/emoji-provider/Twitch-metadata/preparer/Kitty-renderer stack when config, cache writability, terminal capability, and any API credentials required by the selected asset kinds allow it. IRC fragment-backed emotes use public CDN URLs without Twitch API credentials; avatars, badges, and fallback metadata still require their documented dependencies. Disabled, unsupported, missing-dependency, degraded, resolver failure, downloader failure, preparation failure, and render failure paths keep initials, badge labels, emote tokens, and Unicode emoji fallbacks. Manual Kitty/Ghostty validation remains pending. |
 
 Manual validation evidence for the current environment is tracked in
 [docs/manual-validation.md](docs/manual-validation.md). Credentialed Twitch chat
@@ -238,8 +251,9 @@ export TWI_DEFAULT_CHANNELS="somechannel"
 export TWI_ANIMATION_MODE="fast"
 export TWI_ENABLE_MOUSE="true"
 export TWI_AVATAR_MODE="initials"
+export TWI_EMOJI_MODE="image"
 export TWI_EMOJI_PROVIDER="twemoji"
-export TWI_EMOTE_MODE="text"
+export TWI_EMOTE_MODE="image"
 export TWI_DEBUG_LOG="false"
 ```
 
@@ -266,10 +280,10 @@ enable_kitty_images = true
 enable_mouse = true
 image_mode = "auto"
 avatar_mode = "initials"
-emoji_mode = "unicode"
+emoji_mode = "image"
 emoji_provider = "twemoji"
 emoji_url_template = ""
-emote_mode = "text"
+emote_mode = "image"
 animation_mode = "fast"
 debug_logging = false
 debug_log_path = ""

@@ -102,8 +102,20 @@ go run ./cmd/twi login --dry-run
 
 For the real OAuth flow, set `TWITCH_CLIENT_ID`/`TWITCH_CLIENT_SECRET` or the
 canonical `TWI_TWITCH_CLIENT_ID`/`TWI_TWITCH_CLIENT_SECRET` names and register
-`http://127.0.0.1:17643/oauth/twitch/callback` on the Twitch app. On supported
-Unix platforms, the command validates returned tokens, saves them privately, and
+`http://127.0.0.1:17643/oauth/twitch/callback` on the Twitch app. If your
+Twitch app already uses another localhost callback, pass it exactly, for
+example:
+
+```sh
+go run ./cmd/twi login --redirect-uri http://localhost:1337/api/connect/twitch/callback
+```
+
+In the Twitch developer console, click **Add** after entering the callback URL,
+then click **Save**. The registered value and `--redirect-uri` value must match
+exactly, including `localhost` versus `127.0.0.1`, port, path, scheme, and
+trailing slash.
+
+On supported Unix platforms, the command validates returned tokens, saves them privately, and
 never prints them. The credential file fallback uses a separate private
 `credentials.json` under a `0700` platform config directory with `0600` file
 permissions, symlink rejection, and no-follow file opens. Non-Unix builds keep
@@ -156,8 +168,8 @@ default_channels = "somechannel"
 enable_kitty_images = true
 image_mode = "auto"
 avatar_mode = "initials"
-emoji_mode = "unicode"
-emote_mode = "text"
+emoji_mode = "image"
+emote_mode = "image"
 animation_mode = "fast"
 ```
 

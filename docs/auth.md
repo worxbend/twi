@@ -106,6 +106,17 @@ Register that URI on the Twitch app, or pass `--redirect-uri` with another
 localhost HTTP callback URL. Non-localhost callbacks and non-HTTP callbacks are
 rejected because the CLI listener only supports a local browser callback.
 
+If your Twitch app already has a different localhost callback, use that exact
+value with `--redirect-uri`. For example:
+
+```sh
+twi login --redirect-uri http://localhost:1337/api/connect/twitch/callback
+```
+
+In the Twitch developer console, type or paste the URL, click **Add**, then
+click **Save** before running `twi login`. The value must match exactly,
+including `localhost` versus `127.0.0.1`, port, path, scheme, and trailing slash.
+
 For a credential-free or CI-safe command smoke, use:
 
 ```sh

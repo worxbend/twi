@@ -4,6 +4,50 @@ This file records release-candidate manual evidence for environment-dependent
 terminal behavior. It intentionally avoids screenshots, terminal recordings,
 debug-log contents, and credential values.
 
+## 2026-07-06 Ghostty Image Smoke Probe
+
+Environment:
+
+- Validation terminal: Ghostty-compatible graphics terminal.
+- Visual inline-image rendering: confirmed by manual user report.
+
+Command:
+
+```sh
+go run ./cmd/twi image-smoke --force
+```
+
+Result:
+
+- The image smoke probe rendered visibly in Ghostty after the Kitty graphics
+  command stopped using `C=1` cursor suppression and stopped printing trailing
+  width-reserving spaces after the inline image payload.
+
+## 2026-07-05 Image Smoke Probe
+
+Environment:
+
+- Active validation terminal: PTY with no Kitty/Ghostty graphics signal.
+- Visual inline-image rendering: not claimed in this environment.
+
+Commands run:
+
+```sh
+go run ./cmd/twi image-smoke
+env XDG_CACHE_HOME=/tmp/twi-image-smoke-cache go run ./cmd/twi image-smoke --force
+```
+
+Results:
+
+- `twi image-smoke` refused to claim graphics support and printed guidance to
+  rerun with `--force` only in a known Kitty/Ghostty-compatible terminal.
+- `twi image-smoke --force` with an isolated writable cache generated a local
+  PNG, prepared it through the existing PNG image preparer, and emitted a Kitty
+  graphics escape sequence with inline PNG payload bytes. The active PTY
+  printed the sequence as terminal text, so visual image drawing remains
+  unverified until the command is run inside a compatible graphics terminal
+  session.
+
 ## 2026-07-04 T004 Terminal Matrix
 
 Environment:

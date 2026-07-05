@@ -1,6 +1,10 @@
 package twitch
 
-import "time"
+import (
+	"net/url"
+	"strings"
+	"time"
+)
 
 type ChatMessage struct {
 	ID          string
@@ -79,4 +83,33 @@ type AssetRef struct {
 	Kind string
 	ID   string
 	URL  string
+}
+
+func StaticEmoteCDNURL(raw string) (cleanURL, id string, ok bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", false
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed == nil {
+		return "", "", false
+	}
+	if strings.ToLower(parsed.Scheme) != "https" || strings.ToLower(parsed.Hostname()) != "static-cdn.jtvnw.net" {
+		return "", "", false
+	}
+	parts := strings.Split(strings.Trim(parsed.EscapedPath(), "/"), "/")
+	if len(parts) < 3 || parts[0] != "emoticons" || parts[1] != "v2" {
+		return "", "", false
+	}
+	unescapedID, err := url.PathUnescape(parts[2])
+	if err != nil {
+		return "", "", false
+	}
+	id = strings.TrimSpace(unescapedID)
+	if id == "" || strings.ContainsAny(id, `/\`) {
+		return "", "", false
+	}
+	parsed.Fragment = ""
+	parsed.RawFragment = ""
+	return parsed.String(), id, true
 }

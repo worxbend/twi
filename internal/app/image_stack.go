@@ -143,7 +143,7 @@ func imageStackSupportedKinds(cfg config.Config, capability render.ImageCapabili
 	var supported []string
 	var missing []string
 
-	twitchRequested := imageStackTwitchAssetsRequested(capability)
+	twitchRequested := imageStackTwitchAPIAssetsRequested(capability)
 	twitchCredentialsReady, missingCredentials := imageStackTwitchCredentialsReady(cfg)
 	if twitchRequested && !twitchCredentialsReady {
 		missing = append(missing, missingCredentials...)
@@ -155,9 +155,9 @@ func imageStackSupportedKinds(cfg config.Config, capability render.ImageCapabili
 		if imageStackGlobalAssetsActive(capability) {
 			supported = append(supported, assets.KindBadge)
 		}
-		if capability.Emote.Active {
-			supported = append(supported, assets.KindTwitchEmote)
-		}
+	}
+	if capability.Emote.Active {
+		supported = append(supported, assets.KindTwitchEmote)
 	}
 
 	if capability.Emoji.Active {
@@ -175,8 +175,8 @@ func imageStackSupportedKinds(cfg config.Config, capability render.ImageCapabili
 	return supported, missing
 }
 
-func imageStackTwitchAssetsRequested(capability render.ImageCapabilityDecision) bool {
-	return capability.Avatar.Active || capability.Emote.Active || imageStackGlobalAssetsActive(capability)
+func imageStackTwitchAPIAssetsRequested(capability render.ImageCapabilityDecision) bool {
+	return capability.Avatar.Active || imageStackGlobalAssetsActive(capability)
 }
 
 func imageStackGlobalAssetsActive(capability render.ImageCapabilityDecision) bool {

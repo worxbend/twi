@@ -31,6 +31,7 @@ const (
 	defaultMaxPreparedPixels          = 1024 * 1024
 	defaultCellPixelWidth             = 16
 	defaultCellPixelHeight            = 32
+	kittyPayloadChunkSize             = 4096
 )
 
 var (
@@ -580,9 +581,10 @@ func preparedImageFilename(asset storage.AssetRecord, data []byte, widthCells, h
 	return "prepared-" + hex.EncodeToString(sum[:16]) + ".png"
 }
 
-// KittyRenderer renders prepared local PNG assets with the Kitty graphics
-// protocol. It is intended for asynchronous callers; View paths should render
-// stable fallback fragments until a cell has been prepared.
+// KittyRenderer renders prepared PNG assets with the Kitty graphics protocol.
+// It transmits image bytes inline so terminals do not need filesystem access to
+// cached files. It is intended for asynchronous callers; View paths should
+// render stable fallback fragments until a cell has been prepared.
 type KittyRenderer struct {
 	Decision ImageCapabilityDecision
 }
@@ -623,37 +625,117 @@ func (r *KittyRenderer) RenderImage(ctx context.Context, asset storage.AssetReco
 	if containsUnsafeImageIdentity(path) {
 		return cell, fmt.Errorf("%w: %w", ErrImageRenderFailed, ErrImageUnsafeAsset)
 	}
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		return cell, fmt.Errorf("%w: cached image file is unavailable", ErrImageRenderFailed)
 	}
-	if info.IsDir() {
-		return cell, fmt.Errorf("%w: cached image path is a directory", ErrImageRenderFailed)
+	if !info.Mode().IsRegular() {
+		return cell, fmt.Errorf("%w: cached image path is not a regular file", ErrImageRenderFailed)
 	}
-	file, err := os.Open(path)
+	data, err := readKittyImageFile(ctx, path, defaultMaxImageSourceBytes)
 	if err != nil {
-		return cell, fmt.Errorf("%w: cached image file is unreadable", ErrImageRenderFailed)
+		return cell, err
 	}
-	if err := file.Close(); err != nil {
-		return cell, fmt.Errorf("%w: cached image file close failed", ErrImageRenderFailed)
-	}
-	if err := ctx.Err(); err != nil {
+	data, err = normalizeKittyPNGData(data)
+	if err != nil {
 		return cell, err
 	}
 
 	width := cell.WidthCells
 	height := positiveFirst(spec.HeightCells, asset.HeightCells, 1)
-	encodedPath := base64.StdEncoding.EncodeToString([]byte(path))
-	escape := fmt.Sprintf(
-		"\x1b_Ga=T,f=%d,t=f,q=2,C=1,i=%d,c=%d,r=%d;%s\x1b\\",
-		format,
-		kittyImageID(asset),
-		width,
-		height,
-		encodedPath,
-	)
-	cell.Text = escape + strings.Repeat(" ", width)
+	escape := kittyInlineImageEscape(format, kittyImageID(asset), width, height, data)
+	cell.Text = escape
 	return cell, nil
+}
+
+func readKittyImageFile(ctx context.Context, path string, maxBytes int64) ([]byte, error) {
+	file, err := openKittyImageFileNoFollow(path)
+	if err != nil {
+		return nil, fmt.Errorf("%w: cached image file is unreadable", ErrImageRenderFailed)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("%w: cached image file is unavailable", ErrImageRenderFailed)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: cached image path is not a regular file", ErrImageRenderFailed)
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("%w: read cached image file", ErrImageRenderFailed)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("%w: %w", ErrImageRenderFailed, ErrImageTooLarge)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func normalizeKittyPNGData(data []byte) ([]byte, error) {
+	imageData, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrImageRenderFailed, ErrImageCorruptData)
+	}
+	bounds := imageData.Bounds()
+	config := image.Config{
+		Width:  bounds.Dx(),
+		Height: bounds.Dy(),
+	}
+	if err := validateDecodedImageBounds(config, defaultMaxPreparedPixels); err != nil {
+		if errors.Is(err, ErrImageCorruptData) {
+			return nil, fmt.Errorf("%w: %w", ErrImageRenderFailed, ErrImageCorruptData)
+		}
+		return nil, fmt.Errorf("%w: %w", ErrImageRenderFailed, ErrImageTooLarge)
+	}
+	var normalized bytes.Buffer
+	if err := png.Encode(&normalized, imageData); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrImageRenderFailed, ErrImageCorruptData)
+	}
+	return normalized.Bytes(), nil
+}
+
+func kittyInlineImageEscape(format int, imageID uint32, widthCells, heightCells int, data []byte) string {
+	payload := base64.StdEncoding.EncodeToString(data)
+	if len(payload) <= kittyPayloadChunkSize {
+		return fmt.Sprintf(
+			"\x1b_Ga=T,f=%d,q=2,i=%d,c=%d,r=%d;%s\x1b\\",
+			format,
+			imageID,
+			widthCells,
+			heightCells,
+			payload,
+		)
+	}
+
+	var builder strings.Builder
+	for start, chunk := 0, 0; start < len(payload); start, chunk = start+kittyPayloadChunkSize, chunk+1 {
+		end := start + kittyPayloadChunkSize
+		if end > len(payload) {
+			end = len(payload)
+		}
+		more := 0
+		if end < len(payload) {
+			more = 1
+		}
+		if chunk == 0 {
+			fmt.Fprintf(
+				&builder,
+				"\x1b_Ga=T,f=%d,q=2,i=%d,c=%d,r=%d,m=%d;%s\x1b\\",
+				format,
+				imageID,
+				widthCells,
+				heightCells,
+				more,
+				payload[start:end],
+			)
+			continue
+		}
+		fmt.Fprintf(&builder, "\x1b_Gm=%d;%s\x1b\\", more, payload[start:end])
+	}
+	return builder.String()
 }
 
 func (r *KittyRenderer) supported() bool {

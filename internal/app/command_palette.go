@@ -372,6 +372,7 @@ func (m *mockShellModel) clearLocalChat() {
 	state.scrollOffset = 0
 	state.activeOrder = nil
 	state.activeMessages = make(map[string]twitch.ChatMessage)
+	state.localEchoes = make(map[string]struct{})
 	if m.channels != nil {
 		state.revealQueue = animation.NewQueue(m.channels.animationConfig, m.channels.clock)
 	}

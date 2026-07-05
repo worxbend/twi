@@ -47,16 +47,49 @@ func TestKittyRendererProducesFixedCellOutput(t *testing.T) {
 	if !strings.HasPrefix(cell.Text, "\x1b_G") || !strings.Contains(cell.Text, "a=T") {
 		t.Fatalf("cell.Text missing Kitty graphics command: %q", cell.Text)
 	}
-	for _, want := range []string{"f=100", "t=f", "q=2", "C=1", "c=4", "r=1"} {
+	for _, want := range []string{"f=100", "q=2", "c=4", "r=1"} {
 		if !strings.Contains(cell.Text, want) {
 			t.Fatalf("cell.Text = %q, want it to contain %q", cell.Text, want)
 		}
 	}
-	if !strings.Contains(cell.Text, base64.StdEncoding.EncodeToString([]byte(path))) {
-		t.Fatalf("cell.Text does not include encoded cached path: %q", cell.Text)
+	if strings.Contains(cell.Text, "C=1") {
+		t.Fatalf("cell.Text disables Kitty cursor movement, which can hide the image when reserving cells: %q", cell.Text)
 	}
-	if !strings.HasSuffix(cell.Text, strings.Repeat(" ", 4)) {
-		t.Fatalf("cell.Text should end with four width-reserving spaces: %q", cell.Text)
+	if strings.Contains(cell.Text, "t=f") {
+		t.Fatalf("cell.Text uses file transfer instead of inline payload: %q", cell.Text)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile tiny PNG returned error: %v", err)
+	}
+	if !strings.Contains(cell.Text, base64.StdEncoding.EncodeToString(data)) {
+		t.Fatalf("cell.Text does not include encoded PNG payload: %q", cell.Text)
+	}
+	if !strings.HasSuffix(cell.Text, "\x1b\\") {
+		t.Fatalf("cell.Text should end at the Kitty APC terminator without padding over the image: %q", cell.Text)
+	}
+}
+
+func TestKittyInlineImageEscapeChunksLargePayload(t *testing.T) {
+	data := []byte(strings.Repeat("0123456789abcdef", 400))
+
+	escape := kittyInlineImageEscape(kittyPNGFormat, 42, 8, 4, data)
+
+	parts := strings.Split(escape, "\x1b\\")
+	if len(parts) < 3 {
+		t.Fatalf("escape = %q, want multiple Kitty chunks", escape)
+	}
+	if !strings.Contains(parts[0], "a=T") || !strings.Contains(parts[0], "m=1") {
+		t.Fatalf("first chunk = %q, want transmit command with continuation", parts[0])
+	}
+	if !strings.Contains(escape, "\x1b_Gm=0;") {
+		t.Fatalf("escape = %q, want final continuation chunk", escape)
+	}
+	if strings.Contains(escape, "t=f") {
+		t.Fatalf("escape uses file transfer instead of inline chunks: %q", escape)
+	}
+	if strings.Contains(escape, "C=1") {
+		t.Fatalf("escape disables Kitty cursor movement: %q", escape)
 	}
 }
 
@@ -106,6 +139,124 @@ func TestKittyRendererFailurePreservesReservedWidth(t *testing.T) {
 	}
 	if got, want := cell.Text, "[AL] "; got != want {
 		t.Fatalf("cell.Text = %q, want fallback %q", got, want)
+	}
+}
+
+func TestKittyRendererRejectsNonPNGBytesWithoutEmittingContents(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "not-png.bin")
+	secret := "not-png oauth:secret-token"
+	if err := os.WriteFile(path, []byte(secret), 0o600); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	spec := ImageSpec{WidthCells: 6, HeightCells: 1, Fallback: "Kappa"}
+	renderer := NewKittyRenderer(supportedKittyDecision())
+
+	cell, err := renderer.RenderImage(context.Background(), storage.AssetRecord{
+		Key:       storage.AssetKey{Kind: "twitch_emote", ID: "25"},
+		Path:      path,
+		MediaType: "image/png",
+	}, spec)
+
+	if !errors.Is(err, ErrImageRenderFailed) || !errors.Is(err, ErrImageCorruptData) {
+		t.Fatalf("RenderImage error = %v, want render corrupt-data failure", err)
+	}
+	if !IsPermanentImageFailure(err) {
+		t.Fatalf("RenderImage error = %v, want permanent image failure", err)
+	}
+	if strings.Contains(cell.Text, secret) || strings.Contains(cell.Text, base64.StdEncoding.EncodeToString([]byte(secret))) || strings.Contains(cell.Text, "\x1b_G") {
+		t.Fatalf("fallback cell leaked non-PNG contents or image escape: %q", cell.Text)
+	}
+	if got, want := cell.Text, "Kappa "; got != want {
+		t.Fatalf("cell.Text = %q, want fallback %q", got, want)
+	}
+}
+
+func TestKittyRendererDoesNotEmitTrailingPNGBytes(t *testing.T) {
+	path := writeTinyPNG(t)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	secret := "oauth:trailing-secret"
+	if err := os.WriteFile(path, append(data, []byte(secret)...), 0o600); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	spec := ImageSpec{WidthCells: 6, HeightCells: 1, Fallback: "Kappa"}
+	renderer := NewKittyRenderer(supportedKittyDecision())
+
+	cell, err := renderer.RenderImage(context.Background(), storage.AssetRecord{
+		Key:       storage.AssetKey{Kind: "twitch_emote", ID: "25"},
+		Path:      path,
+		MediaType: "image/png",
+	}, spec)
+
+	if err != nil {
+		t.Fatalf("RenderImage returned error: %v", err)
+	}
+	if !strings.Contains(cell.Text, "\x1b_G") {
+		t.Fatalf("cell.Text missing image escape: %q", cell.Text)
+	}
+	if strings.Contains(cell.Text, base64.StdEncoding.EncodeToString(append(data, []byte(secret)...))) ||
+		strings.Contains(cell.Text, base64.StdEncoding.EncodeToString([]byte(secret))) ||
+		strings.Contains(cell.Text, secret) {
+		t.Fatalf("cell.Text leaked trailing bytes: %q", cell.Text)
+	}
+}
+
+func TestKittyRendererRejectsSymlinkInput(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.png")
+	data, err := os.ReadFile(writeTinyPNG(t))
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if err := os.WriteFile(target, data, 0o600); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	link := filepath.Join(dir, "link.png")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	spec := ImageSpec{WidthCells: 6, HeightCells: 1, Fallback: "Kappa"}
+	renderer := NewKittyRenderer(supportedKittyDecision())
+
+	cell, err := renderer.RenderImage(context.Background(), storage.AssetRecord{
+		Key:       storage.AssetKey{Kind: "twitch_emote", ID: "25"},
+		Path:      link,
+		MediaType: "image/png",
+	}, spec)
+
+	if !errors.Is(err, ErrImageRenderFailed) {
+		t.Fatalf("RenderImage error = %v, want render failure", err)
+	}
+	if strings.Contains(cell.Text, "\x1b_G") {
+		t.Fatalf("symlink input produced image escape: %q", cell.Text)
+	}
+}
+
+func TestKittyRendererRejectsOversizedInlineInput(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "large.png")
+	data := make([]byte, defaultMaxImageSourceBytes+1)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	spec := ImageSpec{WidthCells: 6, HeightCells: 1, Fallback: "Kappa"}
+	renderer := NewKittyRenderer(supportedKittyDecision())
+
+	cell, err := renderer.RenderImage(context.Background(), storage.AssetRecord{
+		Key:       storage.AssetKey{Kind: "twitch_emote", ID: "25"},
+		Path:      path,
+		MediaType: "image/png",
+	}, spec)
+
+	if !errors.Is(err, ErrImageRenderFailed) || !errors.Is(err, ErrImageTooLarge) {
+		t.Fatalf("RenderImage error = %v, want render too-large failure", err)
+	}
+	if !IsPermanentImageFailure(err) {
+		t.Fatalf("RenderImage error = %v, want permanent image failure", err)
+	}
+	if strings.Contains(cell.Text, "\x1b_G") {
+		t.Fatalf("oversized input produced image escape: %q", cell.Text)
 	}
 }
 
@@ -599,13 +750,16 @@ func (r failingImageRenderer) RenderImage(context.Context, storage.AssetRecord, 
 
 func writeTinyPNG(t *testing.T) string {
 	t.Helper()
-	data, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=")
-	if err != nil {
-		t.Fatalf("decode fixture PNG: %v", err)
-	}
 	path := filepath.Join(t.TempDir(), "asset.png")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("write fixture PNG: %v", err)
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create fixture PNG: %v", err)
+	}
+	defer file.Close()
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.RGBA{R: 0x91, G: 0x46, B: 0xff, A: 0xff})
+	if err := png.Encode(file, img); err != nil {
+		t.Fatalf("encode fixture PNG: %v", err)
 	}
 	return path
 }

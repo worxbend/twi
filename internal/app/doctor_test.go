@@ -500,7 +500,7 @@ func TestDoctorReportsImageStackStates(t *testing.T) {
 			},
 			environ:    []string{"TERM=xterm-kitty", "COLORTERM=truecolor", "KITTY_WINDOW_ID=42"},
 			wantStatus: DoctorStatusWarn,
-			wantDetail: []string{"missing-dependency", "TWI_TWITCH_CLIENT_ID", "text fallbacks active"},
+			wantDetail: []string{"degraded", "supported=twitch_emote,emoji", "TWI_TWITCH_CLIENT_ID", "fallbacks active"},
 		},
 		{
 			name:     "degraded ready",

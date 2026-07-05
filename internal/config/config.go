@@ -113,9 +113,9 @@ func Default() Config {
 			EnableMouse:       true,
 			ImageMode:         "auto",
 			AvatarMode:        "initials",
-			EmojiMode:         "unicode",
+			EmojiMode:         "image",
 			EmojiProvider:     "twemoji",
-			EmoteMode:         "text",
+			EmoteMode:         "image",
 			AnimationMode:     "fast",
 		},
 	}

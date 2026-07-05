@@ -24,6 +24,7 @@ type channelState struct {
 	revealQueue    *animation.Queue
 	activeOrder    []string
 	activeMessages map[string]twitch.ChatMessage
+	localEchoes    map[string]struct{}
 	unread         int
 	composerText   string
 	replyTo        *composerReplyContext
@@ -83,6 +84,7 @@ func (s *channelStateSet) ensure(channel string) *channelState {
 		status:         ConnectionState{Status: ConnectionDisconnected, Channel: name},
 		revealQueue:    animation.NewQueue(s.animationConfig, s.clock),
 		activeMessages: make(map[string]twitch.ChatMessage),
+		localEchoes:    make(map[string]struct{}),
 	}
 	s.states[key] = state
 	s.order = append(s.order, key)

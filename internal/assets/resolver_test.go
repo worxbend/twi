@@ -239,6 +239,50 @@ func TestResolverDownloadsAndCachesCacheMiss(t *testing.T) {
 	}
 }
 
+func TestResolverDownloadsDirectTwitchEmoteFragmentURL(t *testing.T) {
+	cache := storage.NewMemoryAssetCache()
+	rawURL := "https://static-cdn.jtvnw.net/emoticons/v2/emotesv2_299397e0339249f8a1b50f0affb044d8/default/dark/1.0#e=0"
+	cleanURL := "https://static-cdn.jtvnw.net/emoticons/v2/emotesv2_299397e0339249f8a1b50f0affb044d8/default/dark/1.0"
+	downloader := &fakeDownloader{
+		result: DownloadResult{
+			Path:            "emotes/emotesv2_299397e0339249f8a1b50f0affb044d8.png",
+			PayloadIdentity: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		},
+	}
+	resolver := &Resolver{
+		Metadata: &TwitchMetadataResolver{
+			Lookup: &fakeTwitchChatMetadataLookup{},
+			Cache:  cache,
+		},
+		Downloader: downloader,
+		Cache:      cache,
+	}
+
+	event := resolver.Resolve(context.Background(), Request{
+		ID:  "req-direct-emote",
+		Ref: twitch.AssetRef{Kind: KindTwitchEmote, URL: rawURL},
+	})
+
+	if event.Kind != EventDownloaded {
+		t.Fatalf("event.Kind = %s, want %s; err=%v", event.Kind, EventDownloaded, event.Err)
+	}
+	if downloader.calls != 1 {
+		t.Fatalf("downloader calls = %d, want 1", downloader.calls)
+	}
+	if got, want := downloader.last.URL, cleanURL; got != want {
+		t.Fatalf("download URL = %q, want cleaned URL %q", got, want)
+	}
+	if got, want := downloader.last.Ref.ID, "emotesv2_299397e0339249f8a1b50f0affb044d8"; got != want {
+		t.Fatalf("download Ref.ID = %q, want %q", got, want)
+	}
+	if got, want := event.Record.Key, (storage.AssetKey{Kind: KindTwitchEmote, ID: "emotesv2_299397e0339249f8a1b50f0affb044d8"}); got != want {
+		t.Fatalf("record key = %#v, want %#v", got, want)
+	}
+	if got, want := event.Record.SourceURL, cleanURL; got != want {
+		t.Fatalf("record SourceURL = %q, want cleaned URL %q", got, want)
+	}
+}
+
 func TestResolverReturnsCacheOwnedPathAndRemovesTemporaryDownload(t *testing.T) {
 	root := t.TempDir()
 	downloadDir := filepath.Join(root, "downloads")

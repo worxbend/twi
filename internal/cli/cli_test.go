@@ -55,7 +55,7 @@ func TestHelp(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0", code)
 	}
-	for _, want := range []string{"twi chat", "twi setup", "TWI_ENABLE_MOUSE", "TWI_EMOJI_PROVIDER", "TWI_EMOJI_URL_TEMPLATE", "TWI_DEBUG_LOG"} {
+	for _, want := range []string{"twi chat", "twi image-smoke", "twi setup", "TWI_ENABLE_MOUSE", "TWI_EMOJI_PROVIDER", "TWI_EMOJI_URL_TEMPLATE", "TWI_DEBUG_LOG"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("help output missing %q: %q", want, stdout.String())
 		}
@@ -137,6 +137,54 @@ func TestDebugLogRejectsExistingGroupReadableFile(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "open debug log") || !strings.Contains(stderr.String(), "private user-only") {
 		t.Fatalf("stderr missing private-permission failure: %q", stderr.String())
+	}
+}
+
+func TestImageSmokeForceEmitsKittyGraphicsProbe(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	code := Run([]string{"image-smoke", "--force"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "\x1b_G") || !strings.Contains(stdout.String(), "twi image smoke") {
+		t.Fatalf("image smoke output missing Kitty graphics probe:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "t=f") {
+		t.Fatalf("image smoke output used file transfer instead of inline payload:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "C=1") {
+		t.Fatalf("image smoke output disabled Kitty cursor movement and may overwrite the image:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "twi-image-smoke-source-") {
+		t.Fatalf("image smoke output leaked temporary source path:\n%s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestImageSmokeHelpExitsSuccessfully(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	code := Run([]string{"image-smoke", "--help"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "Usage of image-smoke") || !strings.Contains(stderr.String(), "-force") {
+		t.Fatalf("help output missing image-smoke flags: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestImageSmokeReportsUnsupportedTerminalWithoutForce(t *testing.T) {
+	cell, err := renderImageSmokeCell(context.Background(), []string{"TERM=xterm-256color", "COLORTERM=truecolor"}, false)
+	if err == nil {
+		t.Fatalf("renderImageSmokeCell returned cell %#v and nil error, want unsupported guidance", cell)
+	}
+	if !strings.Contains(err.Error(), "rerun with --force") || !strings.Contains(err.Error(), "Kitty/Ghostty") {
+		t.Fatalf("error = %q, want force guidance", err.Error())
 	}
 }
 
@@ -1061,6 +1109,65 @@ func TestLiveChatTokenValidationMissingScopeStopsBeforeClient(t *testing.T) {
 	}
 }
 
+func TestLiveChatTokenValidationHintsWhenEnvTokenShadowsStoredCredentials(t *testing.T) {
+	clearTwitchCredentialEnv(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
+	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:env-secret-token")
+	writeStoredCredentialFixture(t, storage.CredentialRecord{
+		UserID:       "42",
+		Login:        "viewer",
+		DisplayName:  "Viewer",
+		ClientID:     "client-id",
+		AccessToken:  auth.NewSecret("stored-access-token"),
+		RefreshToken: auth.NewSecret("stored-refresh-secret"),
+		TokenType:    "bearer",
+		Scopes:       auth.RequiredChatScopes(),
+		UpdatedAt:    time.Now(),
+	})
+
+	fakeValidator := twitch.NewFakeTokenValidator(twitch.FakeTokenValidationOutcome{
+		Result: twitch.TokenValidationResult{
+			Status:        twitch.TokenValidationMissingScope,
+			Identity:      twitch.TokenIdentity{Login: "viewer"},
+			MissingScopes: []twitch.TokenScope{twitch.ScopeChatRead, twitch.ScopeChatEdit},
+		},
+	})
+	oldNewLiveTokenValidator := newLiveTokenValidator
+	oldNewLiveChatClient := newLiveChatClient
+	t.Cleanup(func() {
+		newLiveTokenValidator = oldNewLiveTokenValidator
+		newLiveChatClient = oldNewLiveChatClient
+	})
+	newLiveTokenValidator = func() twitch.TokenValidator {
+		return fakeValidator
+	}
+	newLiveChatClient = func(context.Context, config.Config, debuglog.Logger, credentialLoadStatus) (app.ChatClient, error) {
+		t.Fatal("newLiveChatClient called after definitive token validation failure")
+		return nil, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
+
+	if code != 2 {
+		t.Fatalf("Run returned %d, want 2; stderr=%q", code, stderr.String())
+	}
+	for _, want := range []string{"missing required scopes", "Saved login credentials are present but were not used", "TWI_TWITCH_OAUTH_TOKEN", "TWITCH_ACCESS_TOKEN", "twitch_oauth_token"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr missing %q: %q", want, stderr.String())
+		}
+	}
+	requests := fakeValidator.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("validator requests = %d, want 1", len(requests))
+	}
+	if requests[0].OAuthToken != "oauth:env-secret-token" {
+		t.Fatalf("validator token = %q, want env token", requests[0].OAuthToken)
+	}
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "env-secret-token", "stored-access-token", "stored-refresh-secret")
+}
+
 func TestLiveChatTokenValidationWrongUserPreemptsMissingScope(t *testing.T) {
 	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
@@ -1442,7 +1549,7 @@ func TestLiveClientOptionsGateImageStackByTerminalAndCredentials(t *testing.T) {
 	if partial.AvatarResolver != nil {
 		t.Fatalf("partial AvatarResolver = %T, want nil without Twitch API client ID", partial.AvatarResolver)
 	}
-	if got, want := assetKindNames(partial.AssetKinds), []string{assets.KindEmoji}; strings.Join(got, ",") != strings.Join(want, ",") {
+	if got, want := assetKindNames(partial.AssetKinds), []string{assets.KindTwitchEmote, assets.KindEmoji}; strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("partial AssetKinds = %#v, want %#v", got, want)
 	}
 }

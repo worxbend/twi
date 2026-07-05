@@ -58,12 +58,13 @@ func TestNormalizeIRCPrivateMessage(t *testing.T) {
 	if got, want := msg.Type, MessageTypeChat; got != want {
 		t.Fatalf("Type = %q, want %q", got, want)
 	}
-	wantEmotes := []Emote{{ID: "28087", Name: "WutFace", Start: 0, End: 6}}
+	wantEmoteRef := AssetRef{Kind: "twitch_emote", ID: "28087", URL: "https://static-cdn.jtvnw.net/emoticons/v2/28087/static/light/2.0"}
+	wantEmotes := []Emote{{ID: "28087", Name: "WutFace", Start: 0, End: 6, Ref: wantEmoteRef}}
 	if !reflect.DeepEqual(msg.Emotes, wantEmotes) {
 		t.Fatalf("Emotes = %#v, want %#v", msg.Emotes, wantEmotes)
 	}
 	wantFragments := []MessageFragment{
-		{Type: FragmentEmote, Text: "WutFace", Ref: AssetRef{Kind: "twitch_emote", ID: "28087"}},
+		{Type: FragmentEmote, Text: "WutFace", Ref: wantEmoteRef},
 		{Type: FragmentText, Text: " hello "},
 		{Type: FragmentMention, Text: "@friend"},
 	}
@@ -148,7 +149,8 @@ func TestNormalizeIRCProtocolEvents(t *testing.T) {
 				if got, want := event.UserNotice.Params["msg-param-ritual-name"], "new_chatter"; got != want {
 					t.Fatalf("ritual param = %q, want %q", got, want)
 				}
-				if got, want := event.UserNotice.Emotes, []Emote{{ID: "64138", Name: "SeemsGood", Start: 0, End: 8}}; !reflect.DeepEqual(got, want) {
+				wantRef := AssetRef{Kind: "twitch_emote", ID: "64138", URL: "https://static-cdn.jtvnw.net/emoticons/v2/64138/static/light/2.0"}
+				if got, want := event.UserNotice.Emotes, []Emote{{ID: "64138", Name: "SeemsGood", Start: 0, End: 8, Ref: wantRef}}; !reflect.DeepEqual(got, want) {
 					t.Fatalf("Emotes = %#v, want %#v", got, want)
 				}
 			},

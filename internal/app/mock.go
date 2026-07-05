@@ -1456,6 +1456,9 @@ func (m mockShellModel) nextConnectionStateCommand() tea.Cmd {
 }
 
 func (m *mockShellModel) enqueueMessage(message twitch.ChatMessage) tea.Cmd {
+	if state := m.channels.ensure(message.Channel); state != nil {
+		state.removeLocalEcho(message.ID)
+	}
 	state, activeChannel := m.channels.applyMessage(message)
 	if state == nil {
 		return nil
@@ -1593,12 +1596,19 @@ func (m mockShellModel) staticMessageRowCount(message twitch.ChatMessage) int {
 
 func (m *mockShellModel) removeActiveReveal(id string) {
 	state := m.activeChannelState()
-	for i, activeID := range state.activeOrder {
+	state.removeActiveRevealID(id)
+}
+
+func (s *channelState) removeActiveRevealID(id string) {
+	if s == nil {
+		return
+	}
+	for i, activeID := range s.activeOrder {
 		if activeID != id {
 			continue
 		}
-		copy(state.activeOrder[i:], state.activeOrder[i+1:])
-		state.activeOrder = state.activeOrder[:len(state.activeOrder)-1]
+		copy(s.activeOrder[i:], s.activeOrder[i+1:])
+		s.activeOrder = s.activeOrder[:len(s.activeOrder)-1]
 		return
 	}
 }
@@ -2457,7 +2467,56 @@ func (m mockShellModel) completeComposerSend(msg composerSendCompletedMsg) (tea.
 
 	state.sendState = composerSendSucceeded
 	state.sendFeedback = sendResultDetail(msg.result)
+	m.appendLocalEcho(sent, msg.result)
 	return m, m.startNextComposerSend(state)
+}
+
+func (m *mockShellModel) appendLocalEcho(sent queuedComposerSend, result SendResult) {
+	state := m.channels.ensure(sent.Channel)
+	if state == nil {
+		return
+	}
+	message := m.localEchoMessage(sent, result, state.name)
+	if message.ID != "" {
+		if state.localEchoes == nil {
+			state.localEchoes = make(map[string]struct{})
+		}
+		state.localEchoes[message.ID] = struct{}{}
+	}
+	m.appendStaticMessage(message, channelKey(state.name) == m.channels.active && state.scrollOffset > 0)
+}
+
+func (m mockShellModel) localEchoMessage(sent queuedComposerSend, result SendResult, channel string) twitch.ChatMessage {
+	at := result.AcceptedAt
+	if at.IsZero() && m.channels != nil && m.channels.clock != nil {
+		at = m.channels.clock.Now()
+	}
+	if at.IsZero() {
+		at = time.Now()
+	}
+	id := strings.TrimSpace(result.MessageID)
+	if id == "" {
+		id = fmt.Sprintf("local-send-%d", sent.ID)
+	}
+	author := strings.TrimSpace(m.mentionLogin)
+	if author == "" {
+		author = "me"
+	}
+	messageType := twitch.MessageTypeChat
+	if sent.Action {
+		messageType = twitch.MessageTypeAction
+	}
+	return twitch.ChatMessage{
+		ID:          id,
+		Channel:     channel,
+		Timestamp:   at,
+		AuthorLogin: author,
+		DisplayName: author,
+		AuthorColor: "#9146ff",
+		Text:        sent.Text,
+		Type:        messageType,
+		Reply:       replyFromComposerContext(sent.Reply),
+	}
 }
 
 func (m mockShellModel) channelStateForActiveSend(id int) *channelState {
@@ -2470,6 +2529,32 @@ func (m mockShellModel) channelStateForActiveSend(id int) *channelState {
 		}
 	}
 	return nil
+}
+
+func (s *channelState) removeLocalEcho(id string) bool {
+	if s == nil || id == "" {
+		return false
+	}
+	if _, ok := s.localEchoes[id]; !ok {
+		return false
+	}
+	delete(s.localEchoes, id)
+	for i, message := range s.messages {
+		if message.ID == id {
+			copy(s.messages[i:], s.messages[i+1:])
+			s.messages = s.messages[:len(s.messages)-1]
+			return true
+		}
+	}
+	for _, activeID := range s.activeOrder {
+		message, ok := s.activeMessages[activeID]
+		if ok && message.ID == id {
+			delete(s.activeMessages, activeID)
+			s.removeActiveRevealID(activeID)
+			return true
+		}
+	}
+	return false
 }
 
 func (s *channelState) drainUnsentComposerSends(active queuedComposerSend) ([]string, *composerReplyContext) {
@@ -2552,6 +2637,18 @@ func cloneComposerReply(reply *composerReplyContext) *composerReplyContext {
 	}
 	copied := *reply
 	return &copied
+}
+
+func replyFromComposerContext(reply *composerReplyContext) *twitch.Reply {
+	if reply == nil || reply.MessageID == "" {
+		return nil
+	}
+	return &twitch.Reply{
+		ParentMessageID: reply.MessageID,
+		ParentLogin:     reply.Author,
+		ParentAuthor:    reply.Author,
+		ParentText:      reply.Text,
+	}
 }
 
 func replyAuthor(reply *composerReplyContext) string {

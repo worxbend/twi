@@ -30,6 +30,7 @@ Usage:
   twi config show
   twi config path
   twi doctor
+  twi image-smoke [--force]
   twi login [--dry-run]
   twi setup
 
@@ -117,13 +118,14 @@ var newCredentialStore = func() (storage.CredentialStore, error) {
 }
 
 type credentialLoadStatus struct {
-	Path     string
-	Label    string
-	Location string
-	Present  bool
-	Err      error
-	Store    storage.CredentialStore
-	Record   storage.CredentialRecord
+	Path                string
+	Label               string
+	Location            string
+	Present             bool
+	AccessTokenShadowed bool
+	Err                 error
+	Store               storage.CredentialStore
+	Record              storage.CredentialRecord
 }
 
 // Run executes the command line entrypoint. It returns a process exit code.
@@ -143,6 +145,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runConfig(args[1:], stdout, stderr)
 	case "doctor":
 		return runDoctor(args[1:], stdout, stderr)
+	case "image-smoke":
+		return runImageSmoke(args[1:], stdout, stderr)
 	case "login":
 		return runLogin(args[1:], stdout, stderr)
 	case "setup":
@@ -229,6 +233,9 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 	}
 	if warning, err := validateLiveChatToken(context.Background(), cfg, newLiveTokenValidator()); err != nil {
 		logger.Log(context.Background(), "cli.chat.token_validation_failed", slog.String("error", err.Error()))
+		if hint := credentialPrecedenceHint(status); hint != "" {
+			err = fmt.Errorf("%w %s", err, hint)
+		}
 		fmt.Fprintln(stderr, err)
 		return 2
 	} else if warning != "" {
@@ -585,9 +592,17 @@ func applyStoredCredentials(ctx context.Context, cfg *config.Config) (credential
 	status.Present = ok
 	if ok {
 		status.Record = record.Clone()
+		status.AccessTokenShadowed = record.AccessToken.Present() && strings.TrimSpace(cfg.Twitch.OAuthToken) != ""
 		applyCredentialRecord(cfg, record)
 	}
 	return status, nil
+}
+
+func credentialPrecedenceHint(status credentialLoadStatus) string {
+	if !status.AccessTokenShadowed {
+		return ""
+	}
+	return "Saved login credentials are present but were not used because environment or flat-config token credentials take precedence; unset TWI_TWITCH_OAUTH_TOKEN/TWITCH_ACCESS_TOKEN or remove twitch_oauth_token from config.toml, then retry."
 }
 
 func credentialStorePath(store storage.CredentialStore) string {

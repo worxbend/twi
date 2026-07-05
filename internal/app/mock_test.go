@@ -172,7 +172,7 @@ func TestShellImageFallbackRowsStayStableByCapabilityState(t *testing.T) {
 		{
 			name:       "auto unsupported keeps text tokens",
 			features:   imageFeatures,
-			wantRows:   []string{"[VF] 20:00 [moderator] view...: Kappa 😀"},
+			wantRows:   []string{"[VF] 20:00 [moderator] viewer_fan: Kappa 😀"},
 			wantEmoteW: 5,
 		},
 		{
@@ -182,7 +182,7 @@ func TestShellImageFallbackRowsStayStableByCapabilityState(t *testing.T) {
 				features.ImageMode = "off"
 				return features
 			}(),
-			wantRows:   []string{"[VF] 20:00 [moderator] view...: Kappa 😀"},
+			wantRows:   []string{"[VF] 20:00 [moderator] viewer_fan: Kappa 😀"},
 			wantEmoteW: 5,
 		},
 		{
@@ -590,10 +590,12 @@ func TestInspectPanelOpenClosePreservesComposerSelectionReplyAndScroll(t *testin
 func TestLiveShellEnterQueuesComposerSendAndSuccessKeepsComposerCleared(t *testing.T) {
 	client := NewFakeChatClient(1)
 	acceptedAt := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
-	if err := client.QueueSendResult(SendResult{AcceptedAt: acceptedAt, Detail: "accepted by Twitch"}, nil); err != nil {
+	if err := client.QueueSendResult(SendResult{MessageID: "sent-1", AcceptedAt: acceptedAt, Detail: "accepted by Twitch"}, nil); err != nil {
 		t.Fatalf("QueueSendResult returned error: %v", err)
 	}
-	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
+	cfg := config.Default()
+	cfg.Twitch.Username = "self_user"
+	model := newLiveShellModelWithClock("example", cfg, client, nil)
 	model.focus = mockFocusComposer
 	model.activeChannelState().composerText = " hello chat "
 
@@ -628,12 +630,68 @@ func TestLiveShellEnterQueuesComposerSendAndSuccessKeepsComposerCleared(t *testi
 	if got, want := model.activeChannelState().sendState, composerSendSucceeded; got != want {
 		t.Fatalf("sendState after success = %q, want %q", got, want)
 	}
+	messages := model.activeChannelState().messages
+	if len(messages) != 1 {
+		t.Fatalf("messages after success = %d, want local sent message: %#v", len(messages), messages)
+	}
+	local := messages[0]
+	if local.ID != "sent-1" || local.Channel != "example" || local.Text != "hello chat" || local.DisplayName != "self_user" || local.Type != twitch.MessageTypeChat {
+		t.Fatalf("local sent message = %#v, want self-authored chat row", local)
+	}
+	if !local.Timestamp.Equal(acceptedAt) {
+		t.Fatalf("local sent timestamp = %v, want %v", local.Timestamp, acceptedAt)
+	}
 	sent := client.SentRequests()
 	if len(sent) != 1 || sent[0].Channel != "example" || sent[0].Text != "hello chat" {
 		t.Fatalf("SentRequests = %#v, want one trimmed send to active channel", sent)
 	}
-	if !strings.Contains(model.View(), "accepted by Twitch") {
-		t.Fatalf("view missing success detail:\n%s", model.View())
+	view := model.View()
+	for _, want := range []string{"accepted by Twitch", "hello chat", "self_user"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("view missing %q after successful send:\n%s", want, view)
+		}
+	}
+}
+
+func TestLiveShellIncomingEchoReplacesLocalSentMessage(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	cfg.Twitch.Username = "self_user"
+	client := NewFakeChatClient(1)
+	acceptedAt := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	if err := client.QueueSendResult(SendResult{MessageID: "sent-echo", AcceptedAt: acceptedAt}, nil); err != nil {
+		t.Fatalf("QueueSendResult returned error: %v", err)
+	}
+	model := newLiveShellModelWithClock("example", cfg, client, nil)
+	model.focus = mockFocusComposer
+	model.activeChannelState().composerText = "hello chat"
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	updated, _ = model.Update(cmd().(composerSendCompletedMsg))
+	model = updated.(mockShellModel)
+	if got := len(model.activeChannelState().messages); got != 1 {
+		t.Fatalf("messages after local echo = %d, want 1", got)
+	}
+
+	serverEcho := twitch.ChatMessage{
+		ID:          "sent-echo",
+		Channel:     "example",
+		Timestamp:   acceptedAt.Add(time.Second),
+		AuthorLogin: "self_user",
+		DisplayName: "Self User",
+		Text:        "hello chat from Twitch",
+		Type:        twitch.MessageTypeChat,
+	}
+	updated, _ = model.Update(chatClientMessageMsg{message: serverEcho, ok: true})
+	model = updated.(mockShellModel)
+
+	messages := model.activeChannelState().messages
+	if len(messages) != 1 {
+		t.Fatalf("messages after server echo = %d, want replacement only: %#v", len(messages), messages)
+	}
+	if messages[0].ID != "sent-echo" || messages[0].Text != "hello chat from Twitch" || messages[0].DisplayName != "Self User" {
+		t.Fatalf("message after server echo = %#v, want authoritative Twitch row", messages[0])
 	}
 }
 
@@ -1245,6 +1303,14 @@ func TestLiveShellRStartsReplyModeAndReplySendUsesParentID(t *testing.T) {
 	if sent[0].Action {
 		t.Fatalf("Action = true, want false for normal reply")
 	}
+	messages := model.activeChannelState().messages
+	if len(messages) != 3 {
+		t.Fatalf("messages after reply send = %d, want parents plus local reply: %#v", len(messages), messages)
+	}
+	local := messages[2]
+	if local.Text != "thanks" || local.Reply == nil || local.Reply.ParentMessageID != "parent-2" {
+		t.Fatalf("local reply message = %#v, want reply row targeting parent-2", local)
+	}
 	if model.activeChannelState().replyTo != nil {
 		t.Fatalf("replyTo after successful reply send = %#v, want nil", model.activeChannelState().replyTo)
 	}
@@ -1277,6 +1343,13 @@ func TestLiveShellMeInputQueuesActionSend(t *testing.T) {
 	}
 	if !sent[0].Action {
 		t.Fatal("Action = false, want true")
+	}
+	messages := model.activeChannelState().messages
+	if len(messages) != 1 {
+		t.Fatalf("messages after action send = %d, want local action row: %#v", len(messages), messages)
+	}
+	if messages[0].Text != "waves at chat" || messages[0].Type != twitch.MessageTypeAction {
+		t.Fatalf("local action message = %#v, want action row", messages[0])
 	}
 }
 
@@ -1689,10 +1762,54 @@ func TestLiveShellAssetEventsRefreshVisibleRows(t *testing.T) {
 	}
 }
 
+func TestLiveShellAssetRequestPreservesFragmentEmoteURL(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmojiMode = "unicode"
+	cfg.Features.EmoteMode = "image"
+	ref := twitch.AssetRef{
+		Kind: assets.KindTwitchEmote,
+		URL:  "https://static-cdn.jtvnw.net/emoticons/v2/emotesv2_299397e0339249f8a1b50f0affb044d8/default/dark/1.0#e=0",
+	}
+	model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
+		AssetResolver: &appFakeAssetResolver{},
+		ImageRenderer: &appFakeImageRenderer{},
+		AssetKinds:    map[string]bool{assets.KindTwitchEmote: true},
+	})
+	model.activeChannelState().messages = []twitch.ChatMessage{{
+		ID:          "direct-emote-url",
+		Channel:     "example",
+		Timestamp:   time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC),
+		AuthorLogin: "viewer",
+		DisplayName: "viewer",
+		Type:        twitch.MessageTypeChat,
+		Fragments: []twitch.MessageFragment{
+			{Type: twitch.FragmentText, Text: "asset "},
+			{Type: twitch.FragmentEmote, Text: "WutFace", Ref: ref},
+		},
+	}}
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 96, Height: 12})
+	model = updated.(mockShellModel)
+
+	requests := model.pendingAssetRequests()
+	if len(requests) != 1 {
+		t.Fatalf("pending asset requests = %#v, want one emote request", requests)
+	}
+	wantRef := ref
+	wantRef.ID = "emotesv2_299397e0339249f8a1b50f0affb044d8"
+	if got := requests[0].Ref; got != wantRef {
+		t.Fatalf("asset request ref = %#v, want enriched fragment ref %#v", got, wantRef)
+	}
+	if got, want := requests[0].Fallback, "WutFace"; got != want {
+		t.Fatalf("asset request fallback = %q, want %q", got, want)
+	}
+}
+
 func TestLiveShellPreparedImageCellsAreScopedByChannelIdentity(t *testing.T) {
 	cfg := config.Default()
 	cfg.DefaultChannels = []string{"alpha", "beta"}
 	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmojiMode = "unicode"
 	cfg.Features.EmoteMode = "image"
 
 	ref := twitch.AssetRef{Kind: assets.KindTwitchEmote, ID: "25"}
@@ -1796,6 +1913,7 @@ func TestLiveShellPreparedImageCellsAreScopedByChannelIdentity(t *testing.T) {
 func TestLiveShellAssetEventsPrepareDownloadedRecordBeforeRendering(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmojiMode = "unicode"
 	cfg.Features.EmoteMode = "image"
 	resolver := &appFakeAssetResolver{path: "downloaded.jpg", mediaType: "image/jpeg"}
 	preparer := &appFakeImagePreparer{}
@@ -1851,6 +1969,7 @@ func TestLiveShellAssetEventsPrepareDownloadedRecordBeforeRendering(t *testing.T
 func TestLiveShellAssetPreparationFailureKeepsFallbackAndRetries(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmojiMode = "unicode"
 	cfg.Features.EmoteMode = "image"
 	resolver := &appFakeAssetResolver{}
 	preparer := &appFakeImagePreparer{err: render.ErrImagePreparationFailed}
@@ -1900,6 +2019,7 @@ func TestLiveShellAssetPreparationFailureKeepsFallbackAndRetries(t *testing.T) {
 func TestLiveShellPermanentAssetPreparationFailureBacksOffWithoutSecretState(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmojiMode = "unicode"
 	cfg.Features.EmoteMode = "image"
 	resolver := &appFakeAssetResolver{
 		path:      "oauth:fixture-token.png",
@@ -1965,6 +2085,7 @@ func TestLiveShellPermanentAssetPreparationFailureBacksOffWithoutSecretState(t *
 func TestLiveShellPermanentAssetFailureRetriesChangedRecordAfterBackoff(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmojiMode = "unicode"
 	cfg.Features.EmoteMode = "image"
 	initialFetchedAt := time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)
 	resolver := &appFakeAssetResolver{fetchedAt: initialFetchedAt}
@@ -2033,6 +2154,7 @@ func TestLiveShellPermanentAssetFailureRetriesChangedRecordAfterBackoff(t *testi
 func TestLiveShellPermanentAssetFailureRetriesChangedPayloadIdentityAfterBackoff(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmojiMode = "unicode"
 	cfg.Features.EmoteMode = "image"
 	fetchedAt := time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)
 	payloadA := "sha256:" + strings.Repeat("a", 64)
@@ -2227,6 +2349,7 @@ func TestAssetPermanentFailureKeyRejectsPathShapedState(t *testing.T) {
 func TestLiveShellPermanentAssetRenderFailureBacksOff(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmojiMode = "unicode"
 	cfg.Features.EmoteMode = "image"
 	resolver := &appFakeAssetResolver{fetchedAt: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
 	renderer := &appFakeImageRenderer{
@@ -2413,6 +2536,7 @@ func TestLiveShellAssetKindsGateMissingCredentialFallbacks(t *testing.T) {
 func TestLiveShellAssetRequestsPreferChannelIDForMetadata(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmojiMode = "unicode"
 	cfg.Features.EmoteMode = "image"
 	resolver := &appFakeAssetResolver{}
 	model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
@@ -2443,6 +2567,7 @@ func TestLiveShellAssetRequestsPreferChannelIDForMetadata(t *testing.T) {
 func TestLiveShellAssetRequestsDoNotUseChannelNameAsChannelID(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmojiMode = "unicode"
 	cfg.Features.EmoteMode = "image"
 	resolver := &appFakeAssetResolver{}
 	model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
@@ -2520,6 +2645,7 @@ func TestLiveShellAssetEventsPreserveViewportReplyAndComposer(t *testing.T) {
 func TestLiveShellAssetResolverOnlyRequestsVisibleHistory(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmojiMode = "unicode"
 	cfg.Features.EmoteMode = "image"
 	resolver := &appFakeAssetResolver{}
 	model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
@@ -2604,6 +2730,7 @@ func TestLiveShellAssetSchedulerDeduplicatesRepeatedVisibleRequestsAndKeepsViewP
 func TestLiveShellAssetSchedulerBoundsVisibleQueue(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmojiMode = "unicode"
 	cfg.Features.EmoteMode = "image"
 	resolver := &appFakeAssetResolver{}
 	renderer := &appFakeImageRenderer{}
@@ -2755,6 +2882,7 @@ func TestResolveAssetsCommandHonorsContextDeadline(t *testing.T) {
 func TestLiveShellAssetFailureCanRetryVisibleRequest(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmojiMode = "unicode"
 	cfg.Features.EmoteMode = "image"
 	resolver := &appFakeAssetResolver{fail: true}
 	renderer := &appFakeImageRenderer{cells: map[render.ImageCellKey]string{
@@ -2803,6 +2931,7 @@ func TestLiveShellAssetFailureCanRetryVisibleRequest(t *testing.T) {
 func TestMockShellAssetEventRefreshesActiveRevealRows(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmojiMode = "unicode"
 	cfg.Features.EmoteMode = "image"
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
 	model := newMockShellModelWithClock("example", cfg, clock)
@@ -3522,6 +3651,7 @@ func TestMessageFiltersArePerChannelAcrossSwitching(t *testing.T) {
 func TestMessageFiltersLimitVisibleAssetScheduling(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmojiMode = "unicode"
 	cfg.Features.EmoteMode = "image"
 	resolver := &appFakeAssetResolver{}
 	renderer := &appFakeImageRenderer{}

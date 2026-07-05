@@ -12,8 +12,9 @@
 - Visible-row asset events remember permanent preparation/render failures by URL-free asset identity, safe downloaded record metadata, optional payload identity, and requested cell size so unchanged corrupt, oversized, unsafe, or unsupported assets keep stable fallbacks without repeated decode/render work while changed bytes can retry.
 - `internal/storage.AssetCache` provides context-aware cache methods. The in-memory implementation is intended for deterministic tests, and `internal/storage.DiskAssetCache` persists metadata plus cache-owned downloaded and prepared bytes under the platform cache directory using deterministic hashed paths.
 - `twi doctor` reports image-related readiness through terminal color hints, Kitty/Ghostty environment signals, cache writability, selected image/avatar/emoji/emote modes, the resolved image capability state, and the live image-stack state.
-- `internal/render.KittyRenderer` can produce fixed-cell Kitty graphics output for prepared cached PNG assets in supported terminals.
+- `internal/render.KittyRenderer` can produce fixed-cell Kitty graphics output by transmitting prepared PNG bytes inline in supported terminals.
 - Live startup installs the concrete resolver, public downloader, disk cache, emoji provider, Twitch metadata clients, PNG preparer, and Kitty renderer when config, credentials, cache, and terminal capability checks allow it.
+- `twi image-smoke` generates a local PNG and renders it through the same PNG preparer and Kitty renderer path, so a compatible terminal can be checked without Twitch credentials or network assets.
 - Image loading and rendering must be capability-driven and non-blocking.
 - The chat UI must remain usable when image rendering is disabled, unsupported, still loading, or failed.
 - Known limitation: Kitty/Ghostty inline drawing still needs manual terminal validation in a compatible terminal. Current environment evidence and skipped checks are recorded in [manual-validation.md](manual-validation.md).
@@ -54,10 +55,10 @@ Avatars:
 
 Twitch emotes:
 
-- Current: parse emote positions from Twitch IRC tags and preserve compact fallback tokens.
-- Current: resolve Twitch emote metadata and CDN template URLs into cached public image refs.
+- Current: parse emote positions from Twitch IRC tags, preserve compact fallback tokens, and attach Twitch's static CDN URL from the emote ID in each message fragment.
+- Current: use fragment-provided CDN URLs directly for downloads; Helix emote metadata remains a fallback for emote refs that only have an ID.
 - Current: downloaded PNG/JPEG/GIF emote assets can be normalized to fixed-width PNG cells through the async image preparation/render boundaries.
-- Current: prepared cells can replace fallback tokens where supported and available; missing Twitch API credentials keep exact emote tokens.
+- Current: prepared cells can replace fallback tokens where supported and available; missing Twitch API credentials keep exact emote tokens for refs that need Helix metadata.
 - Planned: manual Kitty/Ghostty validation.
 
 Standard emoji:
@@ -107,7 +108,7 @@ default live resolver wiring. Manual Kitty/Ghostty validation is still planned.
 - `disabled`: image mode or Kitty images are disabled by config; text, initials, badge labels, emote tokens, and Unicode emoji stay active.
 - `unsupported`: `image_mode = "auto"` found no Kitty/Ghostty graphics signal; no live image asset events are installed.
 - `degraded`: part of the stack can run, such as emoji images without Twitch API credentials, or the terminal lacks true-color hints; fallbacks remain active for unavailable image assets.
-- `missing-dependency`: no requested image asset kind can run because a required dependency is absent, such as `TWI_TWITCH_CLIENT_ID` for Twitch-backed avatars, badges, or emotes, an OAuth token for Twitch API metadata, a valid emoji provider template, or a writable asset cache.
+- `missing-dependency`: no requested image asset kind can run because a required dependency is absent, such as `TWI_TWITCH_CLIENT_ID` for Twitch-backed avatars or badges, an OAuth token for Twitch API metadata, a valid emoji provider template, or a writable asset cache. IRC fragment-backed Twitch emotes use public CDN URLs and do not require Twitch API credentials.
 
 ## Configuration
 
@@ -117,10 +118,10 @@ Implemented controls for fallback rendering and diagnostics:
 TWI_ENABLE_KITTY_IMAGES=true
 TWI_IMAGE_MODE=auto
 TWI_AVATAR_MODE=initials
-TWI_EMOJI_MODE=unicode
+TWI_EMOJI_MODE=image
 TWI_EMOJI_PROVIDER=twemoji
 TWI_EMOJI_URL_TEMPLATE=
-TWI_EMOTE_MODE=text
+TWI_EMOTE_MODE=image
 ```
 
 Recognized mode strings:
@@ -172,6 +173,23 @@ Cache behavior should:
 - Never store OAuth tokens, client secrets, or credential-bearing URLs.
 
 ## Troubleshooting Targets
+
+Run a credential-free image probe in a Kitty/Ghostty-compatible terminal:
+
+```sh
+twi image-smoke
+```
+
+If terminal detection is missing but you know the terminal supports the Kitty
+graphics protocol, force the probe:
+
+```sh
+twi image-smoke --force
+```
+
+The command should draw a small color tile. If it prints text and escape
+sequences instead, the current terminal session is not interpreting Kitty
+graphics output.
 
 `twi doctor` currently distinguishes:
 

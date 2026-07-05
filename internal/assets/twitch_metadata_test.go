@@ -138,6 +138,98 @@ func TestTwitchMetadataResolverUsesCacheHitWithoutProviderLookup(t *testing.T) {
 	}
 }
 
+func TestTwitchMetadataResolverUsesDirectEmoteURLWithoutProviderLookup(t *testing.T) {
+	now := time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
+	cache := storage.NewMemoryAssetCache()
+	lookup := &fakeTwitchChatMetadataLookup{}
+	resolver := &TwitchMetadataResolver{
+		Lookup: lookup,
+		Cache:  cache,
+		Now:    func() time.Time { return now },
+		TTL:    time.Hour,
+	}
+	ref := twitch.AssetRef{
+		Kind: KindTwitchEmote,
+		ID:   "28087",
+		URL:  "https://static-cdn.jtvnw.net/emoticons/v2/28087/static/light/2.0",
+	}
+
+	metadata, err := resolver.LookupMetadata(context.Background(), MetadataRequest{Ref: ref, ChannelID: "11148817"})
+	if err != nil {
+		t.Fatalf("LookupMetadata error = %v", err)
+	}
+	if metadata.Ref != ref {
+		t.Fatalf("metadata Ref = %#v, want direct ref %#v", metadata.Ref, ref)
+	}
+	if got, want := metadata.URL, ref.URL; got != want {
+		t.Fatalf("metadata URL = %q, want %q", got, want)
+	}
+	if got, want := metadata.MediaType, "image/png"; got != want {
+		t.Fatalf("metadata MediaType = %q, want %q", got, want)
+	}
+	if got, want := metadata.WidthCells, 2; got != want {
+		t.Fatalf("metadata WidthCells = %d, want %d", got, want)
+	}
+	if lookup.totalCalls() != 0 {
+		t.Fatalf("provider calls = %d, want 0", lookup.totalCalls())
+	}
+	cached, ok, err := cache.GetAsset(context.Background(), storage.AssetKey{Kind: KindTwitchEmote, ID: "28087"})
+	if err != nil || !ok {
+		t.Fatalf("cached direct emote ok=%v err=%v, want hit nil", ok, err)
+	}
+	if got, want := cached.SourceURL, ref.URL; got != want {
+		t.Fatalf("cached SourceURL = %q, want %q", got, want)
+	}
+	if !cached.ExpiresAt.Equal(now.Add(time.Hour)) {
+		t.Fatalf("cached ExpiresAt = %s, want %s", cached.ExpiresAt, now.Add(time.Hour))
+	}
+}
+
+func TestTwitchMetadataResolverUsesDirectEmoteCDNURLWithFragment(t *testing.T) {
+	now := time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
+	cache := storage.NewMemoryAssetCache()
+	lookup := &fakeTwitchChatMetadataLookup{}
+	resolver := &TwitchMetadataResolver{
+		Lookup: lookup,
+		Cache:  cache,
+		Now:    func() time.Time { return now },
+		TTL:    time.Hour,
+	}
+	rawURL := "https://static-cdn.jtvnw.net/emoticons/v2/emotesv2_299397e0339249f8a1b50f0affb044d8/default/dark/1.0#e=0"
+	cleanURL := "https://static-cdn.jtvnw.net/emoticons/v2/emotesv2_299397e0339249f8a1b50f0affb044d8/default/dark/1.0"
+	ref := twitch.AssetRef{
+		Kind: KindTwitchEmote,
+		URL:  rawURL,
+	}
+
+	metadata, err := resolver.LookupMetadata(context.Background(), MetadataRequest{Ref: ref, ChannelID: "11148817"})
+	if err != nil {
+		t.Fatalf("LookupMetadata error = %v", err)
+	}
+	if got, want := metadata.Ref.ID, "emotesv2_299397e0339249f8a1b50f0affb044d8"; got != want {
+		t.Fatalf("metadata Ref.ID = %q, want %q", got, want)
+	}
+	if got, want := metadata.Ref.URL, cleanURL; got != want {
+		t.Fatalf("metadata Ref.URL = %q, want cleaned URL %q", got, want)
+	}
+	if got, want := metadata.URL, cleanURL; got != want {
+		t.Fatalf("metadata URL = %q, want cleaned URL %q", got, want)
+	}
+	if got, want := metadata.MediaType, "image/png"; got != want {
+		t.Fatalf("metadata MediaType = %q, want %q", got, want)
+	}
+	if lookup.totalCalls() != 0 {
+		t.Fatalf("provider calls = %d, want 0", lookup.totalCalls())
+	}
+	cached, ok, err := cache.GetAsset(context.Background(), storage.AssetKey{Kind: KindTwitchEmote, ID: "emotesv2_299397e0339249f8a1b50f0affb044d8"})
+	if err != nil || !ok {
+		t.Fatalf("cached direct emote ok=%v err=%v, want hit nil", ok, err)
+	}
+	if got, want := cached.SourceURL, cleanURL; got != want {
+		t.Fatalf("cached SourceURL = %q, want cleaned URL %q", got, want)
+	}
+}
+
 func TestTwitchMetadataResolverRejectsUnsafeEmoteCacheKey(t *testing.T) {
 	resolver := &TwitchMetadataResolver{Cache: storage.NewMemoryAssetCache()}
 
@@ -304,6 +396,39 @@ func TestResolveMessageRefsPreservesFragmentText(t *testing.T) {
 	}
 	if resolved.Fragments[1].Ref.URL == "" {
 		t.Fatalf("resolved fragment ref = %#v, want image URL", resolved.Fragments[1].Ref)
+	}
+}
+
+func TestResolveMessageRefsPreservesDirectFragmentEmoteCDNURL(t *testing.T) {
+	rawURL := "https://static-cdn.jtvnw.net/emoticons/v2/emotesv2_299397e0339249f8a1b50f0affb044d8/default/dark/1.0#e=0"
+	cleanURL := "https://static-cdn.jtvnw.net/emoticons/v2/emotesv2_299397e0339249f8a1b50f0affb044d8/default/dark/1.0"
+	msg := twitch.ChatMessage{
+		Timestamp:   time.Date(2026, 7, 2, 12, 34, 0, 0, time.Local),
+		DisplayName: "fragment_fan",
+		Type:        twitch.MessageTypeChat,
+		Fragments: []twitch.MessageFragment{
+			{Type: twitch.FragmentText, Text: "sent "},
+			{Type: twitch.FragmentEmote, Text: "Party", Ref: twitch.AssetRef{Kind: KindTwitchEmote, URL: rawURL}},
+		},
+	}
+	resolver := &TwitchMetadataResolver{
+		Lookup: &fakeTwitchChatMetadataLookup{},
+		Cache:  storage.NewMemoryAssetCache(),
+	}
+
+	resolved, err := resolver.ResolveMessageRefs(context.Background(), msg, "")
+	if err != nil {
+		t.Fatalf("ResolveMessageRefs error = %v", err)
+	}
+	if got, want := render.PlainRows(resolved, 80), []string{"12:34 fragment_fan: sent Party"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("rows mismatch\n got: %#v\nwant: %#v", got, want)
+	}
+	ref := resolved.Fragments[1].Ref
+	if got, want := ref.ID, "emotesv2_299397e0339249f8a1b50f0affb044d8"; got != want {
+		t.Fatalf("fragment ref ID = %q, want %q", got, want)
+	}
+	if got := ref.URL; got != cleanURL {
+		t.Fatalf("fragment ref URL = %q, want cleaned URL %q", got, cleanURL)
 	}
 }
 

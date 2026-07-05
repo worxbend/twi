@@ -1,6 +1,7 @@
 package twitch
 
 import (
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -11,6 +12,8 @@ import (
 )
 
 const rawEventTODO = "TODO: add a typed normalizer for this Twitch IRC message before rendering it in the app"
+
+const twitchEmoteStaticURLTemplate = "https://static-cdn.jtvnw.net/emoticons/v2/%s/static/light/2.0"
 
 // NormalizeIRCMessage converts a go-twitch-irc callback payload into the
 // internal event model used by the rest of twi.
@@ -302,6 +305,7 @@ func normalizeIRCEmotes(in []*irc.Emote) []Emote {
 				Name:  emote.Name,
 				Start: position.Start,
 				End:   position.End,
+				Ref:   twitchEmoteAssetRef(emote.ID),
 			})
 		}
 	}
@@ -353,7 +357,7 @@ func normalizeMessageFragments(text string, emotes []Emote) []MessageFragment {
 		fragments = append(fragments, MessageFragment{
 			Type: FragmentEmote,
 			Text: emoteText,
-			Ref:  AssetRef{Kind: "twitch_emote", ID: emote.ID},
+			Ref:  twitchEmoteAssetRef(emote.ID),
 		})
 		next = emote.End + 1
 	}
@@ -361,6 +365,15 @@ func normalizeMessageFragments(text string, emotes []Emote) []MessageFragment {
 		fragments = append(fragments, splitMentionFragments(string(runes[next:]))...)
 	}
 	return coalesceMessageFragments(fragments)
+}
+
+func twitchEmoteAssetRef(id string) AssetRef {
+	id = strings.TrimSpace(id)
+	ref := AssetRef{Kind: "twitch_emote", ID: id}
+	if id != "" {
+		ref.URL = fmt.Sprintf(twitchEmoteStaticURLTemplate, id)
+	}
+	return ref
 }
 
 func splitMentionFragments(text string) []MessageFragment {

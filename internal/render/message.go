@@ -397,7 +397,6 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 	includeTimestamp := opts.Width >= 16
 	includeBadges := opts.Width >= 28 && len(msg.Badges) > 0
 	includeAvatar := opts.Assets.ShowAvatars && opts.Width >= 24
-	targetWidth := targetPrefixWidth(opts.Width)
 
 	for {
 		fixedWidth := 2
@@ -416,9 +415,7 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 			fixedWidth += opts.Assets.AvatarWidthCells
 		}
 
-		maxAuthorWidth := targetWidth - fixedWidth
-		if maxAuthorWidth >= 3 || (!includeAvatar && !includeBadges && !includeTimestamp) {
-			author = truncateCells(author, maxAuthorWidth)
+		if fixedWidth+textWidth(author) <= opts.Width || (!includeAvatar && !includeBadges && !includeTimestamp) {
 			break
 		}
 		if includeBadges {
@@ -597,6 +594,12 @@ func emoteFragmentRef(fragment twitch.MessageFragment) twitch.AssetRef {
 	if ref.Kind == "" {
 		ref.Kind = "twitch_emote"
 	}
+	if ref.ID == "" {
+		_, id, ok := twitch.StaticEmoteCDNURL(ref.URL)
+		if ok {
+			ref.ID = id
+		}
+	}
 	return ref
 }
 
@@ -715,18 +718,24 @@ func wrap(prefix, content []Fragment, width int) []Row {
 		return nil
 	}
 
-	prefix = fitFragments(prefix, width)
 	prefixWidth := fragmentsWidth(prefix)
 	indentWidth := prefixWidth
 	if indentWidth >= width {
 		indentWidth = width / 2
 	}
 
-	current := Row{Fragments: cloneFragments(prefix)}
-	used := prefixWidth
 	rows := make([]Row, 0, 2)
-	for _, fragment := range content {
-		if isAtomicFragment(fragment) {
+	current := Row{}
+	used := 0
+	rows, current, used = appendWrappedFragments(rows, current, used, prefix, width, 0)
+	rows, current, used = appendWrappedFragments(rows, current, used, content, width, indentWidth)
+	rows = append(rows, current)
+	return rows
+}
+
+func appendWrappedFragments(rows []Row, current Row, used int, fragments []Fragment, width, indentWidth int) ([]Row, Row, int) {
+	for _, fragment := range fragments {
+		if fragment.WidthCells > 0 || isAtomicFragment(fragment) {
 			fragmentWidth := fragment.Width()
 			if fragmentWidth == 0 {
 				continue
@@ -777,8 +786,7 @@ func wrap(prefix, content []Fragment, width int) []Row {
 			used += clusterWidth
 		}
 	}
-	rows = append(rows, current)
-	return rows
+	return rows, current, used
 }
 
 func isAtomicFragment(fragment Fragment) bool {
@@ -1086,54 +1094,6 @@ func fitCells(value string, width int) string {
 	used := textWidth(out)
 	if used < width {
 		out += strings.Repeat(" ", width-used)
-	}
-	return out
-}
-
-func targetPrefixWidth(width int) int {
-	switch {
-	case width < 16:
-		return maxInt(4, width/2)
-	case width < 32:
-		return maxInt(8, width-10)
-	case width < 56:
-		return maxInt(16, width/2)
-	default:
-		return 32
-	}
-}
-
-func fitFragments(fragments []Fragment, width int) []Fragment {
-	if width <= 0 {
-		return nil
-	}
-	out := make([]Fragment, 0, len(fragments))
-	used := 0
-	for _, fragment := range fragments {
-		remaining := width - used
-		if remaining <= 0 {
-			break
-		}
-		next := fragment
-		fragmentWidth := fragment.Width()
-		if fragment.WidthCells > 0 && fragmentWidth <= remaining {
-			next.Text = fragment.Text
-			used += fragmentWidth
-		} else {
-			next.Text = truncateCells(fragment.Text, remaining)
-			next.WidthCells = 0
-			next.ImageCell = ImageCell{}
-			next.ImageReady = false
-			used += textWidth(next.Text)
-		}
-		if next.Text == "" {
-			continue
-		}
-		if len(out) > 0 && sameFragmentStyle(out[len(out)-1], next) {
-			out[len(out)-1].Text += next.Text
-		} else {
-			out = append(out, next)
-		}
 	}
 	return out
 }
