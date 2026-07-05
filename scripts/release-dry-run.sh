@@ -22,7 +22,7 @@ repo_root=$(CDPATH= cd "$script_dir/.." && pwd)
 
 out_dir=${TWI_RELEASE_DIR:-"$repo_root/dist/release"}
 image=${TWI_RELEASE_IMAGE:-"twi:local"}
-targets=${TWI_RELEASE_TARGETS:-"linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64"}
+targets=${TWI_RELEASE_TARGETS:-"linux/amd64 linux/arm64 darwin/amd64 darwin/arm64"}
 skip_docker=0
 
 while [ "$#" -gt 0 ]; do
@@ -138,7 +138,8 @@ for target in $targets; do
 
 	name="twi_${goos}_${goarch}"
 	if [ "$goos" = "windows" ]; then
-		name="$name.exe"
+		echo "windows is not a supported release target" >&2
+		exit 2
 	fi
 	bin="$out_dir/$name"
 

@@ -13,7 +13,7 @@
 
 `twi` is a terminal Twitch chat client with taste. It is keyboard-first, fast to launch, friendly to low-drama terminals, and allergic to leaking your OAuth token.
 
-The project is currently an MVP-shaped Go app: mock chat is ready without the network; live Twitch IRC read/send, diagnostics, redacted debug logging, multi-channel UX, inline image plumbing, OAuth login, setup, Unix restrictive credential-file persistence, and Windows Credential Manager persistence are partially shipped. Release binary/container packaging is available through the dry-run workflow. Credentialed Twitch release validation, native Windows-host credential smoke evidence, and manual Kitty/Ghostty image validation remain environment-dependent. Current manual terminal evidence is recorded in [docs/manual-validation.md](docs/manual-validation.md).
+The project is currently an MVP-shaped Go app for Unix-like terminals and Docker: mock chat and diagnostics are ready without needing Twitch credentials; live Twitch IRC read/send, redacted debug logging, multi-channel UX, inline image plumbing, OAuth login, setup, and Unix restrictive credential-file persistence are shipped for their documented paths. Release binary/container packaging is available through the dry-run workflow. Credentialed Twitch release validation and manual Kitty/Ghostty image validation remain environment-dependent. Current manual terminal evidence is recorded in [docs/manual-validation.md](docs/manual-validation.md).
 
 ```text
         +---------------------------------------------+
@@ -80,7 +80,7 @@ candidate path yet.
 
 ## Live Twitch Chat
 
-Live mode needs a Twitch login, an IRC OAuth token, and at least one channel. Repeat `--channel` to join multiple Twitch IRC channels. The token needs `chat:read`; sending from the composer also needs `chat:edit`. Username/token credentials can come from environment variables, the flat config file, or the private credential store created by `twi login` on supported platforms. Unix builds use a restrictive credential file; Windows builds use native Windows Credential Manager. Environment and flat config values take precedence over saved credentials. CLI flags currently override channels and config path, not username or token values.
+Live mode needs a Twitch login, an IRC OAuth token, and at least one channel. Repeat `--channel` to join multiple Twitch IRC channels. The token needs `chat:read`; sending from the composer also needs `chat:edit`. Before starting live IRC, `twi chat` validates token identity, expiry, username match, and required scopes when Twitch OAuth validation is reachable. Definitive invalid-token states stop startup with redacted guidance; transient validation failures warn and continue to IRC authentication. Username/token credentials can come from environment variables, the flat config file, or the private credential store created by `twi login` on supported Unix platforms. Unix builds use a restrictive credential file. Non-Unix builds keep saved credentials disabled; use environment variables or a private flat config file there. Environment and flat config values take precedence over saved credentials. CLI flags currently override channels and config path, not username or token values.
 
 The setup command writes non-secret config values and can hand off to login:
 
@@ -112,7 +112,7 @@ export TWITCH_CLIENT_SECRET="<client secret from Twitch>"
 export TWITCH_REFRESH_TOKEN="<refresh token from Twitch>"
 ```
 
-If Twitch IRC rejects the access token during login, `twi` will try one OAuth refresh and reconnect when `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, and `TWITCH_REFRESH_TOKEN` are also configured. On supported platforms, refreshed access and refresh tokens are saved through the private credential store. If saving is unsupported or fails, `twi` keeps the refreshed tokens in memory for the current chat session and reports a redacted warning.
+If Twitch IRC rejects the access token during login, `twi` will try one OAuth refresh and reconnect when `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, and `TWITCH_REFRESH_TOKEN` are also configured. On supported Unix platforms, refreshed access and refresh tokens are saved through the private credential store. If saving is unsupported or fails, `twi` keeps the refreshed tokens in memory for the current chat session and reports a redacted warning.
 
 ### OAuth Login Command
 
@@ -130,7 +130,7 @@ export TWI_TWITCH_CLIENT_SECRET="<client secret from Twitch>"
 go run ./cmd/twi login
 ```
 
-By default it opens a browser and listens on `http://127.0.0.1:17643/oauth/twitch/callback`; register that redirect URI on the Twitch app or pass `--redirect-uri` for another localhost HTTP callback. On supported platforms, success validates the returned token, saves it through the private credential store, and prints only identity/scope/storage status. Other non-Unix builds with no selected backend stop before opening the browser and direct users to environment variables or a private flat config file. The command does not print access tokens, refresh tokens, callback codes, OAuth state, authorization URLs, or client secrets.
+By default it opens a browser and listens on `http://127.0.0.1:17643/oauth/twitch/callback`; register that redirect URI on the Twitch app or pass `--redirect-uri` for another localhost HTTP callback. On supported Unix platforms, success validates the returned token, saves it through the private credential store, and prints only identity/scope/storage status. Non-Unix builds stop before opening the browser and direct users to environment variables or a private flat config file. The command does not print access tokens, refresh tokens, callback codes, OAuth state, authorization URLs, or client secrets.
 
 Use the bounded noninteractive smoke path when you only want to check command wiring:
 
@@ -138,7 +138,7 @@ Use the bounded noninteractive smoke path when you only want to check command wi
 go run ./cmd/twi login --dry-run
 ```
 
-The file fallback is Unix-only. It stores a separate private `credentials.json` under a `0700` platform config directory, creates the file with `0600` permissions, rejects symlinked credential paths, and opens existing files with no-follow protection. Existing credential files or directories with different modes are rejected instead of reused. Windows does not use a JSON credential file; it stores the same versioned Twitch credential payload in native Windows Credential Manager under target `w0rxbend/twi/twitch-oauth` with local-machine persistence for the current Windows user. Other non-Unix builds keep saved credentials disabled until a native backend is selected. If you keep duplicate credentials in environment variables or `config.toml`, those sources still win until you remove them.
+The file fallback is Unix-only. It stores a separate private `credentials.json` under a `0700` platform config directory, creates the file with `0600` permissions, rejects symlinked credential paths, and opens existing files with no-follow protection. Existing credential files or directories with different modes are rejected instead of reused. Non-Unix builds keep saved credentials disabled. If you keep duplicate credentials in environment variables or `config.toml`, those sources still win until you remove them.
 
 Docker version:
 
@@ -156,13 +156,13 @@ Do not paste real tokens into commits, screenshots, issue comments, terminal rec
 | Area | Status | Current behavior |
 | --- | --- | --- |
 | Mock chat | Ready | `twi chat --mock [--channel demo]` runs without Twitch credentials or network access. |
-| Multi-channel live IRC read/send | Partial | `twi chat --channel <channel> [--channel other]` can read, send, reply, and send `/me` actions for configured channels when env/config credentials or saved credentials on supported platforms are present; broader live manual evidence remains future work. |
+| Multi-channel live IRC read/send | Partial | `twi chat --channel <channel> [--channel other]` validates startup credentials when Twitch OAuth validation is reachable, then can read, send, reply, and send `/me` actions for configured channels when env/config credentials or saved credentials on supported Unix platforms are present; broader live manual evidence remains future work. |
 | Config commands | Ready | `twi config show` prints effective flat config with secrets redacted; `twi config path` shows the default config path. |
-| Diagnostics | Partial | `twi doctor` checks config path, credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, username mismatch, Twitch IRC reachability, terminal hints, Kitty/Ghostty signals, cache writability/pruning, image capability, live image-stack readiness, and feature modes. |
-| Debug logging | Partial | Redacted JSON debug logs can be enabled with `debug_logging = true`, `TWI_DEBUG_LOG=true`, or `--debug-log` on chat, login, and doctor. Logs use curated fields for auth, transport, send, asset, and render diagnostics instead of raw struct or raw tag dumps. |
+| Diagnostics | Ready | `twi doctor` checks config path, credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, username mismatch, Twitch IRC reachability, terminal hints, Kitty/Ghostty signals, cache writability/pruning, image capability, live image-stack readiness, and feature modes. Live chat also preflights token validation before IRC startup when validation is reachable. |
+| Debug logging | Ready | Redacted JSON debug logs can be enabled with `debug_logging = true`, `TWI_DEBUG_LOG=true`, or `--debug-log` on chat, login, and doctor. Logs use curated fields for auth, transport, send, asset, and render diagnostics instead of raw struct or raw tag dumps. |
 | Avatar metadata | Partial | When live chat runs with `avatar_mode = "image"` plus Twitch API credentials, a writable cache, and Kitty-compatible image capability, visible author avatar URLs are batched through Helix Get Users, downloaded, prepared, and rendered through async asset events while initials remain stable on every failure path. |
 | Emote/badge metadata | Partial | Live startup can wire Helix-backed Twitch emote and badge metadata, the public downloader, disk cache, PNG preparer, and Kitty renderer behind config, credential, cache, and terminal gates while keeping compact badge labels and exact emote-token fallbacks stable. |
-| Login/setup | Partial | `twi setup` creates or updates non-secret flat config values and can hand off to `twi login`; on supported Unix builds, `twi login` saves through the restrictive credential-file fallback, and on Windows it saves through native Windows Credential Manager. Other non-Unix builds keep env/config credentials as the supported path. |
+| Login/setup | Partial | `twi setup` creates or updates non-secret flat config values and can hand off to `twi login`; on supported Unix builds, `twi login` saves through the restrictive credential-file fallback. Non-Unix builds keep env/config credentials as the supported path. |
 | Multi-channel UX | Partial | Messages, unread counts, scroll, drafts, replies, sends, and local view filters are per-channel. Normal and wide terminals show a keyboard-first channel sidebar with connection indicators, unread counts, and filter markers; `ctrl+p` opens a keyboard command palette for common actions, panel toggles, channel switching, local filters, local clear, and live reconnect restart. Optional mouse support can scroll chat, click channels, focus the composer, and select messages. Selected messages can be inspected in a redacted diagnostics panel even when filters hide them from the chat view. Narrow terminals collapse channel state into the status line. Twitch IRC connect/reconnect/disconnect callbacks are connection-level and are shown on configured channel states rather than as independent per-channel transport events. Manual reconnect tears down the active live IRC transport before creating a fresh one while preserving per-channel UI state. |
 | Inline terminal images | Partial | Live startup installs the concrete resolver/downloader/disk-cache/emoji-provider/Twitch-metadata/preparer/Kitty-renderer stack only when config, credentials for Twitch-backed assets, cache writability, and terminal capability allow it. Disabled, unsupported, missing-dependency, degraded, resolver failure, downloader failure, preparation failure, and render failure paths keep initials, badge labels, emote tokens, and Unicode emoji fallbacks. Manual Kitty/Ghostty validation remains pending. |
 
@@ -253,7 +253,7 @@ no-follow semantics before validating the opened file.
 
 Nested TOML tables are not implemented yet. Keep the file flat.
 
-Prefer `twi login` for saved tokens on supported platforms. Leave secret
+Prefer `twi login` for saved tokens on supported Unix platforms. Leave secret
 values empty in shared examples and docs. If you also keep real tokens in the
 flat config, keep that file private to your user account, for example with
 `chmod 600`; flat config values still take precedence over saved credentials.

@@ -287,7 +287,7 @@ func TestCredentialFileStoreOverwriteReplacesAtomicallyWithoutTempFiles(t *testi
 }
 
 func TestCredentialFileStoreFailedSaveKeepsExistingFile(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		t.Skip("directory mode write-denial check is Unix-specific")
 	}
 
@@ -438,8 +438,8 @@ func TestCredentialFileStoreRejectsUnsafePermissions(t *testing.T) {
 }
 
 func TestCredentialFileStoreRejectsSymlinkWithoutFollowing(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink permissions vary on Windows")
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("symlink permission checks are Unix-specific")
 	}
 
 	dir := filepath.Join(t.TempDir(), "twi")
@@ -500,8 +500,8 @@ func TestCredentialFileStoreRejectsSymlinkWithoutFollowing(t *testing.T) {
 }
 
 func TestCredentialFileStoreRejectsSymlinkDirectoryWithoutFollowing(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink permissions vary on Windows")
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("symlink permission checks are Unix-specific")
 	}
 
 	realDir := filepath.Join(t.TempDir(), "real")

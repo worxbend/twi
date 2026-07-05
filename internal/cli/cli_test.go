@@ -975,6 +975,7 @@ func TestLiveChatMissingCredentialsAreActionableAndRedacted(t *testing.T) {
 func TestLiveChatConfiguredStartsClient(t *testing.T) {
 	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
+	installValidLiveTokenValidator(t, "viewer")
 
 	oldNewLiveChatClient := newLiveChatClient
 	oldRunLiveChat := runLiveChat
@@ -1017,9 +1018,99 @@ func TestLiveChatConfiguredStartsClient(t *testing.T) {
 	}
 }
 
+func TestLiveChatTokenValidationMissingScopeStopsBeforeClient(t *testing.T) {
+	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
+	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
+
+	fakeValidator := twitch.NewFakeTokenValidator(twitch.FakeTokenValidationOutcome{
+		Result: twitch.TokenValidationResult{
+			Status:        twitch.TokenValidationMissingScope,
+			Identity:      twitch.TokenIdentity{Login: "viewer"},
+			Scopes:        []twitch.TokenScope{twitch.ScopeChatRead},
+			MissingScopes: []twitch.TokenScope{twitch.ScopeChatEdit},
+		},
+	})
+	oldNewLiveTokenValidator := newLiveTokenValidator
+	oldNewLiveChatClient := newLiveChatClient
+	t.Cleanup(func() {
+		newLiveTokenValidator = oldNewLiveTokenValidator
+		newLiveChatClient = oldNewLiveChatClient
+	})
+	newLiveTokenValidator = func() twitch.TokenValidator {
+		return fakeValidator
+	}
+	newLiveChatClient = func(context.Context, config.Config, debuglog.Logger, credentialLoadStatus) (app.ChatClient, error) {
+		t.Fatal("newLiveChatClient called after definitive token validation failure")
+		return nil, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
+
+	if code != 2 {
+		t.Fatalf("Run returned %d, want 2; stderr=%q", code, stderr.String())
+	}
+	for _, want := range []string{"twitch OAuth token validation failed", "chat:edit", "twi doctor", "--mock"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr missing %q: %q", want, stderr.String())
+		}
+	}
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "oauth:secret-token", "secret-token")
+	if got := len(fakeValidator.Requests()); got != 1 {
+		t.Fatalf("validator requests = %d, want 1", got)
+	}
+}
+
+func TestLiveChatTokenValidationTransientFailureWarnsAndContinues(t *testing.T) {
+	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
+	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
+	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
+
+	fakeValidator := twitch.NewFakeTokenValidator(twitch.FakeTokenValidationOutcome{
+		Err: errors.New("temporary validator failure for oauth:secret-token client_secret=client-secret"),
+	})
+	oldNewLiveTokenValidator := newLiveTokenValidator
+	oldNewLiveChatClient := newLiveChatClient
+	oldRunLiveChat := runLiveChat
+	t.Cleanup(func() {
+		newLiveTokenValidator = oldNewLiveTokenValidator
+		newLiveChatClient = oldNewLiveChatClient
+		runLiveChat = oldRunLiveChat
+	})
+	newLiveTokenValidator = func() twitch.TokenValidator {
+		return fakeValidator
+	}
+	fakeClient := app.NewFakeChatClient(1)
+	newLiveChatClient = func(context.Context, config.Config, debuglog.Logger, credentialLoadStatus) (app.ChatClient, error) {
+		return fakeClient, nil
+	}
+	runLiveChat = func(stdout io.Writer, _ config.Config, client app.ChatClient, _ app.ClientOptions) error {
+		if client != fakeClient {
+			t.Fatalf("runLiveChat client = %#v, want fake", client)
+		}
+		_, err := stdout.Write([]byte("live shell started\n"))
+		return err
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "warning: Twitch OAuth token validation failed") || !strings.Contains(stderr.String(), "continuing to IRC authentication") {
+		t.Fatalf("stderr missing validation warning: %q", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "live shell started") {
+		t.Fatalf("stdout missing live shell output: %q", stdout.String())
+	}
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "oauth:secret-token", "secret-token", "client-secret")
+}
+
 func TestLiveChatEnvCredentialsIgnoreUnsupportedCredentialFileFallback(t *testing.T) {
 	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
+	installValidLiveTokenValidator(t, "viewer")
 
 	oldNewCredentialStore := newCredentialStore
 	oldNewLiveChatClient := newLiveChatClient
@@ -1134,7 +1225,7 @@ func TestPersistRefreshedIRCCredentialsUnavailableAndFailureErrorsAreRedacted(t 
 		want   string
 	}{
 		{
-			name: "unsupported platform",
+			name: "unsupported Unix platform",
 			status: credentialLoadStatus{
 				Err: fmt.Errorf("%w: credential-file fallback disabled; use env/config; oauth:stored-secret refresh_token=stored-refresh client_secret=stored-client-secret", storage.ErrUnsupportedCredentialFilePlatform),
 			},
@@ -1174,6 +1265,7 @@ func TestPersistRefreshedIRCCredentialsUnavailableAndFailureErrorsAreRedacted(t 
 func TestLiveChatConfiguredStartsClientWithMultipleChannels(t *testing.T) {
 	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
+	installValidLiveTokenValidator(t, "viewer")
 
 	oldNewLiveChatClient := newLiveChatClient
 	oldRunLiveChat := runLiveChat
@@ -1226,6 +1318,7 @@ func TestLiveChatConfiguredWiresImageStackWhenReady(t *testing.T) {
 	t.Setenv("COLORTERM", "truecolor")
 	t.Setenv("KITTY_WINDOW_ID", "42")
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	installValidLiveTokenValidator(t, "viewer")
 
 	oldNewLiveChatClient := newLiveChatClient
 	oldRunLiveChat := runLiveChat
@@ -1883,6 +1976,25 @@ func writeRawStoredCredentialFile(t *testing.T, content string) {
 	if err := os.Chmod(path, storage.CredentialFileMode); err != nil {
 		t.Fatalf("chmod credential file: %v", err)
 	}
+}
+
+func installValidLiveTokenValidator(t *testing.T, login string) *twitch.FakeTokenValidator {
+	t.Helper()
+	fake := twitch.NewFakeTokenValidator()
+	fake.SetDefault(twitch.TokenValidationResult{
+		Status:   twitch.TokenValidationValid,
+		Identity: twitch.TokenIdentity{Login: login},
+		Scopes:   twitch.RequiredIRCScopes(),
+	}, nil)
+
+	oldNewLiveTokenValidator := newLiveTokenValidator
+	newLiveTokenValidator = func() twitch.TokenValidator {
+		return fake
+	}
+	t.Cleanup(func() {
+		newLiveTokenValidator = oldNewLiveTokenValidator
+	})
+	return fake
 }
 
 type saveFailCredentialStore struct {

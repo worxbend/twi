@@ -7,12 +7,14 @@ This document describes the configuration model for `twi`. The implemented parse
 - Config loading exists for flat `key = value` files, environment variables, and selected CLI overrides.
 - `twi config show` and `twi config path` exist in the CLI.
 - Mock chat is ready and does not require credentials or network access.
-- Multi-channel live IRC read/send is partially shipped: `twi chat --channel <channel> [--channel other]` can read, send, reply, and send `/me` actions when username/token credentials are configured.
-- Twitch credentials are currently read from environment variables, the flat config file, or saved credentials on supported platforms. Unix builds use the private credential file. Windows builds use native Windows Credential Manager. CLI flags currently override `--config` and `--channel`, not username or OAuth token values.
+- Multi-channel live IRC read/send is partially shipped: `twi chat --channel <channel> [--channel other]` validates startup credentials when Twitch OAuth validation is reachable, then can read, send, reply, and send `/me` actions when username/token credentials are configured.
+- Twitch credentials are currently read from environment variables, the flat config file, or saved credentials on supported Unix platforms. Unix builds use the private credential file. Non-Unix builds keep saved credentials disabled. CLI flags currently override `--config` and `--channel`, not username or OAuth token values.
 - Config output redacts OAuth tokens and client secrets.
-- `twi doctor` diagnostics are partially shipped and report the effective config file path, credential presence,
-  selected feature modes, Twitch IRC reachability, terminal hints, Kitty graphics
-  signals, and cache directory writability without printing token or client
+- `twi doctor` diagnostics report the effective config file path, credential
+  presence, Twitch OAuth identity/expiry/scope validation, refresh availability,
+  username mismatch, selected feature modes, Twitch IRC reachability, terminal
+  hints, Kitty graphics signals, cache directory writability/pruning, image
+  capability, and live image-stack readiness without printing token or client
   secret values.
 - Redacted structured debug logging is opt-in through flat config, environment,
   or command flags for chat, login, and doctor. Debug records use curated fields
@@ -21,10 +23,9 @@ This document describes the configuration model for `twi`. The implemented parse
 - Multi-channel UX is partially shipped: per-channel history, unread counts, scroll, drafts, replies, sends, local view filters, keyboard sidebar, command palette, optional mouse interactions, and selected-message inspect are current behavior.
 - Inline terminal image support is partially shipped: bounded image decode/cell preparation, renderer cells, stable fallback rows, cache boundaries, standard emoji provider metadata, capability diagnostics, visible-row asset event scheduling, and default live resolver/downloader/preparer/renderer wiring exist; manual Kitty/Ghostty validation remains planned for a compatible graphics terminal session.
 - `twi setup` can create or update non-secret flat config values and hand off
-  to login. On supported platforms, `twi login` can run the OAuth
-  browser/callback flow and save returned tokens without printing them. Unix
-  builds use the restrictive credential-file fallback; Windows builds use
-  native Windows Credential Manager. Other non-Unix builds keep saved
+  to login. On supported Unix platforms, `twi login` can run the OAuth
+  browser/callback flow and save returned tokens without printing them through
+  the restrictive credential-file fallback. Non-Unix builds keep saved
   credentials disabled and users should use environment variables or a private
   flat config file.
 - Nested TOML tables are not implemented yet; keep config files flat.
@@ -37,7 +38,7 @@ Effective config should be resolved in this order, highest priority first:
    `--debug-log-path`.
 2. Environment variables.
 3. Config file.
-4. Saved credential values for empty credential fields on supported platforms.
+4. Saved credential values for empty credential fields on supported Unix platforms.
 5. Defaults.
 
 This order lets users override local config for one command without editing files.
@@ -98,8 +99,6 @@ $XDG_CONFIG_HOME/twi/config.toml
 ~/.config/twi/config.toml
 ```
 
-Windows should use the platform config directory for the flat config file.
-
 The cache directory is the platform cache directory, such as:
 
 ```text
@@ -124,18 +123,7 @@ permissions do not match those exact modes, rejects symlinks at the credential
 directory or file path, and opens existing credential files with no-follow
 protection. These guarantees are Unix file-mode and no-follow guarantees.
 
-Windows and other non-Unix builds do not enable the credential-file fallback.
-`twi` does not enforce Windows owner-only ACLs, DACL inheritance rules, or
-reparse-point/no-follow protections for credential files, and it does not map
-Unix `0700`/`0600` semantics onto Windows.
-
-Windows saved credentials use native Windows Credential Manager instead of a
-JSON credential file. The entry is a generic credential for the current Windows
-user with target `w0rxbend/twi/twitch-oauth` and
-`CRED_PERSIST_LOCAL_MACHINE` persistence. `twi doctor` reports the Windows
-Credential Manager target and whether it was loaded or missing.
-
-Other non-Unix platforms keep saved credentials disabled. On those platforms,
+Non-Unix platforms keep saved credentials disabled. On those platforms,
 use environment variables or a private flat config file for Twitch credentials.
 `twi doctor` reports disabled saved credential persistence as a warning, and
 `twi login` exits with a redacted actionable error before opening the browser.
@@ -234,7 +222,7 @@ debug_log_path = ""
 
 Do not paste a real token into shared docs, commits, logs, or support issues.
 Shared config examples should leave secret values empty. Prefer `twi login` for
-saved tokens on supported platforms. If you keep credentials in this flat
+saved tokens on supported Unix platforms. If you keep credentials in this flat
 config file too, keep the file private to your user account, for example with
 `chmod 600`. `twi` does not automatically migrate values out of `config.toml`,
 and flat config values still take precedence over saved credentials.
@@ -282,8 +270,7 @@ event counts, and hostnames.
 
 `twi login` is implemented as a browser/local-callback OAuth flow with a
 `--dry-run` explanation path. Successful logins save credentials through the
-restrictive fallback-file store on supported Unix builds and through native
-Windows Credential Manager on Windows builds; other non-Unix builds keep
+restrictive fallback-file store on supported Unix builds; non-Unix builds keep
 environment variables and private flat config files as the supported credential
 path. `twi setup` is implemented for non-secret settings and login handoff.
 Manual Kitty/Ghostty validation is still planned for a compatible graphics
@@ -318,8 +305,8 @@ validation, or other degraded optional behavior.
 The current diagnostics include:
 
 - Config file path existence/readability.
-- Saved credential-store presence, including Unix credential-file path or
-  Windows Credential Manager target when that platform backend is available.
+- Saved credential-store presence, including the Unix credential-file path on
+  supported builds.
 - Twitch username, OAuth token, client ID, and client secret presence.
 - Channel count, with a warning when no channel is configured.
 - Token validation status, including Twitch identity, required and granted
@@ -353,7 +340,7 @@ TUI model.
 Current behavior:
 
 - Load username and OAuth token from env/config and saved credentials on
-  supported platforms.
+  supported Unix platforms.
 - Load channel names from `--channel`, `TWI_DEFAULT_CHANNELS`, or config.
 - Load animation mode.
 - Load basic image fallback settings.
@@ -372,8 +359,5 @@ Current behavior:
 
 Future target:
 
-- Startup token validation with scope checks.
-- Continued deferral for other non-Unix credential persistence until a target
-  platform has an explicit native backend or exact owner-only protections.
 - Full terminal image mode controls.
 - Cache sizing and pruning configuration.

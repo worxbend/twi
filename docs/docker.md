@@ -56,12 +56,11 @@ wiring is current when config, credentials, cache, and terminal checks allow
 it.
 
 Username/token credentials currently come from environment variables, the flat
-config file, or saved credentials on supported platforms. The Linux container
-uses the restrictive Unix credential-file fallback; Windows host binaries use
-native Windows Credential Manager instead. Docker examples pass credentials
-through environment variables; CLI flags currently override channel and config
-path only. Environment and flat config values take precedence over saved
-credentials.
+config file, or saved credentials on supported Unix platforms. The Linux
+container uses the restrictive Unix credential-file fallback. Docker examples
+pass credentials through environment variables; CLI flags currently override
+channel and config path only. Environment and flat config values take
+precedence over saved credentials.
 
 Set credentials in your shell:
 
@@ -98,12 +97,13 @@ docker run --rm twi:local doctor
 docker compose run --rm doctor
 ```
 
-`doctor` diagnostics are partially shipped: they report credential presence,
-Twitch OAuth identity/expiry/scope validation, refresh availability, username
-mismatch, Twitch IRC reachability, terminal hints, Kitty/Ghostty signals, cache
-writability, and feature modes. `doctor` is safe to share only after you
-personally review the output. It redacts OAuth tokens and client secrets, but
-local paths and terminal details may still be private.
+`doctor` diagnostics report credential presence, Twitch OAuth
+identity/expiry/scope validation, refresh availability, username mismatch,
+Twitch IRC reachability, terminal hints, Kitty/Ghostty signals, cache
+writability/pruning, image capability, live image-stack readiness, and feature
+modes. `doctor` is safe to share only after you personally review the output. It
+redacts OAuth tokens and client secrets, but local paths and terminal details
+may still be private.
 
 ## Use A Mounted Config File
 

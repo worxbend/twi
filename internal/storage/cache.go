@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -889,8 +888,5 @@ func writeContext(ctx context.Context, dst io.Writer, data []byte) error {
 }
 
 func renameReplace(oldPath, newPath string) error {
-	if runtime.GOOS == "windows" {
-		_ = os.Remove(newPath)
-	}
 	return os.Rename(oldPath, newPath)
 }

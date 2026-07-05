@@ -14,7 +14,6 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/gempir/go-twitch-irc/v4 v4.4.1
 	github.com/rivo/uniseg v0.4.7
-	golang.org/x/sys v0.46.0
 	golang.org/x/term v0.44.0
 )
 
@@ -37,6 +36,7 @@ require (
 	golang.org/x/exp/typeparams v0.0.0-20231108232855-2478ac86f678 // indirect
 	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260625142307-59b4966ccb57 // indirect
 	golang.org/x/text v0.3.8 // indirect
 	golang.org/x/tools v0.47.0 // indirect

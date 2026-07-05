@@ -1,14 +1,13 @@
 # Risk Register
 
 Status: Risk register aligned with the release-candidate MVP. Mock chat is
-ready; multi-channel live IRC read/send, diagnostics, multi-channel UX, redacted
-debug logging, release binary/container packaging, and inline image plumbing are
-partial or current for their documented paths; on supported Unix builds login
-can save through the restrictive credential file fallback; on Windows builds it
-can save through native Credential Manager; setup can write non-secret config
-and hand off to login; refreshed IRC tokens are saved through the supported
-credential store when available. Credentialed Twitch release validation, native
-Windows-host credential smoke evidence, exact Docker CLI validation, and manual
+ready; diagnostics are ready; multi-channel live IRC read/send, multi-channel
+UX, redacted debug logging, release binary/container packaging, and inline image
+plumbing are partial or current for their documented paths; on supported Unix
+builds login can save through the restrictive credential file fallback; setup
+can write non-secret config and hand off to login; refreshed IRC tokens are
+saved through the supported credential store when available. Credentialed
+Twitch release validation, exact Docker CLI validation, and manual
 Kitty/Ghostty image validation remain environment-dependent.
 
 Credential assumption: Twitch username/token values currently come from
@@ -36,7 +35,7 @@ Likelihood and impact use `Low`, `Medium`, or `High`.
 | RR-013 | Twitch Helix/API outages or quota issues break avatars, badges, emotes, or token validation. | Medium | Medium | Treat asset/API data as optional; cache metadata; keep chat read/send usable without assets. | Twitch integration engineer and asset/image engineer | Fake API failure tests; fallback golden snapshots; manual degraded-mode status. |
 | RR-014 | Visual design becomes a debug console or unreadable in small terminals. | Medium | Medium | Define layout snapshots; correct low-contrast username colors; hide sidebar/status details in narrow mode. | Core TUI engineer and rendering engineer | Golden layouts at narrow/normal/wide widths; manual resize check. |
 | RR-015 | OAuth login UX is blocked by Twitch app registration or local callback constraints. | Medium | Medium | Keep MVP token config path; support a localhost callback flow with clear dry-run and fallback docs; document redirect URI requirements. | Twitch integration engineer | Login command tests; auth docs; manual token setup docs; redaction checkpoint. |
-| RR-016 | Stored credentials are created through an unsafe platform backend. | Medium | High | Keep credential persistence behind `CredentialStore`; support the file fallback only on Unix builds; require exact `0700` credential directories, `0600` credential files, symlink rejection, and no-follow opens; never enable a Windows credential file; use native Windows Credential Manager for Windows saved credentials; keep other non-Unix targets deferred until a backend is selected. | Twitch integration engineer and QA/release engineer | Storage permission unit tests; non-Unix gated tests; Windows Credential Manager adapter tests; `config show`/`doctor` redaction checks; manual docs review. |
+| RR-016 | Stored credentials are created through an unsafe platform backend. | Medium | High | Keep credential persistence behind `CredentialStore`; support the file fallback only on Unix builds; require exact `0700` credential directories, `0600` credential files, symlink rejection, and no-follow opens; keep non-Unix saved credentials disabled. | Twitch integration engineer and QA/release engineer | Storage permission unit tests; non-Unix gated tests; `config show`/`doctor` redaction checks; manual docs review. |
 | RR-017 | Release artifacts are treated as fully published despite incomplete environment-specific validation. | Medium | Medium | Keep the release dry-run credential-free; separate Docker, credentialed Twitch, Kitty/Ghostty, registry, signing, notarization, and package-manager claims from the automated artifact build; document skipped environment checks explicitly. | QA/release engineer | Release dry-run artifacts and checksums; exact Docker CLI smokes in final validation; manual-validation evidence for credentialed and terminal-specific checks. |
 
 ## Highest Early Risks

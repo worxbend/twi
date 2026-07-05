@@ -43,11 +43,10 @@ Behavior:
   returned token with Twitch, and prints only identity/scope status. Access
   tokens, refresh tokens, callback codes, OAuth state, authorization URLs, and
   client secrets are not printed. Successful logins save tokens through the
-  private credential store on supported platforms. Unix builds use the
-  restrictive credential-file fallback; Windows builds use native Windows
-  Credential Manager. Other non-Unix builds keep saved credentials disabled, so
-  use environment variables or a private flat config file. Environment variables
-  and flat config credentials still take precedence when present.
+  private credential store on supported Unix platforms. Non-Unix builds keep
+  saved credentials disabled, so use environment variables or a private flat
+  config file there. Environment variables and flat config credentials still
+  take precedence when present.
 
 Flags:
 `
@@ -286,7 +285,7 @@ func validateLoginConfig(request auth.LoginRequest) error {
 		missing = append(missing, "--redirect-uri")
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("login requires %s; existing env/config token credentials still work for `twi chat`, and saved credentials are used on supported platforms when those sources are empty", strings.Join(missing, " and "))
+		return fmt.Errorf("login requires %s; existing env/config token credentials still work for `twi chat`, and saved credentials are used on supported Unix platforms when those sources are empty", strings.Join(missing, " and "))
 	}
 	return nil
 }
@@ -305,7 +304,7 @@ func printLoginDryRun(stdout io.Writer, cfg config.Config, redirectURI string, t
 	fmt.Fprintf(stdout, "Client ID: %s\n", presentMissing(cfg.Twitch.ClientID))
 	fmt.Fprintf(stdout, "Client secret: %s\n", presentMissing(cfg.Twitch.ClientSecret))
 	fmt.Fprintln(stdout, "Real login opens a browser and waits for a localhost callback.")
-	fmt.Fprintln(stdout, "On supported platforms, tokens are validated, saved privately, and never printed.")
+	fmt.Fprintln(stdout, "On supported Unix platforms, tokens are validated, saved privately, and never printed.")
 	fmt.Fprintln(stdout, "For live chat, saved credentials are used when environment variables or flat config credentials are empty.")
 }
 
@@ -469,8 +468,6 @@ func openBrowser(ctx context.Context, targetURL string) error {
 	switch runtime.GOOS {
 	case "darwin":
 		candidates = append(candidates, []string{"open", targetURL})
-	case "windows":
-		candidates = append(candidates, []string{"rundll32", "url.dll,FileProtocolHandler", targetURL})
 	default:
 		candidates = append(candidates, []string{"xdg-open", targetURL})
 	}
