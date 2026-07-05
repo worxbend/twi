@@ -1,6 +1,6 @@
 # Quickstart
 
-This guide assumes nothing except a terminal and either Go or Docker. It keeps to what `twi` can do today.
+This guide assumes nothing except a terminal and either Go or Docker. It keeps to what `twi` can do today. For the full documentation map, read [index.md](index.md); for failure diagnosis, read [troubleshooting.md](troubleshooting.md).
 
 ## 1. Pick Your Path
 
@@ -62,7 +62,7 @@ the primary path.
 
 ## 4. Configure Live Twitch Chat
 
-Live mode is partially shipped: it supports one or more Twitch channels over IRC with read, send, selected-message replies, `/me` actions, keyboard-first channel switching/sidebar state, command palette actions, optional mouse controls, and selected-message inspect diagnostics. `twi setup` can write non-secret config values and hand off to login. On supported platforms, `twi login` can validate an OAuth browser/callback flow and save returned tokens without printing them. Unix builds use the restrictive credential-file fallback; Windows builds use native Windows Credential Manager.
+Live mode is partially shipped: it supports one or more Twitch channels over IRC with startup token validation when Twitch OAuth validation is reachable, read, send, selected-message replies, `/me` actions, keyboard-first channel switching/sidebar state, command palette actions, optional mouse controls, and selected-message inspect diagnostics. `twi setup` can write non-secret config values and hand off to login. On supported Unix platforms, `twi login` can validate an OAuth browser/callback flow and save returned tokens through the restrictive credential-file fallback without printing them. Non-Unix builds keep saved credentials disabled.
 
 You need:
 
@@ -71,7 +71,11 @@ You need:
 - `chat:read` scope to read chat.
 - `chat:edit` scope to send chat.
 
-Username/token credentials currently come from environment variables, the flat config file, or saved credentials on supported platforms. Environment and flat config values take precedence over saved credentials. CLI flags currently override channels and config path, not username or token values.
+Definitive malformed, expired, wrong-user, or missing-scope token states stop
+live startup before IRC connects. If Twitch OAuth validation itself is
+temporarily unreachable, `twi chat` warns and lets IRC authentication decide.
+
+Username/token credentials currently come from environment variables, the flat config file, or saved credentials on supported Unix platforms. Environment and flat config values take precedence over saved credentials. CLI flags currently override channels and config path, not username or token values.
 
 Guided setup:
 
@@ -99,14 +103,12 @@ go run ./cmd/twi login --dry-run
 For the real OAuth flow, set `TWITCH_CLIENT_ID`/`TWITCH_CLIENT_SECRET` or the
 canonical `TWI_TWITCH_CLIENT_ID`/`TWI_TWITCH_CLIENT_SECRET` names and register
 `http://127.0.0.1:17643/oauth/twitch/callback` on the Twitch app. On supported
-platforms, the command validates returned tokens, saves them privately, and
-never prints them. The Unix credential file fallback uses a separate private
+Unix platforms, the command validates returned tokens, saves them privately, and
+never prints them. The credential file fallback uses a separate private
 `credentials.json` under a `0700` platform config directory with `0600` file
-permissions, symlink rejection, and no-follow file opens. Windows saved
-credentials use native Windows Credential Manager target
-`w0rxbend/twi/twitch-oauth` instead of a JSON credential file. Other non-Unix
-builds keep saved credentials disabled; use environment variables or a private
-flat config file there.
+permissions, symlink rejection, and no-follow file opens. Non-Unix builds keep
+saved credentials disabled; use environment variables or a private flat config
+file there.
 
 Environment variable setup:
 
@@ -134,7 +136,7 @@ docker run --rm -it \
 
 The app also accepts the older canonical names `TWI_TWITCH_USERNAME` and `TWI_TWITCH_OAUTH_TOKEN`. If you use `TWITCH_ACCESS_TOKEN` without the `oauth:` prefix, `twi` adds the prefix before opening Twitch IRC.
 
-If `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, and `TWITCH_REFRESH_TOKEN` are set, `twi` tries one token refresh when Twitch IRC rejects the access token during login. On supported platforms, refreshed tokens are saved through the private credential store. If saving is unavailable or fails, `twi` keeps the refreshed tokens in memory for the current chat session and reports a redacted warning. It does not write refreshed tokens back to `.env`.
+If `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, and `TWITCH_REFRESH_TOKEN` are set, `twi` tries one token refresh when Twitch IRC rejects the access token during login. On supported Unix platforms, refreshed tokens are saved through the private credential store. If saving is unavailable or fails, `twi` keeps the refreshed tokens in memory for the current chat session and reports a redacted warning. It does not write refreshed tokens back to `.env`.
 
 ## 5. Use A Config File Instead
 

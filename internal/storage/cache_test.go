@@ -261,8 +261,8 @@ func TestDiskAssetCacheReportsFilesystemFailures(t *testing.T) {
 }
 
 func TestDiskAssetCacheReportsPermissionFailures(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("chmod write denial is not portable on Windows")
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("chmod write-denial checks are Unix-specific")
 	}
 	root := filepath.Join(t.TempDir(), "readonly")
 	if err := os.Mkdir(root, 0o700); err != nil {
@@ -643,8 +643,8 @@ func TestDiskAssetCachePruneHonorsContextCancellation(t *testing.T) {
 }
 
 func TestDiskAssetCachePruneReportsCleanupFailures(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("chmod cleanup denial is not portable on Windows")
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("chmod cleanup-denial checks are Unix-specific")
 	}
 	root := t.TempDir()
 	cache := NewDiskAssetCache(root)
@@ -790,8 +790,8 @@ func TestDiskAssetCacheRejectsCredentialBearingKeysAndPaths(t *testing.T) {
 }
 
 func TestDefaultAssetCacheDirUsesPlatformCacheDir(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("XDG_CACHE_HOME does not define UserCacheDir on Windows")
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("XDG cache-dir checks are Unix-specific")
 	}
 	dir := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", dir)

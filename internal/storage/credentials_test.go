@@ -17,6 +17,17 @@ import (
 	"github.com/w0rxbend/twi/internal/auth"
 )
 
+func skipIfNotUnix(t *testing.T, reason string) {
+	t.Helper()
+
+	switch runtime.GOOS {
+	case "aix", "android", "darwin", "dragonfly", "freebsd", "hurd", "illumos", "ios", "linux", "netbsd", "openbsd", "solaris":
+		return
+	default:
+		t.Skip(reason)
+	}
+}
+
 func TestCredentialRecordFromLoginResultAndRedaction(t *testing.T) {
 	updatedAt := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
 	expiresAt := updatedAt.Add(time.Hour)
@@ -287,9 +298,7 @@ func TestCredentialFileStoreOverwriteReplacesAtomicallyWithoutTempFiles(t *testi
 }
 
 func TestCredentialFileStoreFailedSaveKeepsExistingFile(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("directory mode write-denial check is Unix-specific")
-	}
+	skipIfNotUnix(t, "directory mode write-denial check is Unix-specific")
 
 	dir := filepath.Join(t.TempDir(), "twi")
 	path := filepath.Join(dir, "credentials.json")
@@ -438,9 +447,7 @@ func TestCredentialFileStoreRejectsUnsafePermissions(t *testing.T) {
 }
 
 func TestCredentialFileStoreRejectsSymlinkWithoutFollowing(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink permissions vary on Windows")
-	}
+	skipIfNotUnix(t, "symlink permission checks are Unix-specific")
 
 	dir := filepath.Join(t.TempDir(), "twi")
 	if err := os.MkdirAll(dir, CredentialDirectoryMode); err != nil {
@@ -500,9 +507,7 @@ func TestCredentialFileStoreRejectsSymlinkWithoutFollowing(t *testing.T) {
 }
 
 func TestCredentialFileStoreRejectsSymlinkDirectoryWithoutFollowing(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink permissions vary on Windows")
-	}
+	skipIfNotUnix(t, "symlink permission checks are Unix-specific")
 
 	realDir := filepath.Join(t.TempDir(), "real")
 	if err := os.MkdirAll(realDir, CredentialDirectoryMode); err != nil {

@@ -15,7 +15,6 @@ The release script builds these targets by default:
 | linux | arm64 | `twi_linux_arm64` |
 | darwin | amd64 | `twi_darwin_amd64` |
 | darwin | arm64 | `twi_darwin_arm64` |
-| windows | amd64 | `twi_windows_amd64.exe` |
 
 Each binary is built with:
 
@@ -61,10 +60,9 @@ twi --help
 ```
 
 macOS users can verify with `shasum -a 256 -c twi_darwin_arm64.sha256` when
-`sha256sum` is unavailable. Windows builds are emitted as
-`twi_windows_amd64.exe`. No package-manager manifest, signing, notarization,
-registry publishing, or SBOM/provenance step is implemented in this release
-candidate path.
+`sha256sum` is unavailable. No unsupported OS artifact, package-manager
+manifest, signing, notarization, registry publishing, or SBOM/provenance step
+is implemented in this release candidate path.
 
 ## Container Usage
 

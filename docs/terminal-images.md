@@ -1,6 +1,6 @@
 # Terminal Images
 
-`twi` supports fallback-safe inline image plumbing for avatars, Twitch emotes, and standard emoji in capable terminals. The Kitty-compatible renderer core exists behind the internal image renderer boundary, and chat rows can reserve image placeholders and substitute prepared image cells without changing fallback text. The current MVP implements ready text, Unicode, initials, compact badge, and emote-token fallbacks; live avatar, badge, emote, and standard emoji metadata can be resolved and cached, and visible-row asset events can prepare fixed-width image cells without blocking input.
+`twi` supports fallback-safe inline image plumbing for avatars, Twitch emotes, and standard emoji in capable terminals. The Kitty-compatible renderer core exists behind the internal image renderer boundary, and chat rows can reserve image placeholders and substitute prepared image cells without changing fallback text. The current MVP implements ready text, Unicode, initials, compact badge, and emote-token fallbacks; live avatar, badge, emote, and standard emoji metadata can be resolved and cached, and visible-row asset events can prepare fixed-width image cells without blocking input. For setup failures, read [troubleshooting.md](troubleshooting.md); for manual evidence, read [manual-validation.md](manual-validation.md).
 
 ## Current State
 

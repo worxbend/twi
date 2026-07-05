@@ -360,7 +360,7 @@ func (c *IRCClient) refreshPersistenceWarning(err error, refreshed OAuthRefresh,
 		refreshed.RefreshToken,
 	)
 	detail := redactIRCError(redactor.Redact(err.Error()))
-	return "warning: Twitch IRC refreshed OAuth credentials but could not save them (" + detail + "); using refreshed credentials in memory for this chat session only. Run `twi login` on a supported platform or update env/config credentials before the next session."
+	return "warning: Twitch IRC refreshed OAuth credentials but could not save them (" + detail + "); using refreshed credentials in memory for this chat session only. Run `twi login` on a supported Unix platform or update env/config credentials before the next session."
 }
 
 func credentialSafeIRCError(err error) error {

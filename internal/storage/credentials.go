@@ -103,8 +103,7 @@ func (r CredentialRecord) Clone() CredentialRecord {
 }
 
 // CredentialFilePlan describes the restrictive local JSON file fallback. This
-// plan is intentionally separate from the current flat config file and from any
-// future OS keychain backend.
+// plan is intentionally separate from the current flat config file.
 type CredentialFilePlan struct {
 	Path          string
 	DirectoryMode fs.FileMode

@@ -7,24 +7,22 @@ Progress as of the initial swarm pass:
 
 - Done: Phase 0 requirements matrix, risk register, backlog, and six ADRs.
 - Done: Go module bootstrap, CLI shell, config precedence/redaction tests, normalized message model skeleton, Bubble Tea mock chat shell, module tool directives for `govulncheck`/`staticcheck`, Twitch IRC read adapter, the active-channel composer send queue, selected-message replies, `/me` action sends, and per-channel live routing.
-- Current status labels: mock chat is ready; multi-channel live IRC read/send,
-  multi-channel UX, diagnostics, redacted debug logging, inline image plumbing,
-  OAuth login, setup, release binary/container packaging, Unix restrictive
-  credential-file persistence, and Windows Credential Manager persistence are
-  partial or current for their documented paths, including refreshed-token
-  persistence through the supported credential store. Credentialed Twitch
-  release validation, native Windows-host credential smoke evidence, and manual
-  Kitty/Ghostty image validation remain environment-dependent.
+- Current status labels: mock chat and diagnostics are ready; multi-channel live IRC read/send,
+  multi-channel UX, redacted debug logging, inline image plumbing,
+  OAuth login, setup, release binary/container packaging, and Unix restrictive
+  credential-file persistence are partial or current for their documented
+  paths, including refreshed-token persistence through the supported credential
+  store. Credentialed Twitch release validation and manual Kitty/Ghostty image
+  validation remain environment-dependent.
   Active live IRC reconnect restart and per-channel local filters are
   implemented.
 - Credential rule: Twitch username/token values currently come from
   environment variables, the flat config file, or saved credentials on
-  supported platforms; environment and flat config values take precedence over
+  supported Unix platforms; environment and flat config values take precedence over
   saved credentials, and CLI overrides cover channel and config path.
 - Remaining validation limits are environment-dependent: credentialed Twitch
-  release checks, exact Docker CLI smokes on a Docker-enabled host, native
-  Windows-host Credential Manager smoke evidence, and manual Kitty/Ghostty
-  inline image drawing.
+  release checks, exact Docker CLI smokes on a Docker-enabled host, and manual
+  Kitty/Ghostty inline image drawing.
 
 Each task is intended to fit one implementation loop. Agents should keep write scope to
 the listed files where possible and use fakes before network-dependent code.
@@ -188,7 +186,7 @@ Implementation notes: Completed in T016 with config path state, credential prese
 Acceptance criteria: `twi doctor` runs without Twitch credentials and never prints secrets.
 Verification: Unit tests for diagnostic redaction; manual `go run ./cmd/twi doctor`.
 Risks: Terminal feature detection may be incomplete initially.
-Follow-ups: Add startup token validation and interactive auth recovery.
+Follow-ups: Add interactive auth recovery for failed live-chat credentials.
 
 ## Expanded Implementation Plan
 
@@ -207,8 +205,8 @@ Owner lane: QA/release engineer.
 Goal: Make README, quickstart, config, auth, Docker, terminal image docs, and
 the product requirements describe the same shipped behavior.
 Context: Several docs mention planned work that is now partially implemented,
-while image drawing evidence, credentialed Twitch evidence, and non-Unix
-credential storage remain planned or environment-dependent.
+while image drawing evidence and credentialed Twitch evidence remain
+environment-dependent. Non-Unix saved credentials are out of scope.
 Files likely touched: `README.md`, `docs/quickstart.md`, `docs/auth.md`,
 `docs/config.md`, `docs/development.md`, `docs/terminal-images.md`,
 `docs/product/requirements.md`.
@@ -538,17 +536,15 @@ Task: Implement `twi login` OAuth device flow or local callback flow.
 Owner lane: Auth/platform engineer.
 Goal: Let users validate Twitch OAuth credentials without manually pasting
 tokens into terminal output.
-Context: On supported Unix and Windows builds, the CLI wires `twi login` to a
+Context: On supported Unix builds, the CLI wires `twi login` to a
 browser/local-callback flow and saves successful login results through the
-private credential store. Unix builds use the restrictive credential-file
-fallback. Windows builds use native Credential Manager instead of a JSON
-credential file. Setup can hand off to this same login/storage path.
+private credential store. Setup can hand off to this same login/storage path.
 Files likely touched: `internal/cli`, `internal/config`, `internal/twitch`,
 `docs/auth.md`, `docs/quickstart.md`.
 Implementation notes: The implemented flow requests only required scopes first:
 `chat:read` and `chat:edit`, opens a browser, waits on a localhost callback, and
 does not print token values.
-Acceptance criteria: On supported platforms, login validates the resulting
+Acceptance criteria: On supported Unix platforms, login validates the resulting
 token, saves it through the credential store, and prints safe next steps.
 Unsupported non-Unix builds report a redacted actionable storage error before
 opening the browser.
@@ -569,17 +565,16 @@ Files likely touched: `internal/storage`, `internal/config`, `internal/cli`,
 Implementation notes: Implement the fallback file on Unix builds with exact
 `0700` directory and `0600` file permissions before advertising saved login
 credentials. Keep env/config compatibility. Disable non-Unix fallback behavior
-unless a native backend is selected. Windows uses native Credential Manager
-instead of a JSON credential file. Do not claim OS keychain support unless a
-backend is actually implemented and platform behavior is documented.
-Acceptance criteria: On supported platforms, `twi login` can save credentials
-through the boundary; fallback files are never group/world-accessible; Windows
-does not use a credential file; config output, doctor, and errors stay
-redacted. Unsupported non-Unix builds do not imply Unix mode semantics.
-Verification: Interface fake tests; fallback permission tests; non-Unix
-platform-gated tests; redaction tests.
-Risks: Cross-platform keychain behavior can be brittle in CI and containers if
-added later.
+by product scope. Do not claim any credential backend beyond the Unix
+credential-file store.
+Acceptance criteria: On supported Unix platforms, `twi login` can save credentials
+through the boundary; fallback files are never group/world-accessible; config
+output, doctor, and errors stay redacted. Unsupported non-Unix builds do not
+imply Unix mode semantics.
+Verification: Interface fake tests; fallback permission tests; unsupported
+non-Unix platform-gated tests; redaction tests.
+Risks: Non-Unix builds must keep failing closed for saved credentials rather
+than implying Unix permission semantics.
 Follow-ups: Config migration helper.
 
 Task: Add first-run setup wizard.

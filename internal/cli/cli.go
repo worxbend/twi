@@ -93,6 +93,10 @@ var newDoctorTokenValidator = func() twitch.TokenValidator {
 	})
 }
 
+var newLiveTokenValidator = func() twitch.TokenValidator {
+	return newDoctorTokenValidator()
+}
+
 var doctorReachabilityProbe = app.ProbeTwitchIRCReachability
 
 var doctorCacheDir = func() string {
@@ -222,6 +226,14 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 	if err := validateLiveChatConfig(cfg); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
+	}
+	if warning, err := validateLiveChatToken(context.Background(), cfg, newLiveTokenValidator()); err != nil {
+		logger.Log(context.Background(), "cli.chat.token_validation_failed", slog.String("error", err.Error()))
+		fmt.Fprintln(stderr, err)
+		return 2
+	} else if warning != "" {
+		logger.Log(context.Background(), "cli.chat.token_validation_warning", slog.String("warning", warning))
+		fmt.Fprintln(stderr, warning)
 	}
 
 	client, err := newLiveChatClient(context.Background(), cfg, logger, status)
@@ -367,6 +379,87 @@ func validateLiveChatConfig(cfg config.Config) error {
 		return fmt.Errorf("missing Twitch credentials: set %s for live chat, or run `twi chat --mock`; OAuth token must include chat:read and chat:edit", strings.Join(missing, " and "))
 	}
 	return nil
+}
+
+func validateLiveChatToken(ctx context.Context, cfg config.Config, validator twitch.TokenValidator) (string, error) {
+	if validator == nil {
+		return "warning: Twitch OAuth token validation is unavailable; continuing to IRC authentication. Run `twi doctor` to verify token identity, expiry, and scopes.", nil
+	}
+
+	credentials := twitch.TokenCredentials{
+		Username:     cfg.Twitch.Username,
+		OAuthToken:   cfg.Twitch.OAuthToken,
+		RefreshToken: cfg.Twitch.RefreshToken,
+		ClientID:     cfg.Twitch.ClientID,
+		ClientSecret: cfg.Twitch.ClientSecret,
+	}
+	validation, err := validator.ValidateToken(ctx, credentials)
+	redactor := auth.NewRedactor(
+		auth.NewSecret(cfg.Twitch.OAuthToken),
+		auth.NewSecret(cfg.Twitch.RefreshToken),
+		auth.NewSecret(cfg.Twitch.ClientSecret),
+	)
+	if err != nil {
+		detail := config.RedactDisplayValue(redactor.Redact(err.Error()))
+		return "warning: Twitch OAuth token validation failed (" + detail + "); continuing to IRC authentication. Run `twi doctor` to verify token identity, expiry, and scopes.", nil
+	}
+
+	mismatch := liveTokenUsernameMismatch(cfg.Twitch.Username, validation.Identity.Login)
+	if validation.Status == twitch.TokenValidationWrongUser {
+		return "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, mismatch))
+	}
+	if validation.Status == twitch.TokenValidationValid && mismatch != "" {
+		return "", liveTokenValidationError(redactor, mismatch)
+	}
+
+	missing := validation.MissingScopes
+	if len(missing) == 0 {
+		missing = twitch.MissingRequiredIRCScopes(validation.Scopes)
+	}
+	if validation.Status == twitch.TokenValidationValid && len(missing) == 0 {
+		return "", nil
+	}
+	if len(missing) > 0 {
+		return "", liveTokenValidationError(redactor, "missing required scopes: "+strings.Join(auth.ScopeValues(missing), ", "))
+	}
+
+	switch validation.Status {
+	case twitch.TokenValidationMalformed:
+		return "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, "malformed OAuth token"))
+	case twitch.TokenValidationExpired:
+		return "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, "OAuth token expired"))
+	case twitch.TokenValidationWrongUser:
+		return "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, mismatch))
+	case twitch.TokenValidationMissingScope:
+		return "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, "missing required IRC scope"))
+	default:
+		return "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, "token validation returned unknown state"))
+	}
+}
+
+func liveTokenValidationError(redactor auth.Redactor, detail string) error {
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		detail = "token is not valid for live IRC chat"
+	}
+	detail = config.RedactDisplayValue(redactor.Redact(detail))
+	return fmt.Errorf("twitch OAuth token validation failed: %s. Run `twi doctor`; live chat requires chat:read and chat:edit scopes, matching username, and an unexpired token. Use `twi chat --mock` for credential-free mode", detail)
+}
+
+func liveTokenValidationDetail(validation twitch.TokenValidationResult, fallback string) string {
+	if detail := strings.TrimSpace(validation.Detail); detail != "" {
+		return detail
+	}
+	return fallback
+}
+
+func liveTokenUsernameMismatch(configured, actual string) string {
+	configured = strings.TrimSpace(configured)
+	actual = strings.TrimSpace(actual)
+	if configured == "" || actual == "" || strings.EqualFold(configured, actual) {
+		return ""
+	}
+	return fmt.Sprintf("configured username %q does not match token identity %q", configured, actual)
 }
 
 func runConfig(args []string, stdout, stderr io.Writer) int {

@@ -413,8 +413,8 @@ func TestWriteNonSecretFileUpdatesAllowedKeysAndPreservesExistingSecrets(t *test
 }
 
 func TestDefaultCacheDirUsesPlatformCacheDir(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("XDG_CACHE_HOME does not define UserCacheDir on Windows")
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("XDG cache-dir checks are Unix-specific")
 	}
 	dir := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", dir)
