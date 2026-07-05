@@ -21,7 +21,7 @@ The project is currently an MVP-shaped Go app for Unix-like terminals and Docker
         +---------------------------------------------+
         | twi chat --mock                             |
         |                                             |
-        |  ariadne  chat in a terminal, but cute      |
+        |  streamer chat in a terminal, but cute      |
         |  modbot   replies, /me, resize, scroll      |
         |  you      no browser tab circus required    |
         +---------------------------------------------+
