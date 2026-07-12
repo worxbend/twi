@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/w0rxbend/twi/internal/animation"
+	"github.com/w0rxbend/twi/internal/render"
 	"github.com/w0rxbend/twi/internal/twitch"
 )
 
@@ -58,7 +59,68 @@ func (m *mockShellModel) toggleCommandPalette() {
 		m.palette = commandPaletteState{}
 		return
 	}
+	m.closeOtherOverlays("palette")
 	m.palette = commandPaletteState{open: true}
+	m.refreshPaletteReveal(time.Now())
+}
+
+// refreshPaletteReveal (re)builds the command-palette typewriter reveal
+// whenever the visible result lines change (query edits, selection moves,
+// resize) and advances it when the content is unchanged. Reuses the same
+// internal/animation Sequence machinery that reveals chat rows.
+func (m *mockShellModel) refreshPaletteReveal(now time.Time) {
+	if !m.palette.open || m.animationMode == string(animation.ModeOff) {
+		m.paletteRevealSeq = animation.Sequence{}
+		m.paletteRevealKey = ""
+		return
+	}
+	layout := m.layout()
+	if layout.paletteContentHeight <= 0 {
+		return
+	}
+	contentWidth := layout.width
+	if layout.paletteFramed {
+		contentWidth = clampMin(layout.width-4, 1)
+	}
+	lines := m.commandPaletteLines(contentWidth, layout.paletteContentHeight)
+	key := strings.Join(lines, "\x00")
+	if key == m.paletteRevealKey {
+		m.paletteRevealSeq.Advance(now)
+		return
+	}
+	m.paletteRevealKey = key
+	m.paletteRevealSeq = animation.NewSequence(paletteLinesToRows(lines), mockAnimationConfig(m.animationMode), now)
+}
+
+func paletteLinesToRows(lines []string) []render.Row {
+	rows := make([]render.Row, len(lines))
+	for i, line := range lines {
+		if line == "" {
+			continue
+		}
+		rows[i] = render.Row{Fragments: []render.Fragment{{Kind: render.FragmentText, Text: line}}}
+	}
+	return rows
+}
+
+// paletteRevealedLines substitutes the typewriter-revealed partial text for
+// each line when animation is enabled and the reveal state matches the
+// current content; otherwise it falls back to the fully rendered lines
+// (animation off, or a resize/content change the reveal hasn't caught up to
+// yet, which self-heals on the next tick).
+func (m mockShellModel) paletteRevealedLines(lines []string, width int) []string {
+	if m.animationMode == string(animation.ModeOff) {
+		return lines
+	}
+	frame := m.paletteRevealSeq.Frame()
+	if len(frame) != len(lines) {
+		return lines
+	}
+	out := make([]string, len(lines))
+	for i, row := range frame {
+		out[i] = fitLine(row.Plain(), width)
+	}
+	return out
 }
 
 func (m mockShellModel) handleCommandPaletteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -85,6 +147,7 @@ func (m mockShellModel) handleCommandPaletteKey(msg tea.KeyMsg) (tea.Model, tea.
 		m.palette.selected = 0
 	}
 	m.clampPaletteSelection()
+	m.refreshPaletteReveal(time.Now())
 	return m, nil
 }
 
@@ -276,6 +339,7 @@ func (m mockShellModel) commandPaletteView(layout mockShellLayout) string {
 		contentWidth = clampMin(layout.width-4, 1)
 	}
 	lines := m.commandPaletteLines(contentWidth, layout.paletteContentHeight)
+	lines = m.paletteRevealedLines(lines, contentWidth)
 	content := strings.Join(lines, "\n")
 	if !layout.paletteFramed {
 		return fitBlock(content, layout.width, layout.paletteHeight)
@@ -284,7 +348,7 @@ func (m mockShellModel) commandPaletteView(layout mockShellLayout) string {
 		Width(clampMin(layout.width-2, 0)).
 		Height(layout.paletteContentHeight).
 		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("#f9e2af")).
+		BorderForeground(lipgloss.Color(m.theme.Accent)).
 		Padding(0, 1).
 		Render(content)
 }
@@ -347,6 +411,7 @@ func paletteWindowStart(selected, total, height int) int {
 
 func (m *mockShellModel) switchChannelBy(delta int) tea.Cmd {
 	if m.channels.switchBy(delta) {
+		m.triggerSceneFlash()
 		m.clampScroll()
 		return m.asyncAssetCommand()
 	}
@@ -355,6 +420,7 @@ func (m *mockShellModel) switchChannelBy(delta int) tea.Cmd {
 
 func (m *mockShellModel) switchChannel(channel string) tea.Cmd {
 	if m.channels.setActive(channel) {
+		m.triggerSceneFlash()
 		m.clampScroll()
 		return m.asyncAssetCommand()
 	}

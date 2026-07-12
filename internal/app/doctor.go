@@ -15,6 +15,7 @@ import (
 	"github.com/w0rxbend/twi/internal/config"
 	"github.com/w0rxbend/twi/internal/render"
 	"github.com/w0rxbend/twi/internal/storage"
+	"github.com/w0rxbend/twi/internal/theme"
 	"github.com/w0rxbend/twi/internal/twitch"
 )
 
@@ -83,6 +84,7 @@ func DoctorWithOptions(ctx context.Context, cfg config.Config, opts DoctorOption
 		imageStackCheck(cfg, opts.Environ, opts.CacheDir),
 		cachePruningCheck(ctx, opts.CacheDir),
 		featureModesCheck(cfg.Features),
+		streamStatusCheck(cfg),
 	}
 
 	for i := range checks {
@@ -385,13 +387,16 @@ func assetCacheDir(cacheDir string) (string, error) {
 
 func featureModesCheck(features config.FeatureConfig) DoctorCheck {
 	detail := fmt.Sprintf(
-		"image=%s avatar=%s emoji=%s emoji_provider=%s emote=%s animation=%s kitty=%t mouse=%t",
+		"image=%s avatar=%s emoji=%s emoji_provider=%s emote=%s animation=%s theme=%s stream_status=%s emote_autocomplete=%s kitty=%t mouse=%t",
 		features.ImageMode,
 		features.AvatarMode,
 		features.EmojiMode,
 		features.EmojiProvider,
 		features.EmoteMode,
 		features.AnimationMode,
+		features.ThemeName,
+		features.StreamStatusMode,
+		features.EmoteAutocompleteMode,
 		features.EnableKittyImages,
 		features.EnableMouse,
 	)
@@ -421,7 +426,36 @@ func unknownFeatureModes(features config.FeatureConfig) []string {
 	if !oneOf(features.AnimationMode, "off", "reduced", "fast") {
 		unknown = append(unknown, "animation="+features.AnimationMode)
 	}
+	if strings.TrimSpace(features.ThemeName) != "" && !oneOf(features.ThemeName, append(theme.PresetNames(), "custom")...) {
+		unknown = append(unknown, "theme="+features.ThemeName)
+	}
+	if !oneOf(features.StreamStatusMode, "auto", "off") {
+		unknown = append(unknown, "stream_status="+features.StreamStatusMode)
+	}
+	if !oneOf(features.EmoteAutocompleteMode, "auto", "off") {
+		unknown = append(unknown, "emote_autocomplete="+features.EmoteAutocompleteMode)
+	}
 	return unknown
+}
+
+// streamStatusCheck reports whether the real-broadcast LIVE indicator can
+// poll Twitch Helix "Get Streams" (see cli.newStreamStatusResolver): it
+// needs stream_status_mode enabled plus a Client ID and OAuth token.
+func streamStatusCheck(cfg config.Config) DoctorCheck {
+	if strings.EqualFold(strings.TrimSpace(cfg.Features.StreamStatusMode), "off") {
+		return warnCheck("stream status polling", "disabled by stream_status_mode=off; the LIVE indicator will show OFFLINE")
+	}
+	var missing []string
+	if strings.TrimSpace(cfg.Twitch.ClientID) == "" {
+		missing = append(missing, "twitch_client_id")
+	}
+	if strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
+		missing = append(missing, "twitch_oauth_token")
+	}
+	if len(missing) > 0 {
+		return warnCheck("stream status polling", "unavailable until "+strings.Join(missing, " and ")+" is set; the LIVE indicator will show OFFLINE")
+	}
+	return okCheck("stream status polling", "Twitch Helix Get Streams is configured; LIVE reflects real broadcast status")
 }
 
 func tokenCredentialsFromConfig(cfg config.TwitchConfig) twitch.TokenCredentials {

@@ -153,7 +153,11 @@ Supported variables:
 | `TWI_EMOJI_PROVIDER` | No | Standard emoji image metadata provider. Defaults to `twemoji`. |
 | `TWI_EMOJI_URL_TEMPLATE` | No | Custom public emoji image URL template required when `TWI_EMOJI_PROVIDER=custom`. Use `{id}` for the normalized emoji asset key. Credential markers are rejected by the provider and redacted from `config show`. |
 | `TWI_EMOTE_MODE` | No | Twitch emote rendering mode. |
-| `TWI_ANIMATION_MODE` | No | Animation behavior. |
+| `TWI_ANIMATION_MODE` | No | Animation behavior: pulsing status indicators, scene-switch flash, startup splash, and command-palette typewriter reveal, in addition to the existing chat-row reveal speed. |
+| `TWI_THEME_NAME` | No | Active theme: one of the 13 built-in preset names, or `custom` to use the `TWI_THEME_*` hex fields below. Defaults to `claude`. |
+| `TWI_THEME_BACKGROUND` / `TWI_THEME_FOREGROUND` / `TWI_THEME_ACCENT` / `TWI_THEME_MUTED` / `TWI_THEME_BORDER` / `TWI_THEME_SURFACE` / `TWI_THEME_WARNING` / `TWI_THEME_ERROR` / `TWI_THEME_SUCCESS` | No | Custom palette hex values, only applied when `TWI_THEME_NAME=custom`. |
+| `TWI_STREAM_STATUS_MODE` | No | Enables (`auto`, default) or disables (`off`) polling Twitch Helix "Get Streams" for the status bar's real LIVE indicator. Requires `TWI_TWITCH_CLIENT_ID`/`TWI_TWITCH_OAUTH_TOKEN` either way. |
+| `TWI_EMOTE_AUTOCOMPLETE_MODE` | No | Enables (`auto`, default) or disables (`off`) fetching real Twitch global/channel emotes for the Ctrl+E picker and quick-select row. Requires Twitch API credentials either way; `--mock` always uses a built-in sample list regardless of this setting. |
 | `TWI_DEBUG_LOG` | No | Enables redacted structured debug logging when set to a true boolean value. Defaults to disabled. |
 | `TWI_DEBUG_LOG_PATH` | No | Debug log file path. If omitted while logging is enabled, `twi` writes `debug.log` under the platform cache directory. Credential-shaped path values are redacted from config and diagnostic output. |
 
@@ -194,7 +198,22 @@ Animation modes:
 - `reduced`
 - `fast`
 
-The current parser accepts mode values as strings. Animation mode currently supports `off`, `reduced`, and `fast`; `twi setup` rejects other animation modes, and `twi doctor` warns when a config file contains one. `avatar_mode = "image"` enables batched live avatar URL metadata lookup when Twitch API credentials are present. `emoji_provider = "twemoji"` uses the built-in pinned public Twemoji PNG template; `emoji_provider = "custom"` requires `emoji_url_template` with `{id}`. The Kitty renderer core exists behind the internal renderer boundary, and chat rows can substitute prepared image cells while preserving fallback text. Image, emoji, emote, and Kitty settings drive fallback rendering, diagnostics, renderer capability decisions, visible-row asset event scheduling, and live image-stack installation.
+Theme names (`theme_name`):
+
+- `claude` (default), `codex`, `btop`, `nord`, `dracula`, `gruvbox`,
+  `solarized-dark`, `monokai`, `one-dark`, `tokyo-night`, `catppuccin-mocha`,
+  `rose-pine`, `mono`
+- `custom`, using the `theme_background`/`theme_foreground`/`theme_accent`/
+  `theme_muted`/`theme_border`/`theme_surface`/`theme_warning`/`theme_error`/
+  `theme_success` hex fields
+
+Stream status mode (`stream_status_mode`) and emote autocomplete mode
+(`emote_autocomplete_mode`):
+
+- `auto` (default): enabled when Twitch API credentials are present
+- `off`: disabled regardless of credentials
+
+The current parser accepts mode values as strings. Animation mode currently supports `off`, `reduced`, and `fast`; `twi setup` rejects other animation modes, and `twi doctor` warns when a config file contains one. `avatar_mode = "image"` enables batched live avatar URL metadata lookup when Twitch API credentials are present. `emoji_provider = "twemoji"` uses the built-in pinned public Twemoji PNG template; `emoji_provider = "custom"` requires `emoji_url_template` with `{id}`. The Kitty renderer core exists behind the internal renderer boundary, and chat rows can substitute prepared image cells while preserving fallback text. Image, emoji, emote, and Kitty settings drive fallback rendering, diagnostics, renderer capability decisions, visible-row asset event scheduling, and live image-stack installation. Unknown `theme_name`, `stream_status_mode`, or `emote_autocomplete_mode` values fall back to their defaults and are reported by `twi doctor`'s feature-modes check.
 
 ## Example Config
 
@@ -216,6 +235,18 @@ emoji_provider = "twemoji"
 emoji_url_template = ""
 emote_mode = "image"
 animation_mode = "fast"
+theme_name = "claude"
+theme_background = ""
+theme_foreground = ""
+theme_accent = ""
+theme_muted = ""
+theme_border = ""
+theme_surface = ""
+theme_warning = ""
+theme_error = ""
+theme_success = ""
+stream_status_mode = "auto"
+emote_autocomplete_mode = "auto"
 debug_logging = false
 debug_log_path = ""
 ```
@@ -238,6 +269,9 @@ twi config show
 twi config path
 twi doctor
 twi login
+twi profile list
+twi profile show
+twi profile set <name>
 twi setup
 ```
 
@@ -321,7 +355,10 @@ The current diagnostics include:
 - Cache directory writability using a single fixed-content probe file that is
   removed immediately, plus asset-cache pruning status for expired entries and
   the default size budget.
-- Selected image, avatar, emoji, emote, Kitty, and animation modes.
+- Selected image, avatar, emoji, emote, animation, theme, stream-status, and
+  emote-autocomplete modes, warning on unrecognized values.
+- Stream-status polling readiness (`stream_status_mode` plus Twitch API
+  credential presence) for the status bar's real LIVE indicator.
 
 Secrets are never included in doctor details. OAuth tokens and client secrets
 are redacted from validation and probe errors before output is formatted.

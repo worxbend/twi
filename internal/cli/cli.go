@@ -20,6 +20,7 @@ import (
 	"github.com/w0rxbend/twi/internal/debuglog"
 	"github.com/w0rxbend/twi/internal/render"
 	"github.com/w0rxbend/twi/internal/storage"
+	"github.com/w0rxbend/twi/internal/theme"
 	"github.com/w0rxbend/twi/internal/twitch"
 )
 
@@ -32,6 +33,7 @@ Usage:
   twi doctor
   twi image-smoke [--force]
   twi login [--dry-run]
+  twi profile list|show|set <name>
   twi setup
 
 Environment:
@@ -55,6 +57,18 @@ Environment:
   TWI_EMOJI_URL_TEMPLATE
   TWI_EMOTE_MODE
   TWI_ANIMATION_MODE
+  TWI_THEME_NAME
+  TWI_THEME_BACKGROUND
+  TWI_THEME_FOREGROUND
+  TWI_THEME_ACCENT
+  TWI_THEME_MUTED
+  TWI_THEME_BORDER
+  TWI_THEME_SURFACE
+  TWI_THEME_WARNING
+  TWI_THEME_ERROR
+  TWI_THEME_SUCCESS
+  TWI_STREAM_STATUS_MODE
+  TWI_EMOTE_AUTOCOMPLETE_MODE
   TWI_DEBUG_LOG
   TWI_DEBUG_LOG_PATH
 `
@@ -83,7 +97,46 @@ func liveIRCTransportFactory(cfg config.Config, logger debuglog.Logger, credenti
 }
 
 var newLiveClientOptions = func(cfg config.Config) app.ClientOptions {
-	return liveClientOptions(cfg, os.Environ(), "")
+	opts := liveClientOptions(cfg, os.Environ(), "")
+	opts.StreamStatusResolver = newStreamStatusResolver(cfg)
+	opts.EmoteIndex = newEmoteIndex(cfg)
+	return opts
+}
+
+// newEmoteIndex wires Ctrl+E emote search / the quick-select row to real
+// Twitch Helix emote data. Independent of the image/asset stack decision
+// like newStreamStatusResolver: EmoteIndex is in-memory only and needs no
+// cache or image capability, just Client ID/OAuth token.
+func newEmoteIndex(cfg config.Config) *assets.EmoteIndex {
+	if strings.EqualFold(strings.TrimSpace(cfg.Features.EmoteAutocompleteMode), "off") {
+		return nil
+	}
+	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
+		return nil
+	}
+	return assets.NewEmoteIndex(twitch.NewHelixChatAssetsClient(twitch.HelixChatAssetsClientConfig{
+		HTTPClient: &http.Client{Timeout: 2 * time.Second},
+		ClientID:   cfg.Twitch.ClientID,
+		OAuthToken: cfg.Twitch.OAuthToken,
+	}))
+}
+
+// newStreamStatusResolver wires the real Twitch Helix "Get Streams" LIVE
+// indicator. It is independent of the image/asset stack decision (Get
+// Streams needs no cache or image capability), gated only on
+// stream_status_mode and Twitch API credentials.
+func newStreamStatusResolver(cfg config.Config) app.StreamStatusResolver {
+	if strings.EqualFold(strings.TrimSpace(cfg.Features.StreamStatusMode), "off") {
+		return nil
+	}
+	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
+		return nil
+	}
+	return twitch.NewHelixStreamsClient(twitch.HelixStreamsClientConfig{
+		HTTPClient: &http.Client{Timeout: 2 * time.Second},
+		ClientID:   cfg.Twitch.ClientID,
+		OAuthToken: cfg.Twitch.OAuthToken,
+	})
 }
 
 var runLiveChat = app.RunClientWithOptions
@@ -149,6 +202,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runImageSmoke(args[1:], stdout, stderr)
 	case "login":
 		return runLogin(args[1:], stdout, stderr)
+	case "profile":
+		return runProfile(args[1:], stdout, stderr)
 	case "setup":
 		return runSetup(args[1:], stdout, stderr)
 	default:
@@ -502,6 +557,142 @@ func runConfig(args []string, stdout, stderr io.Writer) int {
 	default:
 		fmt.Fprintf(stderr, "unknown config command %q\n", args[0])
 		return 2
+	}
+}
+
+// runProfile implements `twi profile list|show|set <name>`, the theme
+// management surface documented alongside the Ctrl+T settings view.
+func runProfile(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "usage: twi profile list|show|set <name>")
+		return 2
+	}
+
+	switch args[0] {
+	case "list":
+		return runProfileList(args[1:], stdout, stderr)
+	case "show":
+		return runProfileShow(args[1:], stdout, stderr)
+	case "set":
+		return runProfileSet(args[1:], stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "unknown profile command %q\n", args[0])
+		return 2
+	}
+}
+
+func runProfileList(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("profile list", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var cfgPath string
+	fs.StringVar(&cfgPath, "config", "", "config file path")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	cfg, err := config.Load(os.Environ(), config.Overrides{ConfigPath: cfgPath})
+	if err != nil {
+		fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
+		return 1
+	}
+	active := strings.ToLower(strings.TrimSpace(cfg.Features.ThemeName))
+	for _, name := range append(theme.PresetNames(), "custom") {
+		marker := "  "
+		if name == active {
+			marker = "> "
+		}
+		fmt.Fprintf(stdout, "%s%s\n", marker, name)
+	}
+	return 0
+}
+
+func runProfileShow(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("profile show", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var cfgPath string
+	fs.StringVar(&cfgPath, "config", "", "config file path")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	cfg, err := config.Load(os.Environ(), config.Overrides{ConfigPath: cfgPath})
+	if err != nil {
+		fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
+		return 1
+	}
+	palette := cfg.ResolveTheme()
+	fmt.Fprintf(stdout, "theme_name = %s\n", cfg.Features.ThemeName)
+	fmt.Fprintf(stdout, "background = %s\n", palette.Background)
+	fmt.Fprintf(stdout, "foreground = %s\n", palette.Foreground)
+	fmt.Fprintf(stdout, "accent = %s\n", palette.Accent)
+	fmt.Fprintf(stdout, "muted = %s\n", palette.Muted)
+	fmt.Fprintf(stdout, "border = %s\n", palette.Border)
+	fmt.Fprintf(stdout, "surface = %s\n", palette.Surface)
+	fmt.Fprintf(stdout, "warning = %s\n", palette.Warning)
+	fmt.Fprintf(stdout, "error = %s\n", palette.Error)
+	fmt.Fprintf(stdout, "success = %s\n", palette.Success)
+	return 0
+}
+
+func runProfileSet(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "usage: twi profile set <name> [--background '#rrggbb' --foreground '#rrggbb' --accent '#rrggbb' --muted '#rrggbb' --border '#rrggbb' --surface '#rrggbb' --warning '#rrggbb' --error '#rrggbb' --success '#rrggbb']")
+		return 2
+	}
+	name := strings.ToLower(strings.TrimSpace(args[0]))
+
+	fs := flag.NewFlagSet("profile set", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var cfgPath string
+	var background, foreground, accent, muted, border, surface, warning, errorColor, success string
+	fs.StringVar(&cfgPath, "config", "", "config file path")
+	fs.StringVar(&background, "background", "", "custom theme background hex (only used with the 'custom' profile)")
+	fs.StringVar(&foreground, "foreground", "", "custom theme foreground hex")
+	fs.StringVar(&accent, "accent", "", "custom theme accent hex")
+	fs.StringVar(&muted, "muted", "", "custom theme muted hex")
+	fs.StringVar(&border, "border", "", "custom theme border hex")
+	fs.StringVar(&surface, "surface", "", "custom theme surface hex")
+	fs.StringVar(&warning, "warning", "", "custom theme warning hex")
+	fs.StringVar(&errorColor, "error", "", "custom theme error hex")
+	fs.StringVar(&success, "success", "", "custom theme success hex")
+	if err := fs.Parse(args[1:]); err != nil {
+		return 2
+	}
+
+	if name != "custom" {
+		if _, ok := theme.Presets()[name]; !ok {
+			fmt.Fprintf(stderr, "unknown theme %q; run `twi profile list` for available names\n", name)
+			return 2
+		}
+	}
+
+	cfg, err := config.Load(os.Environ(), config.Overrides{ConfigPath: cfgPath})
+	if err != nil {
+		fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
+		return 1
+	}
+	cfg.Features.ThemeName = name
+	if name == "custom" {
+		setIfNonEmpty(&cfg.Features.ThemeCustom.Background, background)
+		setIfNonEmpty(&cfg.Features.ThemeCustom.Foreground, foreground)
+		setIfNonEmpty(&cfg.Features.ThemeCustom.Accent, accent)
+		setIfNonEmpty(&cfg.Features.ThemeCustom.Muted, muted)
+		setIfNonEmpty(&cfg.Features.ThemeCustom.Border, border)
+		setIfNonEmpty(&cfg.Features.ThemeCustom.Surface, surface)
+		setIfNonEmpty(&cfg.Features.ThemeCustom.Warning, warning)
+		setIfNonEmpty(&cfg.Features.ThemeCustom.Error, errorColor)
+		setIfNonEmpty(&cfg.Features.ThemeCustom.Success, success)
+	}
+
+	if err := config.WriteNonSecretFile(cfg.Path, cfg); err != nil {
+		fmt.Fprintf(stderr, "save theme: %s\n", config.RedactDisplayValue(err.Error()))
+		return 1
+	}
+	fmt.Fprintf(stdout, "theme set to %s\n", name)
+	return 0
+}
+
+func setIfNonEmpty(dst *string, value string) {
+	if strings.TrimSpace(value) != "" {
+		*dst = value
 	}
 }
 

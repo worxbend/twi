@@ -2,6 +2,7 @@ package app
 
 import (
 	"strings"
+	"time"
 
 	"github.com/w0rxbend/twi/internal/animation"
 	"github.com/w0rxbend/twi/internal/twitch"
@@ -16,22 +17,27 @@ type channelStateSet struct {
 }
 
 type channelState struct {
-	name           string
-	status         ConnectionState
-	messages       []twitch.ChatMessage
-	scrollOffset   int
-	messageFilters messageFilterSet
-	revealQueue    *animation.Queue
-	activeOrder    []string
-	activeMessages map[string]twitch.ChatMessage
-	localEchoes    map[string]struct{}
-	unread         int
-	composerText   string
-	replyTo        *composerReplyContext
-	activeSend     *queuedComposerSend
-	sendQueue      []queuedComposerSend
-	sendState      composerSendState
-	sendFeedback   string
+	name                   string
+	status                 ConnectionState
+	messages               []twitch.ChatMessage
+	scrollOffset           int
+	messageFilters         messageFilterSet
+	revealQueue            *animation.Queue
+	activeOrder            []string
+	activeMessages         map[string]twitch.ChatMessage
+	localEchoes            map[string]struct{}
+	unread                 int
+	composerText           string
+	replyTo                *composerReplyContext
+	activeSend             *queuedComposerSend
+	sendQueue              []queuedComposerSend
+	sendState              composerSendState
+	sendFeedback           string
+	broadcasterID          string
+	broadcasterIDRequested bool
+	live                   bool
+	liveSince              time.Time
+	viewerCount            int
 }
 
 func newChannelStateSet(channels []string, animationConfig animation.Config, clock animation.Clock) *channelStateSet {

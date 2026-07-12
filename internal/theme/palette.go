@@ -12,21 +12,35 @@ type Palette struct {
 	Foreground string
 	Accent     string
 	Muted      string
+	Border     string
+	Surface    string
 	Warning    string
 	Error      string
 	Success    string
 }
 
+// DefaultPalette returns the "claude" preset, twi's default theme.
 func DefaultPalette() Palette {
-	return Palette{
-		Background: "#111018",
-		Foreground: "#f6f2ff",
-		Accent:     "#9146ff",
-		Muted:      "#9d97aa",
-		Warning:    "#f5c542",
-		Error:      "#ff5c7a",
-		Success:    "#4ade80",
+	palette, ok := Presets()["claude"]
+	if !ok {
+		panic("theme: claude preset missing")
 	}
+	return palette
+}
+
+// ResolvePalette returns the named preset, or custom when name is "custom".
+// Unknown names fall back to DefaultPalette with ok=false so callers can warn
+// without failing startup, matching the config package's lenient-fallback
+// style for unrecognized flat-config values.
+func ResolvePalette(name string, custom Palette) (Palette, bool) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "custom" {
+		return custom, true
+	}
+	if palette, ok := Presets()[name]; ok {
+		return palette, true
+	}
+	return DefaultPalette(), false
 }
 
 const minimumTextContrast = 4.5

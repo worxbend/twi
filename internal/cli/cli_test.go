@@ -1554,6 +1554,100 @@ func TestLiveClientOptionsGateImageStackByTerminalAndCredentials(t *testing.T) {
 	}
 }
 
+func TestProfileListMarksActiveTheme(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	code := Run([]string{"profile", "list", "--config", cfgPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "> claude") {
+		t.Fatalf("profile list output missing active default theme marker:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "custom") {
+		t.Fatalf("profile list output missing custom entry:\n%s", stdout.String())
+	}
+}
+
+func TestProfileShowPrintsResolvedPalette(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	code := Run([]string{"profile", "show", "--config", cfgPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	for _, want := range []string{"theme_name = claude", "background = #", "accent = #"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("profile show output missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestProfileSetPersistsThemeAndPreservesOtherSettings(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(cfgPath, []byte("animation_mode = \"reduced\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"profile", "set", "nord", "--config", cfgPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "theme set to nord") {
+		t.Fatalf("profile set output = %q, want confirmation", stdout.String())
+	}
+
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `theme_name = "nord"`) {
+		t.Fatalf("persisted config missing theme_name = nord:\n%s", data)
+	}
+	if !strings.Contains(string(data), `animation_mode = "reduced"`) {
+		t.Fatalf("profile set clobbered unrelated setting animation_mode:\n%s", data)
+	}
+}
+
+func TestProfileSetCustomAppliesHexFlags(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{
+		"profile", "set", "custom", "--config", cfgPath,
+		"--background", "#010101", "--foreground", "#fefefe", "--accent", "#abcdef",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`theme_name = "custom"`,
+		`theme_background = "#010101"`,
+		`theme_foreground = "#fefefe"`,
+		`theme_accent = "#abcdef"`,
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("persisted config missing %q:\n%s", want, data)
+		}
+	}
+}
+
+func TestProfileSetUnknownThemeRejected(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	code := Run([]string{"profile", "set", "not-a-theme", "--config", cfgPath}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("Run returned %d, want 2; stdout=%q", code, stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "unknown theme") {
+		t.Fatalf("stderr = %q, want unknown theme message", stderr.String())
+	}
+}
+
 func TestConfigShowRedactsSecrets(t *testing.T) {
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret")
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")

@@ -72,3 +72,28 @@ The project can grow without collapsing boundaries:
 - More diagnostics can emit redacted debug fields without exposing raw structs.
 
 Extension work should keep the same rule: the UI depends on internal interfaces and normalized models, not on external service types.
+
+## Theming And Animation
+
+`internal/theme` resolves a `Palette` (background, foreground, accent, muted,
+border, surface, warning, error, success) from either a built-in preset name
+or a custom hex palette (`config.Config.ResolveTheme`); `internal/app` reads
+one active palette (`mockShellModel.theme`) and every widget — including a
+full-viewport `Background()` wrap in `View()` — derives its colors from it, so
+adding a widget only means reading `m.theme` rather than a new literal.
+
+A single shared `animation.FrameMsg` tick (`internal/animation/clock.go`,
+~10fps, skipped when `animation_mode = "off"`) drives every chrome animation
+effect — the pulsing status-bar LIVE/REC segment, the channel-switch flash,
+the startup splash, and a command-palette typewriter reveal that reuses the
+same `Sequence`/`Queue` machinery built for chat-row reveals — instead of each
+effect running its own ad hoc ticker. A future animated widget should hook
+into this same tick rather than scheduling a second clock.
+
+The real-broadcast LIVE indicator (`internal/twitch.HelixStreamsClient`) and
+emote autocomplete (`internal/assets.EmoteIndex`) are wired independently of
+the image/asset stack decision in `internal/cli` (`newStreamStatusResolver`,
+`newEmoteIndex`) since neither needs a disk cache or terminal image
+capability — only `stream_status_mode`/`emote_autocomplete_mode` and Twitch
+API credentials. Both are `nil`-able app-facing interfaces so `--mock` mode
+and credential-free runs degrade to simulated/sample data instead of failing.

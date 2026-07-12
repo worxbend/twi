@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -18,6 +20,7 @@ import (
 	"github.com/w0rxbend/twi/internal/config"
 	"github.com/w0rxbend/twi/internal/render"
 	"github.com/w0rxbend/twi/internal/storage"
+	"github.com/w0rxbend/twi/internal/theme"
 	"github.com/w0rxbend/twi/internal/twitch"
 )
 
@@ -287,8 +290,14 @@ func TestMockShellFocusHelpAndComposerInput(t *testing.T) {
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
 	model = updated.(mockShellModel)
-	if got, want := model.focus, mockFocusChat; got != want {
+	if got, want := model.focus, mockFocusEmotes; got != want {
 		t.Fatalf("focus after second tab = %v, want %v", got, want)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	model = updated.(mockShellModel)
+	if got, want := model.focus, mockFocusChat; got != want {
+		t.Fatalf("focus after third tab = %v, want %v", got, want)
 	}
 	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 	if cmd == nil {
@@ -300,7 +309,7 @@ func TestMockShellPageKeysScrollViewport(t *testing.T) {
 	model := newMockShellModel("example", config.Default())
 	model.activeChannelState().messages = numberedMockMessages("example", 12)
 
-	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 12})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 16})
 	model = updated.(mockShellModel)
 	bottom := model.View()
 	if !strings.Contains(bottom, "message-11") {
@@ -349,7 +358,7 @@ func TestMockShellMouseEventsWhenEnabled(t *testing.T) {
 	model.channels.ensure("alpha").messages = numberedMockMessages("alpha", 12)
 	model.channels.ensure("beta").messages = numberedMockMessages("beta", 3)
 
-	updated, _ := model.Update(tea.WindowSizeMsg{Width: 88, Height: 12})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 88, Height: 16})
 	model = updated.(mockShellModel)
 	layout := model.layout()
 	chatX := layout.sidebarWidth + 2
@@ -1631,7 +1640,7 @@ func TestLiveShellBatchesVisibleAvatarLookups(t *testing.T) {
 		{ID: "m3", AuthorID: "99", AuthorLogin: "mod", DisplayName: "Mod", Text: "third", Type: twitch.MessageTypeChat},
 	}
 
-	updated, cmd := model.Update(tea.WindowSizeMsg{Width: 80, Height: 12})
+	updated, cmd := model.Update(tea.WindowSizeMsg{Width: 80, Height: 16})
 	model = updated.(mockShellModel)
 	if cmd == nil {
 		t.Fatal("WindowSize returned nil command, want debounced avatar lookup")
@@ -1876,7 +1885,7 @@ func TestLiveShellPreparedImageCellsAreScopedByChannelIdentity(t *testing.T) {
 		t.Fatal("failed to switch active channel to beta")
 	}
 	model.clampScroll()
-	if view := model.View(); strings.Contains(view, "ALPHA") || strings.Contains(view, "BETA") || !strings.Contains(view, "Kappa") {
+	if view := chatOnlyView(model); strings.Contains(view, "ALPHA") || strings.Contains(view, "BETA") || !strings.Contains(view, "Kappa") {
 		t.Fatalf("beta view reused a prepared cell before beta render; want fallback only:\n%s", view)
 	}
 
@@ -2010,7 +2019,7 @@ func TestLiveShellAssetPreparationFailureKeepsFallbackAndRetries(t *testing.T) {
 	if cmd == nil || !model.assetLookupScheduled {
 		t.Fatalf("failed visible preparation did not schedule retry; scheduled=%v cmd=%#v", model.assetLookupScheduled, cmd)
 	}
-	after := model.View()
+	after := chatOnlyView(model)
 	if !strings.Contains(after, "Kappa") || strings.Contains(after, "EM25") {
 		t.Fatalf("fallback not preserved after preparation failure:\nbefore:\n%s\nafter:\n%s", before, after)
 	}
@@ -2077,7 +2086,8 @@ func TestLiveShellPermanentAssetPreparationFailureBacksOffWithoutSecretState(t *
 		t.Fatalf("preparer/renderer calls after immediate retry = %d/%d, want 1/0", preparer.calls, renderer.calls)
 	}
 	after := model.View()
-	if before != after || !strings.Contains(after, "Kappa") || strings.Contains(after, "EM25") {
+	afterChat := chatOnlyView(model)
+	if before != after || !strings.Contains(afterChat, "Kappa") || strings.Contains(afterChat, "EM25") {
 		t.Fatalf("fallback changed after permanent failure:\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 }
@@ -2385,7 +2395,7 @@ func TestLiveShellPermanentAssetRenderFailureBacksOff(t *testing.T) {
 	if renderer.calls != 1 {
 		t.Fatalf("renderer calls after immediate retry = %d, want 1", renderer.calls)
 	}
-	if view := model.View(); !strings.Contains(view, "Kappa") || strings.Contains(view, "EM25") {
+	if view := chatOnlyView(model); !strings.Contains(view, "Kappa") || strings.Contains(view, "EM25") {
 		t.Fatalf("fallback not preserved after render failure:\n%s", view)
 	}
 }
@@ -2499,7 +2509,7 @@ func TestLiveShellAssetKindsGateMissingCredentialFallbacks(t *testing.T) {
 	})
 	model.activeChannelState().messages = []twitch.ChatMessage{assetEventMessage("emoji-only-live-stack", "25", "😀")}
 
-	before := model.View()
+	before := chatOnlyView(model)
 	if !strings.Contains(before, "[V]") || !strings.Contains(before, "Kappa") || !strings.Contains(before, "😀") {
 		t.Fatalf("fallbacks missing before asset work:\n%s", before)
 	}
@@ -2517,7 +2527,7 @@ func TestLiveShellAssetKindsGateMissingCredentialFallbacks(t *testing.T) {
 	}
 	updated, _ = model.Update(cmd().(assetPreparedBatchMsg))
 	model = updated.(mockShellModel)
-	after := model.View()
+	after := chatOnlyView(model)
 	if !strings.Contains(after, ":)") {
 		t.Fatalf("emoji cell missing after allowed asset work:\n%s", after)
 	}
@@ -2937,9 +2947,11 @@ func TestMockShellAssetEventRefreshesActiveRevealRows(t *testing.T) {
 	model := newMockShellModelWithClock("example", cfg, clock)
 	model.activeChannelState().messages = nil
 
+	chatContent := func(m mockShellModel) string { return m.chatView(m.layout()) }
+
 	updated, _ := model.Update(mockIncomingMessageMsg{message: activeAssetEventMessage()})
 	model = updated.(mockShellModel)
-	for i := 0; i < 100 && !strings.Contains(model.View(), "Kappa"); i++ {
+	for i := 0; i < 100 && !strings.Contains(chatContent(model), "Kappa"); i++ {
 		clock.Add(mockRevealDelay)
 		updated, _ = model.Update(mockAnimationTickMsg{})
 		model = updated.(mockShellModel)
@@ -2947,7 +2959,7 @@ func TestMockShellAssetEventRefreshesActiveRevealRows(t *testing.T) {
 	if got := model.activeChannelState().revealQueue.Len(); got == 0 {
 		t.Fatal("active reveal completed before asset refresh test could run")
 	}
-	if view := model.View(); !strings.Contains(view, "Kappa") {
+	if view := chatContent(model); !strings.Contains(view, "Kappa") {
 		t.Fatalf("test setup did not reveal Kappa before asset event:\n%s", view)
 	}
 
@@ -2955,7 +2967,7 @@ func TestMockShellAssetEventRefreshesActiveRevealRows(t *testing.T) {
 		preparedAssetForTest(twitch.AssetRef{Kind: assets.KindTwitchEmote, ID: "25"}, "EM25  ", 6),
 	}})
 	model = updated.(mockShellModel)
-	if view := model.View(); !strings.Contains(view, "EM25") {
+	if view := chatContent(model); !strings.Contains(view, "EM25") {
 		t.Fatalf("active reveal view missing prepared emote cell after asset event:\n%s", view)
 	}
 }
@@ -3146,8 +3158,8 @@ func TestMockShellChannelSidebarResponsiveLayouts(t *testing.T) {
 		wantWideSize bool
 	}{
 		{name: "narrow", width: 48, height: 10},
-		{name: "normal", width: 88, height: 12, wantSidebar: true},
-		{name: "wide", width: 124, height: 14, wantSidebar: true, wantWideSize: true},
+		{name: "normal", width: 88, height: 15, wantSidebar: true},
+		{name: "wide", width: 124, height: 17, wantSidebar: true, wantWideSize: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			updated, _ := model.Update(tea.WindowSizeMsg{Width: tt.width, Height: tt.height})
@@ -3186,6 +3198,199 @@ func TestMockShellChannelSidebarResponsiveLayouts(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestThemeSettingsOpensPreviewsAndPersists(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	cfg.Path = filepath.Join(t.TempDir(), "config.toml")
+	model := newMockShellModel("alpha", cfg)
+	model.width, model.height = 88, 18
+	originalTheme := model.theme
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("open theme settings returned command %#v, want nil", cmd)
+	}
+	if !model.themeSettings.open {
+		t.Fatal("themeSettings.open = false, want true")
+	}
+	view := model.View()
+	if !strings.Contains(view, "Theme") || !strings.Contains(view, "claude (active)") {
+		t.Fatalf("theme settings view missing expected content:\n%s", view)
+	}
+
+	// Move to a known preset and confirm live preview applies immediately.
+	names := themeSettingsNames()
+	var nordIndex int
+	for i, name := range names {
+		if name == "nord" {
+			nordIndex = i
+			break
+		}
+	}
+	for model.themeSettings.selected != nordIndex {
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		model = updated.(mockShellModel)
+	}
+	if model.theme != theme.Presets()["nord"] {
+		t.Fatalf("live preview theme = %+v, want nord preset", model.theme)
+	}
+	if model.effectiveConfig.Features.ThemeName == "nord" {
+		t.Fatal("effectiveConfig.ThemeName changed before persisting, want unchanged until enter")
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if model.themeSettings.open {
+		t.Fatal("themeSettings.open after enter = true, want false")
+	}
+	if model.effectiveConfig.Features.ThemeName != "nord" {
+		t.Fatalf("effectiveConfig.ThemeName after persist = %q, want nord", model.effectiveConfig.Features.ThemeName)
+	}
+	data, err := os.ReadFile(cfg.Path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", cfg.Path, err)
+	}
+	if !strings.Contains(string(data), `theme_name = "nord"`) {
+		t.Fatalf("persisted config missing theme_name = nord:\n%s", data)
+	}
+	if originalTheme == model.theme {
+		t.Fatal("theme unchanged after persisting a different preset")
+	}
+}
+
+func TestThemeSettingsEscRevertsPreviewWithoutPersisting(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	cfg.Path = filepath.Join(t.TempDir(), "config.toml")
+	model := newMockShellModel("alpha", cfg)
+	model.width, model.height = 88, 18
+	originalTheme := model.theme
+	originalThemeName := model.effectiveConfig.Features.ThemeName
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	model = updated.(mockShellModel)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model = updated.(mockShellModel)
+	if model.theme == originalTheme {
+		t.Fatal("moving selection did not change live preview theme")
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	model = updated.(mockShellModel)
+	if model.themeSettings.open {
+		t.Fatal("themeSettings.open after esc = true, want false")
+	}
+	if model.theme != originalTheme {
+		t.Fatalf("theme after esc = %+v, want reverted original %+v", model.theme, originalTheme)
+	}
+	if model.effectiveConfig.Features.ThemeName != originalThemeName {
+		t.Fatal("effectiveConfig.ThemeName changed after esc, want unchanged")
+	}
+	if _, err := os.Stat(cfg.Path); err == nil {
+		t.Fatal("config file was written after esc, want no persistence")
+	}
+}
+
+func TestThemeSettingsAndCommandPaletteAreMutuallyExclusive(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	model := newMockShellModel("alpha", cfg)
+	model.width, model.height = 88, 18
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	model = updated.(mockShellModel)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	model = updated.(mockShellModel)
+	if !model.themeSettings.open || model.palette.open {
+		t.Fatalf("expected theme settings open and palette closed; theme=%v palette=%v", model.themeSettings.open, model.palette.open)
+	}
+}
+
+func TestEmotePickerOpensFiltersExecutesAndCloses(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	model := newMockShellModel("alpha", cfg)
+	model.width, model.height = 88, 18
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("open emote picker returned command %#v, want nil", cmd)
+	}
+	if !model.emotePicker.open {
+		t.Fatal("emotePicker.open = false, want true")
+	}
+	view := model.View()
+	for _, want := range []string{"Emote search", "Kappa", "PogChamp"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("emote picker view missing %q:\n%s", want, view)
+		}
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("champ")})
+	model = updated.(mockShellModel)
+	if got, want := model.emotePicker.query, "champ"; got != want {
+		t.Fatalf("emote picker query = %q, want %q", got, want)
+	}
+	entries := model.visibleEmotePickerEntries()
+	if len(entries) != 1 || entries[0].Name != "PogChamp" {
+		t.Fatalf("filtered entries = %#v, want only PogChamp", entries)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if model.emotePicker.open {
+		t.Fatal("emotePicker.open after enter = true, want false")
+	}
+	if got, want := model.activeChannelState().composerText, "PogChamp "; got != want {
+		t.Fatalf("composer text after emote picker selection = %q, want %q", got, want)
+	}
+}
+
+func TestEmotePickerEscCancelsWithoutInserting(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	model := newMockShellModel("alpha", cfg)
+	model.width, model.height = 88, 18
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+	model = updated.(mockShellModel)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	model = updated.(mockShellModel)
+	if model.emotePicker.open {
+		t.Fatal("emotePicker.open after esc = true, want false")
+	}
+	if model.activeChannelState().composerText != "" {
+		t.Fatalf("composerText after esc = %q, want empty", model.activeChannelState().composerText)
+	}
+}
+
+func TestEmotePickerAndCommandPaletteAreMutuallyExclusive(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	model := newMockShellModel("alpha", cfg)
+	model.width, model.height = 88, 18
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	model = updated.(mockShellModel)
+	if !model.palette.open {
+		t.Fatal("palette.open = false after ctrl+p, want true")
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+	model = updated.(mockShellModel)
+	if !model.emotePicker.open || model.palette.open {
+		t.Fatalf("expected emote picker open and palette closed; emotePicker=%v palette=%v", model.emotePicker.open, model.palette.open)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	model = updated.(mockShellModel)
+	if !model.palette.open || model.emotePicker.open {
+		t.Fatalf("expected palette open and emote picker closed; palette=%v emotePicker=%v", model.palette.open, model.emotePicker.open)
 	}
 }
 
@@ -4507,4 +4712,391 @@ func requestKinds(requests []assets.Request) []string {
 
 func lipglossWidth(value string) int {
 	return lipgloss.Width(value)
+}
+
+// chatOnlyView isolates the chat pane from the full dashboard View(). Tests
+// asserting on emote/asset fallback text (e.g. "Kappa") use this instead of
+// the whole View() so they aren't satisfied by the unrelated persistent
+// emotes quick-select row, which also lists well-known emote names.
+func chatOnlyView(m mockShellModel) string {
+	return m.chatView(m.layout())
+}
+
+func TestScheduleFrameTickRunsContinuouslyWhenAnimationEnabled(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "fast"
+	model := newMockShellModel("alpha", cfg)
+
+	cmd := model.scheduleFrameTick()
+	if cmd == nil {
+		t.Fatal("scheduleFrameTick() = nil, want a tea.Cmd")
+	}
+	if !model.frameTickScheduled {
+		t.Fatal("frameTickScheduled = false after scheduling, want true")
+	}
+	if second := model.scheduleFrameTick(); second != nil {
+		t.Fatal("scheduleFrameTick() while already scheduled returned non-nil, want nil")
+	}
+}
+
+func TestScheduleFrameTickDisabledWhenAnimationOff(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	model := newMockShellModel("alpha", cfg)
+
+	if cmd := model.scheduleFrameTick(); cmd != nil {
+		t.Fatal("scheduleFrameTick() with animation off returned non-nil, want nil")
+	}
+}
+
+func TestChannelSwitchTriggersSceneFlash(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "fast"
+	cfg.DefaultChannels = []string{"alpha", "beta"}
+	model := newMockShellModel("alpha", cfg)
+	model.width, model.height = 88, 22
+
+	if model.sceneFlashActive() {
+		t.Fatal("sceneFlashActive() = true before any channel switch, want false")
+	}
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("]")})
+	model = updated.(mockShellModel)
+	if !model.sceneFlashActive() {
+		t.Fatal("sceneFlashActive() = false immediately after channel switch, want true")
+	}
+
+	model.sceneFlashUntil = time.Now().Add(-time.Millisecond)
+	if model.sceneFlashActive() {
+		t.Fatal("sceneFlashActive() = true after deadline elapsed, want false")
+	}
+}
+
+func TestChannelSwitchDoesNotFlashWhenAnimationOff(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	cfg.DefaultChannels = []string{"alpha", "beta"}
+	model := newMockShellModel("alpha", cfg)
+	model.width, model.height = 88, 22
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("]")})
+	model = updated.(mockShellModel)
+	if model.sceneFlashActive() {
+		t.Fatal("sceneFlashActive() = true with animation off, want false")
+	}
+}
+
+func TestCommandPaletteRevealProgressesThenSettles(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "fast"
+	model := newMockShellModel("alpha", cfg)
+	model.width, model.height = 88, 18
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	model = updated.(mockShellModel)
+	if !model.palette.open {
+		t.Fatal("palette open = false, want true")
+	}
+
+	partial := model.View()
+	if strings.Contains(partial, "Focus composer") {
+		t.Fatalf("palette view fully revealed on first frame, want a partial typewriter reveal:\n%s", partial)
+	}
+
+	now := time.Now()
+	for i := 0; i < 200 && !model.paletteRevealSeq.Done(); i++ {
+		now = now.Add(50 * time.Millisecond)
+		updated, _ = model.Update(animation.FrameMsg{At: now})
+		model = updated.(mockShellModel)
+	}
+	settled := model.View()
+	if !strings.Contains(settled, "Focus composer") {
+		t.Fatalf("palette view never fully revealed after ticking:\n%s", settled)
+	}
+}
+
+func TestCommandPaletteFullyRevealedImmediatelyWhenAnimationOff(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	model := newMockShellModel("alpha", cfg)
+	model.width, model.height = 88, 18
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	model = updated.(mockShellModel)
+	if !strings.Contains(model.View(), "Focus composer") {
+		t.Fatalf("palette view not fully revealed with animation off:\n%s", model.View())
+	}
+}
+
+func TestSplashCoversViewUntilDeadlineOrKeypress(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "fast"
+	model := newMockShellModel("alpha", cfg)
+	model.width, model.height = 88, 22
+	model.splashUntil = time.Now().Add(splashDuration)
+
+	view := model.View()
+	if !strings.Contains(view, "twi") {
+		t.Fatalf("splash view missing wordmark:\n%s", view)
+	}
+	if strings.Contains(view, "focus=chat") {
+		t.Fatalf("splash view leaked normal dashboard content:\n%s", view)
+	}
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	model = updated.(mockShellModel)
+	if model.splashActive() {
+		t.Fatal("splashActive() = true after keypress, want false")
+	}
+	if !strings.Contains(model.View(), "focus=chat") {
+		t.Fatalf("view after splash skip missing normal dashboard content:\n%s", model.View())
+	}
+}
+
+func TestSplashClearsAfterDeadlineWithoutKeypress(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "fast"
+	model := newMockShellModel("alpha", cfg)
+	model.width, model.height = 88, 22
+	model.splashUntil = time.Now().Add(-time.Millisecond)
+
+	if model.splashActive() {
+		t.Fatal("splashActive() = true after deadline elapsed, want false")
+	}
+	if !strings.Contains(model.View(), "focus=chat") {
+		t.Fatalf("view after splash deadline missing normal dashboard content:\n%s", model.View())
+	}
+}
+
+func TestCycleFocusIncludesEmotesRow(t *testing.T) {
+	model := newMockShellModel("alpha", config.Default())
+	if model.focus != mockFocusChat {
+		t.Fatalf("initial focus = %v, want chat", model.focus)
+	}
+	model.cycleFocus()
+	if model.focus != mockFocusComposer {
+		t.Fatalf("focus after 1 cycle = %v, want composer", model.focus)
+	}
+	model.cycleFocus()
+	if model.focus != mockFocusEmotes {
+		t.Fatalf("focus after 2 cycles = %v, want emotes", model.focus)
+	}
+	model.cycleFocus()
+	if model.focus != mockFocusChat {
+		t.Fatalf("focus after 3 cycles = %v, want chat", model.focus)
+	}
+}
+
+func TestEmotesViewRendersQuickSelectStripAndHighlightsSelection(t *testing.T) {
+	model := newMockShellModel("alpha", config.Default())
+	model.width, model.height = 88, 22
+	model.focus = mockFocusEmotes
+
+	view := model.View()
+	if !strings.Contains(view, "Kappa") || !strings.Contains(view, "PogChamp") {
+		t.Fatalf("emotes row missing sample entries:\n%s", view)
+	}
+	if !strings.Contains(view, "[Kappa]") {
+		t.Fatalf("emotes row missing highlighted selection for first entry:\n%s", view)
+	}
+}
+
+func TestEmotesFocusLeftRightMovesSelectionAndWraps(t *testing.T) {
+	model := newMockShellModel("alpha", config.Default())
+	model.width, model.height = 88, 22
+	model.focus = mockFocusEmotes
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRight})
+	model = updated.(mockShellModel)
+	if model.emoteSelected != 1 {
+		t.Fatalf("emoteSelected after right = %d, want 1", model.emoteSelected)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	model = updated.(mockShellModel)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	model = updated.(mockShellModel)
+	entries := model.activeEmoteEntries()
+	if model.emoteSelected != len(entries)-1 {
+		t.Fatalf("emoteSelected after wrapping left = %d, want %d", model.emoteSelected, len(entries)-1)
+	}
+}
+
+func TestEmotesFocusEnterInsertsSelectedEmoteIntoComposer(t *testing.T) {
+	model := newMockShellModel("alpha", config.Default())
+	model.width, model.height = 88, 22
+	model.focus = mockFocusEmotes
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRight})
+	model = updated.(mockShellModel)
+	entries := model.activeEmoteEntries()
+	want := entries[1].Name
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if got := model.activeChannelState().composerText; got != want+" " {
+		t.Fatalf("composer text after emote insert = %q, want %q", got, want+" ")
+	}
+}
+
+func TestScheduleBroadcasterIDLookupResolvesAndCaches(t *testing.T) {
+	resolver := &appFakeAvatarResolver{results: []assets.AvatarResult{
+		{UserID: "100", UserLogin: "alpha", Found: true},
+	}}
+	model := newLiveShellModelWithClockAndOptions("alpha", config.Default(), NewFakeChatClient(1), nil, ClientOptions{
+		AvatarResolver: resolver,
+	})
+
+	cmd := model.scheduleBroadcasterIDLookup()
+	if cmd == nil {
+		t.Fatal("scheduleBroadcasterIDLookup() = nil, want a command")
+	}
+	if !model.channels.ensure("alpha").broadcasterIDRequested {
+		t.Fatal("broadcasterIDRequested = false after scheduling, want true")
+	}
+	msg := cmd().(broadcasterIDResolvedMsg)
+	model.applyBroadcasterIDResult(msg)
+	if got := model.channels.ensure("alpha").broadcasterID; got != "100" {
+		t.Fatalf("broadcasterID = %q, want 100", got)
+	}
+
+	if cmd := model.scheduleBroadcasterIDLookup(); cmd != nil {
+		t.Fatal("scheduleBroadcasterIDLookup() after resolution returned non-nil, want nil (already resolved)")
+	}
+}
+
+func TestScheduleBroadcasterIDLookupNoAvatarResolver(t *testing.T) {
+	model := newLiveShellModelWithClockAndOptions("alpha", config.Default(), NewFakeChatClient(1), nil, ClientOptions{})
+	if cmd := model.scheduleBroadcasterIDLookup(); cmd != nil {
+		t.Fatal("scheduleBroadcasterIDLookup() without AvatarResolver returned non-nil, want nil")
+	}
+}
+
+type fakeEmoteListerForApp struct {
+	global []twitch.EmoteMetadata
+}
+
+func (f *fakeEmoteListerForApp) GetGlobalEmotes(context.Context) ([]twitch.EmoteMetadata, error) {
+	return f.global, nil
+}
+
+func (f *fakeEmoteListerForApp) GetChannelEmotes(context.Context, string) ([]twitch.EmoteMetadata, error) {
+	return nil, nil
+}
+
+func TestScheduleEmoteIndexLookupResolvesAndSkipsWhenCached(t *testing.T) {
+	lister := &fakeEmoteListerForApp{global: []twitch.EmoteMetadata{{ID: "1", Name: "Kappa"}}}
+	model := newLiveShellModelWithClockAndOptions("alpha", config.Default(), NewFakeChatClient(1), nil, ClientOptions{
+		EmoteIndex: assets.NewEmoteIndex(lister),
+	})
+
+	cmd := model.scheduleEmoteIndexLookup()
+	if cmd == nil {
+		t.Fatal("scheduleEmoteIndexLookup() = nil, want a command")
+	}
+	msg := cmd().(emoteIndexResolvedMsg)
+	model.applyEmoteIndexResult(msg)
+	entries := model.activeEmoteEntries()
+	if len(entries) != 1 || entries[0].Name != "Kappa" {
+		t.Fatalf("activeEmoteEntries() = %#v, want [Kappa]", entries)
+	}
+
+	if cmd := model.scheduleEmoteIndexLookup(); cmd != nil {
+		t.Fatal("scheduleEmoteIndexLookup() after resolution returned non-nil, want nil (already cached)")
+	}
+}
+
+func TestScheduleEmoteIndexLookupNoIndex(t *testing.T) {
+	model := newLiveShellModelWithClockAndOptions("alpha", config.Default(), NewFakeChatClient(1), nil, ClientOptions{})
+	if cmd := model.scheduleEmoteIndexLookup(); cmd != nil {
+		t.Fatal("scheduleEmoteIndexLookup() without EmoteIndex returned non-nil, want nil")
+	}
+	if entries := model.activeEmoteEntries(); entries != nil {
+		t.Fatalf("activeEmoteEntries() = %#v, want nil before resolution", entries)
+	}
+}
+
+func TestApplyStreamStatusResultsUpdatesLiveOfflineAndViewers(t *testing.T) {
+	cfg := config.Default()
+	cfg.DefaultChannels = []string{"alpha", "beta"}
+	model := newMockShellModel("alpha", cfg)
+
+	startedAt := time.Date(2026, 7, 12, 18, 0, 0, 0, time.UTC)
+	model.applyStreamStatusResults([]twitch.StreamInfo{
+		{UserLogin: "alpha", Live: true, StartedAt: startedAt, ViewerCount: 99},
+		{UserLogin: "beta", Live: false},
+	})
+
+	alpha := model.channels.ensure("alpha")
+	if !alpha.live || alpha.viewerCount != 99 || !alpha.liveSince.Equal(startedAt) {
+		t.Fatalf("alpha state = %+v, want live with viewer_count 99 and matching liveSince", alpha)
+	}
+	beta := model.channels.ensure("beta")
+	if beta.live || !beta.liveSince.IsZero() {
+		t.Fatalf("beta state = %+v, want offline with zero liveSince", beta)
+	}
+}
+
+func TestStatusLineShowsLiveOrOfflineAtSufficientWidth(t *testing.T) {
+	cfg := config.Default()
+	model := newMockShellModel("alpha", cfg)
+	model.channels.ensure("alpha").live = false
+
+	offline := model.statusLine(100)
+	if !strings.Contains(offline, "OFFLINE") {
+		t.Fatalf("status line missing OFFLINE badge:\n%s", offline)
+	}
+
+	model.channels.ensure("alpha").live = true
+	model.channels.ensure("alpha").liveSince = time.Time{}
+	live := model.statusLine(100)
+	if !strings.Contains(live, "LIVE") {
+		t.Fatalf("status line missing LIVE badge:\n%s", live)
+	}
+}
+
+func TestStatusLineOmitsMetricsWhenNarrow(t *testing.T) {
+	cfg := config.Default()
+	model := newMockShellModel("alpha", cfg)
+	narrow := model.statusLine(40)
+	if strings.Contains(narrow, "OFFLINE") || strings.Contains(narrow, "LIVE") {
+		t.Fatalf("narrow status line unexpectedly includes metrics:\n%s", narrow)
+	}
+}
+
+func TestFormatElapsedRendersHoursOnlyWhenPresent(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{0, "0:00"},
+		{90 * time.Second, "1:30"},
+		{time.Hour + 2*time.Minute + 3*time.Second, "1:02:03"},
+		{-time.Second, "0:00"},
+	}
+	for _, c := range cases {
+		if got := formatElapsed(c.d); got != c.want {
+			t.Fatalf("formatElapsed(%v) = %q, want %q", c.d, got, c.want)
+		}
+	}
+}
+
+func TestUpdateFrameMsgAdvancesAndReschedules(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "fast"
+	model := newMockShellModel("alpha", cfg)
+	model.frameTickScheduled = true
+
+	now := time.Now()
+	updated, cmd := model.Update(animation.FrameMsg{At: now})
+	model = updated.(mockShellModel)
+
+	if model.lastFrameAt != now {
+		t.Fatalf("lastFrameAt = %v, want %v", model.lastFrameAt, now)
+	}
+	if cmd == nil {
+		t.Fatal("Update(FrameMsg) returned nil cmd, want a re-scheduled frame tick")
+	}
+	if !model.frameTickScheduled {
+		t.Fatal("frameTickScheduled = false after FrameMsg, want true")
+	}
 }

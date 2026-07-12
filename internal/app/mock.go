@@ -19,24 +19,27 @@ import (
 	"github.com/w0rxbend/twi/internal/debuglog"
 	"github.com/w0rxbend/twi/internal/render"
 	"github.com/w0rxbend/twi/internal/storage"
+	"github.com/w0rxbend/twi/internal/theme"
 	"github.com/w0rxbend/twi/internal/twitch"
 	"golang.org/x/term"
 )
 
 const (
-	defaultMockWidth  = 88
-	defaultMockHeight = 22
-	mockIncomingDelay = 650 * time.Millisecond
-	mockRevealDelay   = 20 * time.Millisecond
-	avatarLookupDelay = 50 * time.Millisecond
-	assetLookupDelay  = 35 * time.Millisecond
-	assetWorkTimeout  = 10 * time.Second
-	assetWorkQueueMax = 24
-	assetWorkParallel = 4
-	assetFailureRetry = 5 * time.Minute
-	sidebarMinWidth   = 72
-	sidebarNormalSize = 18
-	sidebarWideSize   = 24
+	defaultMockWidth   = 88
+	defaultMockHeight  = 22
+	mockIncomingDelay  = 650 * time.Millisecond
+	mockRevealDelay    = 20 * time.Millisecond
+	avatarLookupDelay  = 50 * time.Millisecond
+	assetLookupDelay   = 35 * time.Millisecond
+	assetWorkTimeout   = 10 * time.Second
+	assetWorkQueueMax  = 24
+	assetWorkParallel  = 4
+	assetFailureRetry  = 5 * time.Minute
+	sidebarMinWidth    = 72
+	sidebarNormalSize  = 18
+	sidebarWideSize    = 24
+	sceneFlashDuration = 180 * time.Millisecond
+	splashDuration     = 2 * time.Second
 )
 
 // AvatarResolver is the app-facing boundary for batched author avatar
@@ -45,14 +48,23 @@ type AvatarResolver interface {
 	ResolveAvatars(context.Context, []assets.AvatarRequest) ([]assets.AvatarResult, error)
 }
 
+// StreamStatusResolver is the app-facing boundary for real Twitch broadcast
+// status (Twitch Helix "Get Streams"). Implementations must not perform
+// network work from View.
+type StreamStatusResolver interface {
+	GetStreams(ctx context.Context, logins []string) ([]twitch.StreamInfo, error)
+}
+
 type ClientOptions struct {
-	AvatarResolver AvatarResolver
-	AssetResolver  assets.EventResolver
-	AssetKinds     map[string]bool
-	ImagePreparer  render.ImagePreparer
-	ImageRenderer  render.ImageRenderer
-	SystemNotifier SystemNotifier
-	DebugLogger    debuglog.Logger
+	AvatarResolver       AvatarResolver
+	AssetResolver        assets.EventResolver
+	AssetKinds           map[string]bool
+	ImagePreparer        render.ImagePreparer
+	ImageRenderer        render.ImageRenderer
+	SystemNotifier       SystemNotifier
+	StreamStatusResolver StreamStatusResolver
+	EmoteIndex           *assets.EmoteIndex
+	DebugLogger          debuglog.Logger
 }
 
 type fdWriter interface {
@@ -60,48 +72,73 @@ type fdWriter interface {
 }
 
 type mockShellModel struct {
-	channels               *channelStateSet
-	mentionLogin           string
-	animationMode          string
-	mouseEnabled           bool
-	imageMode              string
-	avatarMode             string
-	emojiMode              string
-	emoteMode              string
-	imageCapability        render.ImageCapabilityDecision
-	sourceDetail           string
-	client                 ChatClient
-	avatarResolver         AvatarResolver
-	assetResolver          assets.EventResolver
-	assetKinds             map[string]bool
-	imagePreparer          render.ImagePreparer
-	imageRenderer          render.ImageRenderer
-	systemNotifier         SystemNotifier
-	debugLogger            debuglog.Logger
-	incoming               []twitch.ChatMessage
-	nextIncoming           int
-	nextReveal             int
-	width                  int
-	height                 int
-	focus                  mockFocus
-	terminalFocused        bool
-	lastSystemNotification *SystemNotification
-	helpExpanded           bool
-	inspectOpen            bool
-	palette                commandPaletteState
-	reconnectInFlight      bool
-	nextSend               int
-	revealTickScheduled    bool
-	avatarLookupScheduled  bool
-	avatarLookupInFlight   bool
-	avatarRequested        map[string]bool
-	assetLookupScheduled   bool
-	assetLookupInFlight    bool
-	assetRetryScheduled    bool
-	assetRequested         map[string]bool
-	assetRetryAfter        map[string]time.Time
-	assetPermanentFailure  map[assetPermanentFailureKey]struct{}
-	imageCells             map[render.ImageCellKey]render.ImageCell
+	channels                  *channelStateSet
+	theme                     theme.Palette
+	effectiveConfig           config.Config
+	mentionLogin              string
+	animationMode             string
+	mouseEnabled              bool
+	imageMode                 string
+	avatarMode                string
+	emojiMode                 string
+	emoteMode                 string
+	imageCapability           render.ImageCapabilityDecision
+	sourceDetail              string
+	client                    ChatClient
+	avatarResolver            AvatarResolver
+	assetResolver             assets.EventResolver
+	assetKinds                map[string]bool
+	imagePreparer             render.ImagePreparer
+	imageRenderer             render.ImageRenderer
+	systemNotifier            SystemNotifier
+	debugLogger               debuglog.Logger
+	incoming                  []twitch.ChatMessage
+	nextIncoming              int
+	nextReveal                int
+	width                     int
+	height                    int
+	focus                     mockFocus
+	terminalFocused           bool
+	lastSystemNotification    *SystemNotification
+	helpExpanded              bool
+	inspectOpen               bool
+	palette                   commandPaletteState
+	themeSettings             themeSettingsState
+	emotePicker               emotePickerState
+	reconnectInFlight         bool
+	nextSend                  int
+	frameTickScheduled        bool
+	lastFrameAt               time.Time
+	sceneFlashUntil           time.Time
+	splashUntil               time.Time
+	splashSkipped             bool
+	frameTimestamps           []time.Time
+	paletteRevealSeq          animation.Sequence
+	paletteRevealKey          string
+	streamStatusResolver      StreamStatusResolver
+	streamStatusTickScheduled bool
+	debugRecording            bool
+	cpuSampleAt               time.Time
+	cpuSampleTime             time.Duration
+	cpuPercent                float64
+	cpuAvailable              bool
+	memoryMB                  float64
+	chatByteSamples           []chatByteSample
+	revealTickScheduled       bool
+	avatarLookupScheduled     bool
+	avatarLookupInFlight      bool
+	avatarRequested           map[string]bool
+	assetLookupScheduled      bool
+	assetLookupInFlight       bool
+	assetRetryScheduled       bool
+	assetRequested            map[string]bool
+	assetRetryAfter           map[string]time.Time
+	assetPermanentFailure     map[assetPermanentFailureKey]struct{}
+	imageCells                map[render.ImageCellKey]render.ImageCell
+	emoteIndex                *assets.EmoteIndex
+	emoteEntries              map[string][]assets.EmoteEntry
+	emoteEntriesRequested     map[string]bool
+	emoteSelected             int
 }
 
 var _ tea.Model = mockShellModel{}
@@ -111,6 +148,7 @@ type mockFocus int
 const (
 	mockFocusChat mockFocus = iota
 	mockFocusComposer
+	mockFocusEmotes
 )
 
 type composerSendState string
@@ -141,24 +179,33 @@ type composerReplyContext struct {
 }
 
 type mockShellLayout struct {
-	width                 int
-	statusHeight          int
-	chatHeight            int
-	chatContentHeight     int
-	chatFramed            bool
-	chatWidth             int
-	sidebarWidth          int
-	sidebarContentHeight  int
-	inspectHeight         int
-	inspectContentHeight  int
-	inspectFramed         bool
-	paletteHeight         int
-	paletteContentHeight  int
-	paletteFramed         bool
-	composerHeight        int
-	composerContentHeight int
-	composerFramed        bool
-	helpHeight            int
+	width                      int
+	statusHeight               int
+	chatHeight                 int
+	chatContentHeight          int
+	chatFramed                 bool
+	chatWidth                  int
+	sidebarWidth               int
+	sidebarContentHeight       int
+	inspectHeight              int
+	inspectContentHeight       int
+	inspectFramed              bool
+	paletteHeight              int
+	paletteContentHeight       int
+	paletteFramed              bool
+	emotePickerHeight          int
+	emotePickerContentHeight   int
+	emotePickerFramed          bool
+	themeSettingsHeight        int
+	themeSettingsContentHeight int
+	themeSettingsFramed        bool
+	composerHeight             int
+	composerContentHeight      int
+	composerFramed             bool
+	emotesHeight               int
+	emotesContentHeight        int
+	emotesFramed               bool
+	helpHeight                 int
 }
 
 type chatRowBlock struct {
@@ -262,6 +309,7 @@ func RunMockWithOptions(w io.Writer, cfg config.Config, opts ClientOptions) erro
 		opts.SystemNotifier = newDefaultSystemNotifier(w)
 	}
 	model.systemNotifier = opts.SystemNotifier
+	model.splashUntil = splashDeadline(model.animationMode)
 
 	program := tea.NewProgram(model, programOptions(w, cfg)...)
 	_, err := program.Run()
@@ -297,10 +345,21 @@ func RunClientWithOptions(w io.Writer, cfg config.Config, client ChatClient, opt
 		_, err := fmt.Fprintln(w, model.View())
 		return err
 	}
+	model.splashUntil = splashDeadline(model.animationMode)
 
 	program := tea.NewProgram(model, programOptions(w, cfg)...)
 	_, err := program.Run()
 	return err
+}
+
+// splashDeadline returns when the startup splash should end, or the zero
+// time when animation is disabled (splashActive treats a zero deadline as
+// "no splash").
+func splashDeadline(animationMode string) time.Time {
+	if animationMode == string(animation.ModeOff) {
+		return time.Time{}
+	}
+	return time.Now().Add(splashDuration)
 }
 
 func programOptions(w io.Writer, cfg config.Config) []tea.ProgramOption {
@@ -336,9 +395,17 @@ func newMockShellModelWithClockAndCapability(channel string, cfg config.Config, 
 			At:      connectedAt,
 		}
 		state.messages = seededMockMessages(channelName, connectedAt)
+		state.live = true
+		state.liveSince = connectedAt
+		state.viewerCount = 128
+	}
+	emoteEntries := make(map[string][]assets.EmoteEntry, len(channels.channelNames()))
+	for _, channelName := range channels.channelNames() {
+		emoteEntries[channelKey(channelName)] = sampleEmoteEntries()
 	}
 	return mockShellModel{
 		channels:        channels,
+		theme:           cfg.ResolveTheme(),
 		mentionLogin:    cfg.Twitch.Username,
 		animationMode:   string(animationConfig.Mode),
 		mouseEnabled:    cfg.Features.EnableMouse,
@@ -353,7 +420,26 @@ func newMockShellModelWithClockAndCapability(channel string, cfg config.Config, 
 		height:          defaultMockHeight,
 		focus:           mockFocusChat,
 		terminalFocused: true,
+		debugRecording:  cfg.Debug.Enabled,
+		emoteEntries:    emoteEntries,
+		effectiveConfig: cfg,
 	}
+}
+
+// sampleEmoteEntries seeds Ctrl+E search and the quick-select row in
+// --mock mode with well-known Twitch global emote names, so both are
+// demoable without credentials or network access.
+func sampleEmoteEntries() []assets.EmoteEntry {
+	names := []string{
+		"Kappa", "PogChamp", "LUL", "monkaS", "KEKW", "5Head", "EZ", "PagMan",
+		"OMEGALUL", "Pog", "BibleThump", "TriHard", "VoHiYo", "ResidentSleeper",
+		"NotLikeThis", "SeemsGood", "HeyGuys", "DansGame",
+	}
+	entries := make([]assets.EmoteEntry, len(names))
+	for i, name := range names {
+		entries[i] = assets.EmoteEntry{Name: name}
+	}
+	return entries
 }
 
 func newLiveShellModelWithClock(channel string, cfg config.Config, client ChatClient, clock animation.Clock) mockShellModel {
@@ -380,6 +466,7 @@ func newLiveShellModelWithClockOptionsAndCapability(channel string, cfg config.C
 	}
 	return mockShellModel{
 		channels:              channels,
+		theme:                 cfg.ResolveTheme(),
 		mentionLogin:          cfg.Twitch.Username,
 		animationMode:         string(animationConfig.Mode),
 		mouseEnabled:          cfg.Features.EnableMouse,
@@ -396,6 +483,10 @@ func newLiveShellModelWithClockOptionsAndCapability(channel string, cfg config.C
 		imagePreparer:         opts.ImagePreparer,
 		imageRenderer:         opts.ImageRenderer,
 		systemNotifier:        opts.SystemNotifier,
+		streamStatusResolver:  opts.StreamStatusResolver,
+		emoteIndex:            opts.EmoteIndex,
+		emoteEntries:          make(map[string][]assets.EmoteEntry),
+		emoteEntriesRequested: make(map[string]bool),
 		debugLogger:           opts.DebugLogger,
 		avatarRequested:       make(map[string]bool),
 		assetRequested:        make(map[string]bool),
@@ -406,6 +497,8 @@ func newLiveShellModelWithClockOptionsAndCapability(channel string, cfg config.C
 		height:                defaultMockHeight,
 		focus:                 mockFocusChat,
 		terminalFocused:       true,
+		debugRecording:        cfg.Debug.Enabled,
+		effectiveConfig:       cfg,
 	}
 }
 
@@ -483,21 +576,46 @@ func incomingMockMessages(channel string, startedAt time.Time) []twitch.ChatMess
 }
 
 func (m mockShellModel) Init() tea.Cmd {
-	return tea.Batch(m.nextIncomingCommand(), m.nextClientMessageCommand(), m.nextConnectionStateCommand())
+	return tea.Batch(
+		m.nextIncomingCommand(),
+		m.nextClientMessageCommand(),
+		m.nextConnectionStateCommand(),
+		m.scheduleFrameTick(),
+		m.resolveStreamStatusCommand(),
+		m.scheduleStreamStatusTick(),
+	)
 }
 
 func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.Type {
-		case tea.KeyCtrlC:
+		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
-		case tea.KeyCtrlP:
+		}
+		if m.splashActive() {
+			m.splashSkipped = true
+			return m, nil
+		}
+		if msg.Type == tea.KeyCtrlP {
 			m.toggleCommandPalette()
+			return m, nil
+		}
+		if msg.Type == tea.KeyCtrlE {
+			m.toggleEmotePicker()
+			return m, nil
+		}
+		if msg.Type == tea.KeyCtrlT {
+			m.toggleThemeSettings()
 			return m, nil
 		}
 		if m.palette.open {
 			return m.handleCommandPaletteKey(msg)
+		}
+		if m.emotePicker.open {
+			return m.handleEmotePickerKey(msg)
+		}
+		if m.themeSettings.open {
+			return m.handleThemeSettingsKey(msg)
 		}
 		switch msg.Type {
 		case tea.KeyTab:
@@ -529,6 +647,14 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focus == mockFocusChat {
 				m.selectReplyMessage(1)
 			}
+		case tea.KeyLeft:
+			if m.focus == mockFocusEmotes {
+				m.moveEmoteSelection(-1)
+			}
+		case tea.KeyRight:
+			if m.focus == mockFocusEmotes {
+				m.moveEmoteSelection(1)
+			}
 		case tea.KeyCtrlU:
 			if m.focus == mockFocusComposer {
 				m.activeChannelState().composerText = ""
@@ -536,6 +662,9 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyEnter:
 			if m.focus == mockFocusComposer {
 				return m.queueComposerSend()
+			}
+			if m.focus == mockFocusEmotes {
+				m.insertSelectedEmote()
 			}
 		case tea.KeySpace:
 			if m.focus == mockFocusComposer {
@@ -549,6 +678,7 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.focus == mockFocusChat && len(msg.Runes) == 1 && msg.Runes[0] == ']' {
 				if m.channels.switchBy(1) {
+					m.triggerSceneFlash()
 					m.clampScroll()
 					return m.withAsyncAssetCommands(nil)
 				}
@@ -556,6 +686,7 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.focus == mockFocusChat && len(msg.Runes) == 1 && msg.Runes[0] == '[' {
 				if m.channels.switchBy(-1) {
+					m.triggerSceneFlash()
 					m.clampScroll()
 					return m.withAsyncAssetCommands(nil)
 				}
@@ -578,6 +709,9 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.focus == mockFocusChat && len(msg.Runes) == 1 && msg.Runes[0] == 'i' {
 				m.inspectOpen = !m.inspectOpen
+				if m.inspectOpen {
+					m.closeOtherOverlays("inspect")
+				}
 				m.clampScroll()
 				return m, nil
 			}
@@ -586,7 +720,7 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case tea.MouseMsg:
-		if m.palette.open {
+		if m.palette.open || m.emotePicker.open || m.themeSettings.open {
 			return m, nil
 		}
 		return m.handleMouse(msg)
@@ -655,6 +789,24 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.completeComposerSend(msg)
 	case reconnectCompletedMsg:
 		m.completeReconnect(msg)
+	case animation.FrameMsg:
+		m.frameTickScheduled = false
+		m.advanceFrame(msg.At)
+		return m, m.scheduleFrameTick()
+	case streamStatusTickMsg:
+		m.streamStatusTickScheduled = false
+		return m, tea.Batch(m.resolveStreamStatusCommand(), m.scheduleStreamStatusTick())
+	case streamStatusResolvedMsg:
+		if msg.err == nil {
+			m.applyStreamStatusResults(msg.results)
+		}
+		return m, nil
+	case broadcasterIDResolvedMsg:
+		m.applyBroadcasterIDResult(msg)
+		return m.withAsyncAssetCommands(nil)
+	case emoteIndexResolvedMsg:
+		m.applyEmoteIndexResult(msg)
+		return m, nil
 	case mockAnimationTickMsg:
 		m.revealTickScheduled = false
 		active := m.activeChannelState()
@@ -709,6 +861,9 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m mockShellModel) View() string {
+	if m.splashActive() {
+		return m.splashView()
+	}
 	layout := m.layout()
 
 	regions := make([]string, 0, 4)
@@ -728,20 +883,40 @@ func (m mockShellModel) View() string {
 	if layout.inspectHeight > 0 {
 		regions = append(regions, m.inspectView(layout))
 	}
+	if layout.emotePickerHeight > 0 {
+		regions = append(regions, m.emotePickerView(layout))
+	}
+	if layout.themeSettingsHeight > 0 {
+		regions = append(regions, m.themeSettingsView(layout))
+	}
 	if layout.composerHeight > 0 {
 		regions = append(regions, m.composerView(layout))
+	}
+	if layout.emotesHeight > 0 {
+		regions = append(regions, m.emotesView(layout))
 	}
 	if layout.helpHeight > 0 {
 		regions = append(regions, m.helpView(layout.width, layout.helpHeight))
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, regions...)
+	joined := lipgloss.JoinVertical(lipgloss.Left, regions...)
+	return lipgloss.NewStyle().
+		Width(layout.width).
+		Height(clampMin(m.height, 1)).
+		Background(lipgloss.Color(m.theme.Background)).
+		Foreground(lipgloss.Color(m.theme.Foreground)).
+		Render(joined)
 }
 
 func (m mockShellModel) statusLine(width int) string {
 	active := m.activeChannelState()
 	channelCount := len(m.channels.channelNames())
 	left := fmt.Sprintf("#%s %s", active.name, active.status.Status)
+	if width >= 96 {
+		left = m.formatStatusMetrics(m.metricsNow(), m.debugRecording) + " | " + left
+	} else if width >= 60 {
+		left = m.compactStatusMetrics(m.metricsNow()) + " | " + left
+	}
 	if channelCount > 1 && width >= 26 {
 		left += fmt.Sprintf(" | channels=%d", channelCount)
 	}
@@ -767,10 +942,12 @@ func (m mockShellModel) statusLine(width int) string {
 	}
 	line := fitLine(" "+left+right, width)
 
+	statusBackground := m.theme.Accent
+	statusForeground := theme.ContrastCorrectedForeground(m.theme.Foreground, statusBackground, m.theme.Background)
 	return lipgloss.NewStyle().
 		Width(width).
-		Foreground(lipgloss.Color("#f8f8f2")).
-		Background(lipgloss.Color("#4b367c")).
+		Foreground(lipgloss.Color(statusForeground)).
+		Background(lipgloss.Color(statusBackground)).
 		Bold(true).
 		Render(line)
 }
@@ -790,9 +967,12 @@ func (m mockShellModel) chatView(layout mockShellLayout) string {
 		return fitBlock(content, layout.chatWidth, layout.chatHeight)
 	}
 
-	borderColor := lipgloss.Color("#5f6c7b")
-	if m.focus == mockFocusChat && !m.palette.open {
-		borderColor = lipgloss.Color("#8bd5ff")
+	borderColor := lipgloss.Color(m.theme.Border)
+	if m.focus == mockFocusChat && !m.anyOverlayOpen() {
+		borderColor = lipgloss.Color(m.theme.Accent)
+	}
+	if m.sceneFlashActive() {
+		borderColor = lipgloss.Color(m.theme.Foreground)
 	}
 	return lipgloss.NewStyle().
 		Width(clampMin(layout.chatWidth-2, 0)).
@@ -837,9 +1017,9 @@ func (m mockShellModel) sidebarView(layout mockShellLayout) string {
 		lines = lines[:layout.sidebarContentHeight]
 	}
 
-	borderColor := lipgloss.Color("#5f6c7b")
-	if m.focus == mockFocusChat && !m.palette.open {
-		borderColor = lipgloss.Color("#cba6f7")
+	borderColor := lipgloss.Color(m.theme.Border)
+	if m.focus == mockFocusChat && !m.anyOverlayOpen() {
+		borderColor = lipgloss.Color(m.theme.Accent)
 	}
 	return lipgloss.NewStyle().
 		Width(contentWidth).
@@ -971,21 +1151,21 @@ func (m mockShellModel) composerView(layout mockShellLayout) string {
 
 	lines := []string{}
 	if active.replyTo != nil && layout.composerContentHeight >= 3 {
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4")).Italic(true).Render(m.replyContextLine(layout.width-4)))
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Muted)).Italic(true).Render(m.replyContextLine(layout.width-4)))
 	}
 	lines = append(lines,
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#8bd5ff")).Render(label),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#a6adc8")).Render(input),
+		lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Accent)).Render(label),
+		lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Foreground)).Render(input),
 	)
 	box := lipgloss.JoinVertical(lipgloss.Left, lines...)
 
 	if layout.composerContentHeight == 1 {
-		box = lipgloss.NewStyle().Foreground(lipgloss.Color("#a6adc8")).Render(input)
+		box = lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Foreground)).Render(input)
 	}
 
-	borderColor := lipgloss.Color("#2a9d8f")
-	if m.focus == mockFocusComposer && !m.palette.open {
-		borderColor = lipgloss.Color("#f9e2af")
+	borderColor := lipgloss.Color(m.theme.Border)
+	if m.focus == mockFocusComposer && !m.anyOverlayOpen() {
+		borderColor = lipgloss.Color(m.theme.Accent)
 	}
 	return lipgloss.NewStyle().
 		Width(clampMin(layout.width-2, 0)).
@@ -996,6 +1176,98 @@ func (m mockShellModel) composerView(layout mockShellLayout) string {
 		Render(box)
 }
 
+// emotesView renders the third dashboard row: a horizontal quick-select
+// strip of available emotes. Left/right move the selection when focused;
+// enter/tab appends the selected emote name to the composer (see
+// insertSelectedEmote). Ctrl+E opens the larger searchable modal for emotes
+// not in this glanceable strip.
+func (m mockShellModel) emotesView(layout mockShellLayout) string {
+	entries := m.activeEmoteEntries()
+	contentWidth := layout.width
+	if layout.emotesFramed {
+		contentWidth = clampMin(layout.width-4, 1)
+	}
+
+	label := " Emotes"
+	var line string
+	switch {
+	case len(entries) == 0:
+		line = label + ": (resolving...)"
+	default:
+		selected := m.clampedEmoteSelected(entries)
+		parts := make([]string, 0, len(entries))
+		for i, entry := range entries {
+			name := entry.Name
+			if i == selected && m.focus == mockFocusEmotes {
+				name = "[" + name + "]"
+			}
+			parts = append(parts, name)
+		}
+		line = label + ": " + strings.Join(parts, " ")
+	}
+	content := fitLine(line, contentWidth)
+
+	if !layout.emotesFramed {
+		return fitBlock(content, layout.width, layout.emotesHeight)
+	}
+
+	borderColor := lipgloss.Color(m.theme.Border)
+	if m.focus == mockFocusEmotes && !m.anyOverlayOpen() {
+		borderColor = lipgloss.Color(m.theme.Accent)
+	}
+	return lipgloss.NewStyle().
+		Width(clampMin(layout.width-2, 0)).
+		Height(layout.emotesContentHeight).
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(borderColor).
+		Padding(0, 1).
+		Render(content)
+}
+
+// clampedEmoteSelected keeps emoteSelected in range as the entry list
+// changes size (e.g. resolves from empty to populated).
+func (m mockShellModel) clampedEmoteSelected(entries []assets.EmoteEntry) int {
+	if len(entries) == 0 {
+		return 0
+	}
+	selected := m.emoteSelected
+	if selected < 0 {
+		selected = 0
+	}
+	if selected >= len(entries) {
+		selected = len(entries) - 1
+	}
+	return selected
+}
+
+func (m *mockShellModel) moveEmoteSelection(delta int) {
+	entries := m.activeEmoteEntries()
+	if len(entries) == 0 {
+		m.emoteSelected = 0
+		return
+	}
+	selected := m.clampedEmoteSelected(entries) + delta
+	if selected < 0 {
+		selected = len(entries) - 1
+	}
+	if selected >= len(entries) {
+		selected = 0
+	}
+	m.emoteSelected = selected
+}
+
+// insertSelectedEmote appends the selected quick-select emote's name plus a
+// trailing space to the composer, matching the composer's existing
+// append-only text model (no cursor-position tracking).
+func (m *mockShellModel) insertSelectedEmote() {
+	entries := m.activeEmoteEntries()
+	if len(entries) == 0 {
+		return
+	}
+	name := entries[m.clampedEmoteSelected(entries)].Name
+	m.activeChannelState().composerText += name + " "
+}
+
 func (m mockShellModel) helpView(width, height int) string {
 	lines := m.helpLines(width, height)
 	for i := range lines {
@@ -1003,8 +1275,8 @@ func (m mockShellModel) helpView(width, height int) string {
 	}
 	return lipgloss.NewStyle().
 		Width(width).
-		Foreground(lipgloss.Color("#cdd6f4")).
-		Background(lipgloss.Color("#1f2430")).
+		Foreground(lipgloss.Color(m.theme.Muted)).
+		Background(lipgloss.Color(m.theme.Surface)).
 		Render(strings.Join(lines, "\n"))
 }
 
@@ -1107,21 +1379,33 @@ func (m mockShellModel) layout() mockShellLayout {
 		layout.composerContentHeight = 1
 	}
 
-	remaining := height - layout.statusHeight - layout.helpHeight - layout.composerHeight
+	if height >= 12 {
+		layout.emotesHeight = 3
+		layout.emotesContentHeight = 1
+		layout.emotesFramed = width >= 5
+	}
+
+	remaining := height - layout.statusHeight - layout.helpHeight - layout.composerHeight - layout.emotesHeight
+	if remaining < 3 && layout.emotesHeight > 0 {
+		layout.emotesHeight = 0
+		layout.emotesContentHeight = 0
+		layout.emotesFramed = false
+		remaining = height - layout.statusHeight - layout.helpHeight - layout.composerHeight
+	}
 	if remaining < 3 && layout.composerHeight > 3 {
 		layout.composerHeight = 3
 		layout.composerContentHeight = 1
-		remaining = height - layout.statusHeight - layout.helpHeight - layout.composerHeight
+		remaining = height - layout.statusHeight - layout.helpHeight - layout.composerHeight - layout.emotesHeight
 	}
 	if remaining < 1 && layout.helpHeight > 0 {
 		layout.helpHeight = 0
-		remaining = height - layout.statusHeight - layout.composerHeight
+		remaining = height - layout.statusHeight - layout.composerHeight - layout.emotesHeight
 	}
 	if remaining < 1 && layout.composerHeight > 0 {
-		layout.composerHeight = clampMin(height-layout.statusHeight, 0)
+		layout.composerHeight = clampMin(height-layout.statusHeight-layout.emotesHeight, 0)
 		layout.composerContentHeight = clampMin(layout.composerHeight-2, 0)
 		layout.composerFramed = layout.composerHeight >= 3 && width >= 5
-		remaining = height - layout.statusHeight - layout.composerHeight
+		remaining = height - layout.statusHeight - layout.composerHeight - layout.emotesHeight
 	}
 
 	if m.palette.open && remaining >= 4 {
@@ -1162,6 +1446,44 @@ func (m mockShellModel) layout() mockShellLayout {
 		remaining -= layout.inspectHeight
 	}
 
+	if !m.palette.open && !m.inspectOpen && m.emotePicker.open && remaining >= 4 {
+		layout.emotePickerHeight = 5
+		if height >= 18 {
+			layout.emotePickerHeight = 7
+		}
+		if layout.emotePickerHeight > remaining-1 {
+			layout.emotePickerHeight = remaining - 1
+		}
+		if layout.emotePickerHeight < 3 {
+			layout.emotePickerHeight = 0
+		}
+		layout.emotePickerFramed = layout.emotePickerHeight >= 3 && width >= 5
+		layout.emotePickerContentHeight = layout.emotePickerHeight
+		if layout.emotePickerFramed {
+			layout.emotePickerContentHeight = layout.emotePickerHeight - 2
+		}
+		remaining -= layout.emotePickerHeight
+	}
+
+	if !m.palette.open && !m.inspectOpen && !m.emotePicker.open && m.themeSettings.open && remaining >= 4 {
+		layout.themeSettingsHeight = 5
+		if height >= 18 {
+			layout.themeSettingsHeight = 7
+		}
+		if layout.themeSettingsHeight > remaining-1 {
+			layout.themeSettingsHeight = remaining - 1
+		}
+		if layout.themeSettingsHeight < 3 {
+			layout.themeSettingsHeight = 0
+		}
+		layout.themeSettingsFramed = layout.themeSettingsHeight >= 3 && width >= 5
+		layout.themeSettingsContentHeight = layout.themeSettingsHeight
+		if layout.themeSettingsFramed {
+			layout.themeSettingsContentHeight = layout.themeSettingsHeight - 2
+		}
+		remaining -= layout.themeSettingsHeight
+	}
+
 	layout.chatHeight = clampMin(remaining, 0)
 	layout.sidebarWidth = m.sidebarWidth(width, layout.chatHeight)
 	layout.chatWidth = clampMin(width-layout.sidebarWidth, 1)
@@ -1178,7 +1500,7 @@ func (m mockShellModel) layout() mockShellLayout {
 		layout.chatContentHeight = 0
 	}
 
-	used := layout.statusHeight + layout.chatHeight + layout.paletteHeight + layout.inspectHeight + layout.composerHeight + layout.helpHeight
+	used := layout.statusHeight + layout.chatHeight + layout.paletteHeight + layout.inspectHeight + layout.emotePickerHeight + layout.themeSettingsHeight + layout.composerHeight + layout.emotesHeight + layout.helpHeight
 	if used < height {
 		layout.chatHeight += height - used
 		if layout.chatFramed {
@@ -1214,11 +1536,14 @@ func (m mockShellModel) chatRowWidth(layout mockShellLayout) int {
 }
 
 func (m *mockShellModel) cycleFocus() {
-	if m.focus == mockFocusChat {
+	switch m.focus {
+	case mockFocusChat:
 		m.focus = mockFocusComposer
-		return
+	case mockFocusComposer:
+		m.focus = mockFocusEmotes
+	default:
+		m.focus = mockFocusChat
 	}
-	m.focus = mockFocusChat
 }
 
 func messageFilterForShortcutRune(r rune) (messageFilter, bool) {
@@ -1459,6 +1784,7 @@ func (m *mockShellModel) enqueueMessage(message twitch.ChatMessage) tea.Cmd {
 	if state := m.channels.ensure(message.Channel); state != nil {
 		state.removeLocalEcho(message.ID)
 	}
+	m.recordChatBytes(message)
 	state, activeChannel := m.channels.applyMessage(message)
 	if state == nil {
 		return nil
@@ -1523,7 +1849,7 @@ func (m mockShellModel) shouldNotifyForSystemEvent(message twitch.ChatMessage) b
 	if !m.terminalFocused {
 		return true
 	}
-	return m.focus != mockFocusChat || m.palette.open || m.inspectOpen
+	return m.focus != mockFocusChat || m.anyOverlayOpen()
 }
 
 func (m mockShellModel) messageTargetsActiveChannel(message twitch.ChatMessage) bool {
@@ -1613,6 +1939,54 @@ func (s *channelState) removeActiveRevealID(id string) {
 	}
 }
 
+// scheduleFrameTick starts the shared animation clock. It runs continuously
+// (not just while something is mid-animation) whenever animation is enabled,
+// driving the pulsing status indicators, scene-switch flash, startup splash,
+// and command-palette typewriter reveal from one ticker.
+func (m *mockShellModel) scheduleFrameTick() tea.Cmd {
+	if m.frameTickScheduled || m.animationMode == string(animation.ModeOff) {
+		return nil
+	}
+	m.frameTickScheduled = true
+	return animation.ScheduleFrame(animation.DefaultFrameInterval)
+}
+
+// advanceFrame runs once per animation-clock tick. It records the frame for
+// FPS measurement and advances the command-palette typewriter reveal; scene
+// flash and splash simply expire based on wall-clock deadlines checked at
+// render time, so they need no per-tick bookkeeping here.
+func (m *mockShellModel) advanceFrame(now time.Time) {
+	m.lastFrameAt = now
+	m.frameTimestamps = append(m.frameTimestamps, now)
+	cutoff := now.Add(-time.Second)
+	trimmed := m.frameTimestamps[:0]
+	for _, ts := range m.frameTimestamps {
+		if ts.After(cutoff) {
+			trimmed = append(trimmed, ts)
+		}
+	}
+	m.frameTimestamps = trimmed
+	m.sampleResourceUsage(now)
+	m.trimChatByteSamples(now)
+	if m.palette.open {
+		m.refreshPaletteReveal(now)
+	}
+}
+
+// triggerSceneFlash briefly highlights the chat border on channel switch,
+// the TUI's closest analog to an OBS "scene switch" transition. It is a
+// no-op when animation is disabled.
+func (m *mockShellModel) triggerSceneFlash() {
+	if m.animationMode == string(animation.ModeOff) {
+		return
+	}
+	m.sceneFlashUntil = time.Now().Add(sceneFlashDuration)
+}
+
+func (m mockShellModel) sceneFlashActive() bool {
+	return !m.sceneFlashUntil.IsZero() && time.Now().Before(m.sceneFlashUntil)
+}
+
 func (m *mockShellModel) scheduleRevealTick() tea.Cmd {
 	if m.revealTickScheduled || m.activeChannelState().revealQueue.Len() == 0 {
 		return nil
@@ -1628,6 +2002,12 @@ func (m *mockShellModel) withAsyncAssetCommands(cmds ...tea.Cmd) (tea.Model, tea
 		cmds = append(cmds, cmd)
 	}
 	if cmd := m.scheduleAssetLookup(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	if cmd := m.scheduleBroadcasterIDLookup(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	if cmd := m.scheduleEmoteIndexLookup(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
 	return *m, batchNonNil(cmds...)
@@ -2696,6 +3076,7 @@ func mockAnimationConfig(mode string) animation.Config {
 
 func (m mockShellModel) renderOptions(width int) render.Options {
 	opts := render.DefaultOptions(width)
+	opts.Palette = m.theme
 	opts.Assets = m.imageCapability.AssetOptions()
 	if len(m.imageCells) > 0 {
 		opts.Assets.ImageCells = m.imageCells
@@ -2823,6 +3204,9 @@ func (m mockShellModel) focusName() string {
 	}
 	if m.focus == mockFocusComposer {
 		return "composer"
+	}
+	if m.focus == mockFocusEmotes {
+		return "emotes"
 	}
 	return "chat"
 }

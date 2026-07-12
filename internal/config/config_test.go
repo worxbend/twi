@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/w0rxbend/twi/internal/theme"
 )
 
 func TestLoadPrecedence(t *testing.T) {
@@ -356,6 +358,46 @@ func TestWriteNonSecretFileCreatesConfigWithoutSecrets(t *testing.T) {
 		if strings.Contains(output, forbidden) {
 			t.Fatalf("written config leaked %q:\n%s", forbidden, output)
 		}
+	}
+}
+
+func TestWriteNonSecretFileRoundTripsThemeAndFeatureKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "twi", "config.toml")
+	cfg := Default()
+	cfg.Features.ThemeName = "custom"
+	cfg.Features.ThemeCustom = theme.Palette{
+		Background: "#010101",
+		Foreground: "#fefefe",
+		Accent:     "#abcdef",
+		Muted:      "#222222",
+		Border:     "#333333",
+		Surface:    "#444444",
+		Warning:    "#555555",
+		Error:      "#666666",
+		Success:    "#777777",
+	}
+	cfg.Features.StreamStatusMode = "off"
+	cfg.Features.EmoteAutocompleteMode = "off"
+
+	if err := WriteNonSecretFile(path, cfg); err != nil {
+		t.Fatalf("WriteNonSecretFile returned error: %v", err)
+	}
+
+	loaded, err := Load(nil, Overrides{ConfigPath: path})
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if loaded.Features.ThemeName != "custom" {
+		t.Fatalf("ThemeName = %q, want %q", loaded.Features.ThemeName, "custom")
+	}
+	if loaded.Features.ThemeCustom != cfg.Features.ThemeCustom {
+		t.Fatalf("ThemeCustom = %+v, want %+v", loaded.Features.ThemeCustom, cfg.Features.ThemeCustom)
+	}
+	if loaded.Features.StreamStatusMode != "off" {
+		t.Fatalf("StreamStatusMode = %q, want %q", loaded.Features.StreamStatusMode, "off")
+	}
+	if loaded.Features.EmoteAutocompleteMode != "off" {
+		t.Fatalf("EmoteAutocompleteMode = %q, want %q", loaded.Features.EmoteAutocompleteMode, "off")
 	}
 }
 

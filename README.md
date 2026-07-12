@@ -208,6 +208,10 @@ Do not paste real tokens into commits, screenshots, issue comments, terminal rec
 | Login/setup | Partial | `twi setup` creates or updates non-secret flat config values and can hand off to `twi login`; on supported Unix builds, `twi login` saves through the restrictive credential-file fallback. Non-Unix builds keep env/config credentials as the supported path. |
 | Multi-channel UX | Partial | Messages, unread counts, scroll, drafts, replies, sends, and local view filters are per-channel. Normal and wide terminals show a keyboard-first channel sidebar with connection indicators, unread counts, and filter markers; `ctrl+p` opens a keyboard command palette for common actions, panel toggles, channel switching, local filters, local clear, and live reconnect restart. Optional mouse support can scroll chat, click channels, focus the composer, and select messages. Twitch `USERNOTICE` events such as raids carry normalized event IDs; when the relevant chat is not active, the terminal is blurred, or another panel has focus, `twi` attempts a desktop system notification, falls back to a terminal bell, and shows a status-line notification summary. Selected messages can be inspected in a redacted diagnostics panel even when filters hide them from the chat view. Narrow terminals collapse channel state into the status line. Twitch IRC connect/reconnect/disconnect callbacks are connection-level and are shown on configured channel states rather than as independent per-channel transport events. Manual reconnect tears down the active live IRC transport before creating a fresh one while preserving per-channel UI state. |
 | Inline terminal images | Partial | Live startup installs the concrete resolver/downloader/disk-cache/emoji-provider/Twitch-metadata/preparer/Kitty-renderer stack when config, cache writability, terminal capability, and any API credentials required by the selected asset kinds allow it. IRC fragment-backed emotes use public CDN URLs without Twitch API credentials; avatars, badges, and fallback metadata still require their documented dependencies. Disabled, unsupported, missing-dependency, degraded, resolver failure, downloader failure, preparation failure, and render failure paths keep initials, badge labels, emote tokens, and Unicode emoji fallbacks. Manual Kitty/Ghostty validation remains pending. |
+| Theming | Ready | 13 built-in presets (Claude, Codex, Btop, Nord, Dracula, Gruvbox, Solarized Dark, Monokai, One Dark, Tokyo Night, Catppuccin Mocha, Rose Pine, Mono) plus a custom hex palette apply across every widget, including the full terminal background. `ctrl+t` opens a btop-style settings view that live-previews a theme as you move the selection and persists it with `enter` (`esc` reverts); `twi profile list\|show\|set` manages the same setting from the CLI. |
+| Animation | Ready | A shared ~10fps clock (disabled when `animation_mode = "off"`) drives a pulsing LIVE/REC status-bar segment, a channel-switch flash, a typewriter reveal for command-palette results, and a ~2s animated startup splash (skippable by any keypress). |
+| Live status telemetry | Partial | The status bar shows real Twitch broadcast status via Helix "Get Streams" polling (LIVE + elapsed on-air time + viewer count) when `stream_status_mode` and Twitch API credentials allow it, otherwise OFFLINE; REC reflects `debug_logging`; CPU%/memory/FPS are twi's own process stats; "chat" bitrate is derived chat-message throughput, not stream encode bitrate. `--mock` simulates a fixed demo LIVE state. |
+| Emote autocomplete | Partial | `ctrl+e` opens a searchable emote picker and a persistent quick-select row (third `tab` stop) backed by real Twitch global/channel emotes when `emote_autocomplete_mode` and credentials allow it, with a built-in sample list in `--mock` mode. |
 
 Manual validation evidence for the current environment is tracked in
 [docs/manual-validation.md](docs/manual-validation.md). Credentialed Twitch chat
@@ -219,18 +223,21 @@ records a complete credential set or a compatible graphics terminal session.
 | Key | Action |
 | --- | --- |
 | `ctrl+p` | Open or close the command palette. |
-| `tab` | Switch focus between chat and composer. |
+| `ctrl+t` | Open or close theme settings; live-preview a theme with `up`/`down`, `enter` to save, `esc` to revert. |
+| `ctrl+e` | Open or close the searchable emote picker; filter by typing, `up`/`down` to select, `enter` to insert. |
+| `tab` | Cycle focus between chat, composer, and the emotes quick-select row. |
+| `left` / `right` | Move the emotes quick-select row's highlighted emote (when it has focus). |
 | `?` | Toggle expanded help. |
 | `pgup` / `pgdown` | Scroll chat. |
-| `up` / `down` | Select messages for reply or inspect mode. |
+| `up` / `down` | Select messages for reply or inspect mode (chat focus), or navigate an open overlay. |
 | `1` / `2` / `3` / `4` | Toggle local filters for mentions, broadcaster/mod/VIP messages, notices, and errors from chat focus. |
 | `0` | Reset active-channel message filters. |
 | `r` | Reply to the selected message. |
 | `i` | Open or close the selected-message inspect panel. |
 | `ctrl+l` | Clear the active channel's local chat history. |
 | `ctrl+r` | Restart the active live chat source when supported, preserving channel history and drafts. |
-| `esc` | Close inspect mode or cancel reply mode. |
-| `enter` | Send from the composer in live mode. |
+| `esc` | Close inspect mode, cancel reply mode, or close an open overlay. |
+| `enter` | Send from the composer in live mode, or insert the selected emote when the emotes row/picker has focus. |
 | `/me does a thing` | Send a Twitch action message. |
 
 Mouse support is enabled by default. Set `enable_mouse = false` or `TWI_ENABLE_MOUSE=false` to keep terminal mouse reporting disabled; all workflows remain available from the keyboard.
@@ -254,6 +261,9 @@ export TWI_AVATAR_MODE="initials"
 export TWI_EMOJI_MODE="image"
 export TWI_EMOJI_PROVIDER="twemoji"
 export TWI_EMOTE_MODE="image"
+export TWI_THEME_NAME="claude"
+export TWI_STREAM_STATUS_MODE="auto"
+export TWI_EMOTE_AUTOCOMPLETE_MODE="auto"
 export TWI_DEBUG_LOG="false"
 ```
 
@@ -285,9 +295,51 @@ emoji_provider = "twemoji"
 emoji_url_template = ""
 emote_mode = "image"
 animation_mode = "fast"
+theme_name = "claude"
+theme_background = ""
+theme_foreground = ""
+theme_accent = ""
+theme_muted = ""
+theme_border = ""
+theme_surface = ""
+theme_warning = ""
+theme_error = ""
+theme_success = ""
+stream_status_mode = "auto"
+emote_autocomplete_mode = "auto"
 debug_logging = false
 debug_log_path = ""
 ```
+
+### Themes
+
+`theme_name` selects one of 13 built-in presets — `claude` (default), `codex`,
+`btop`, `nord`, `dracula`, `gruvbox`, `solarized-dark`, `monokai`, `one-dark`,
+`tokyo-night`, `catppuccin-mocha`, `rose-pine`, `mono` — applied across every
+widget, including the full terminal background. Set `theme_name = "custom"`
+and fill in the `theme_*` hex fields above for your own palette; unset custom
+fields fall back to no styling for that role.
+
+Manage themes from the CLI:
+
+```sh
+twi profile list                 # preset names, with the active one marked
+twi profile show                 # active theme name + resolved hex values
+twi profile set nord             # persist a built-in preset
+twi profile set custom --background '#000000' --foreground '#ffffff' --accent '#ff00ff'
+```
+
+Or interactively: press `ctrl+t` in the chat shell for a btop-style settings
+view that live-previews each theme as you move the selection, `enter` to save,
+`esc` to revert.
+
+The status bar's LIVE indicator reflects the channel's real Twitch broadcast
+status (polled via Helix "Get Streams" every 60s when `stream_status_mode`
+and Twitch API credentials allow it) — not just the local IRC connection.
+REC reflects `debug_logging` (twi's own debug-log recording), since twi has
+no other "recording" concept. The "chat" throughput figure is derived from
+actual incoming chat-message bytes, not stream encode bitrate, which Twitch
+does not expose through any public API.
 
 For support diagnostics, enable redacted JSON logs explicitly:
 

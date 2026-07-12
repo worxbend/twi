@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/w0rxbend/twi/internal/theme"
 )
 
 const redacted = "[redacted]"
@@ -33,15 +35,26 @@ type TwitchConfig struct {
 }
 
 type FeatureConfig struct {
-	EnableKittyImages bool
-	EnableMouse       bool
-	ImageMode         string
-	AvatarMode        string
-	EmojiMode         string
-	EmojiProvider     string
-	EmojiURLTemplate  string
-	EmoteMode         string
-	AnimationMode     string
+	EnableKittyImages     bool
+	EnableMouse           bool
+	ImageMode             string
+	AvatarMode            string
+	EmojiMode             string
+	EmojiProvider         string
+	EmojiURLTemplate      string
+	EmoteMode             string
+	AnimationMode         string
+	ThemeName             string
+	ThemeCustom           theme.Palette
+	StreamStatusMode      string
+	EmoteAutocompleteMode string
+}
+
+// ResolveTheme returns the effective palette for cfg: the named preset, or
+// the custom palette when theme_name is "custom".
+func (c Config) ResolveTheme() theme.Palette {
+	palette, _ := theme.ResolvePalette(c.Features.ThemeName, c.Features.ThemeCustom)
+	return palette
 }
 
 type DebugConfig struct {
@@ -109,14 +122,17 @@ func LoadEnvOnly(environ []string, overrides Overrides) (Config, error) {
 func Default() Config {
 	return Config{
 		Features: FeatureConfig{
-			EnableKittyImages: true,
-			EnableMouse:       true,
-			ImageMode:         "auto",
-			AvatarMode:        "initials",
-			EmojiMode:         "image",
-			EmojiProvider:     "twemoji",
-			EmoteMode:         "image",
-			AnimationMode:     "fast",
+			EnableKittyImages:     true,
+			EnableMouse:           true,
+			ImageMode:             "auto",
+			AvatarMode:            "initials",
+			EmojiMode:             "image",
+			EmojiProvider:         "twemoji",
+			EmoteMode:             "image",
+			AnimationMode:         "fast",
+			ThemeName:             "claude",
+			StreamStatusMode:      "auto",
+			EmoteAutocompleteMode: "auto",
 		},
 	}
 }
@@ -146,17 +162,29 @@ func WriteNonSecretFile(path string, cfg Config) error {
 		return errors.New("config path is required")
 	}
 	updates := map[string]string{
-		"twitch_username":     quote(strings.TrimSpace(cfg.Twitch.Username)),
-		"twitch_client_id":    quote(strings.TrimSpace(cfg.Twitch.ClientID)),
-		"default_channels":    quote(strings.Join(normalizeChannels(cfg.DefaultChannels), ",")),
-		"enable_kitty_images": strconv.FormatBool(cfg.Features.EnableKittyImages),
-		"enable_mouse":        strconv.FormatBool(cfg.Features.EnableMouse),
-		"image_mode":          quote(strings.TrimSpace(cfg.Features.ImageMode)),
-		"avatar_mode":         quote(strings.TrimSpace(cfg.Features.AvatarMode)),
-		"emoji_mode":          quote(strings.TrimSpace(cfg.Features.EmojiMode)),
-		"emoji_provider":      quote(strings.TrimSpace(cfg.Features.EmojiProvider)),
-		"emote_mode":          quote(strings.TrimSpace(cfg.Features.EmoteMode)),
-		"animation_mode":      quote(strings.TrimSpace(cfg.Features.AnimationMode)),
+		"twitch_username":         quote(strings.TrimSpace(cfg.Twitch.Username)),
+		"twitch_client_id":        quote(strings.TrimSpace(cfg.Twitch.ClientID)),
+		"default_channels":        quote(strings.Join(normalizeChannels(cfg.DefaultChannels), ",")),
+		"enable_kitty_images":     strconv.FormatBool(cfg.Features.EnableKittyImages),
+		"enable_mouse":            strconv.FormatBool(cfg.Features.EnableMouse),
+		"image_mode":              quote(strings.TrimSpace(cfg.Features.ImageMode)),
+		"avatar_mode":             quote(strings.TrimSpace(cfg.Features.AvatarMode)),
+		"emoji_mode":              quote(strings.TrimSpace(cfg.Features.EmojiMode)),
+		"emoji_provider":          quote(strings.TrimSpace(cfg.Features.EmojiProvider)),
+		"emote_mode":              quote(strings.TrimSpace(cfg.Features.EmoteMode)),
+		"animation_mode":          quote(strings.TrimSpace(cfg.Features.AnimationMode)),
+		"theme_name":              quote(strings.TrimSpace(cfg.Features.ThemeName)),
+		"theme_background":        quote(strings.TrimSpace(cfg.Features.ThemeCustom.Background)),
+		"theme_foreground":        quote(strings.TrimSpace(cfg.Features.ThemeCustom.Foreground)),
+		"theme_accent":            quote(strings.TrimSpace(cfg.Features.ThemeCustom.Accent)),
+		"theme_muted":             quote(strings.TrimSpace(cfg.Features.ThemeCustom.Muted)),
+		"theme_border":            quote(strings.TrimSpace(cfg.Features.ThemeCustom.Border)),
+		"theme_surface":           quote(strings.TrimSpace(cfg.Features.ThemeCustom.Surface)),
+		"theme_warning":           quote(strings.TrimSpace(cfg.Features.ThemeCustom.Warning)),
+		"theme_error":             quote(strings.TrimSpace(cfg.Features.ThemeCustom.Error)),
+		"theme_success":           quote(strings.TrimSpace(cfg.Features.ThemeCustom.Success)),
+		"stream_status_mode":      quote(strings.TrimSpace(cfg.Features.StreamStatusMode)),
+		"emote_autocomplete_mode": quote(strings.TrimSpace(cfg.Features.EmoteAutocompleteMode)),
 	}
 	order := []string{
 		"twitch_username",
@@ -170,6 +198,18 @@ func WriteNonSecretFile(path string, cfg Config) error {
 		"emoji_provider",
 		"emote_mode",
 		"animation_mode",
+		"theme_name",
+		"theme_background",
+		"theme_foreground",
+		"theme_accent",
+		"theme_muted",
+		"theme_border",
+		"theme_surface",
+		"theme_warning",
+		"theme_error",
+		"theme_success",
+		"stream_status_mode",
+		"emote_autocomplete_mode",
 	}
 	return writeFlatConfigUpdates(path, order, updates)
 }
@@ -279,6 +319,18 @@ func (c Config) RedactedString() string {
 		"emoji_url_template = " + quote(redactUnsafe(c.Features.EmojiURLTemplate)),
 		"emote_mode = " + quote(c.Features.EmoteMode),
 		"animation_mode = " + quote(c.Features.AnimationMode),
+		"theme_name = " + quote(c.Features.ThemeName),
+		"theme_background = " + quote(c.Features.ThemeCustom.Background),
+		"theme_foreground = " + quote(c.Features.ThemeCustom.Foreground),
+		"theme_accent = " + quote(c.Features.ThemeCustom.Accent),
+		"theme_muted = " + quote(c.Features.ThemeCustom.Muted),
+		"theme_border = " + quote(c.Features.ThemeCustom.Border),
+		"theme_surface = " + quote(c.Features.ThemeCustom.Surface),
+		"theme_warning = " + quote(c.Features.ThemeCustom.Warning),
+		"theme_error = " + quote(c.Features.ThemeCustom.Error),
+		"theme_success = " + quote(c.Features.ThemeCustom.Success),
+		"stream_status_mode = " + quote(c.Features.StreamStatusMode),
+		"emote_autocomplete_mode = " + quote(c.Features.EmoteAutocompleteMode),
 		"debug_logging = " + strconv.FormatBool(c.Debug.Enabled),
 		"debug_log_path = " + quote(RedactDisplayValue(c.Debug.LogPath)),
 	}
@@ -401,6 +453,30 @@ func applyEnv(cfg *Config, environ []string) {
 			cfg.Features.EmoteMode = value
 		case "TWI_ANIMATION_MODE":
 			cfg.Features.AnimationMode = value
+		case "TWI_THEME_NAME":
+			cfg.Features.ThemeName = value
+		case "TWI_THEME_BACKGROUND":
+			cfg.Features.ThemeCustom.Background = value
+		case "TWI_THEME_FOREGROUND":
+			cfg.Features.ThemeCustom.Foreground = value
+		case "TWI_THEME_ACCENT":
+			cfg.Features.ThemeCustom.Accent = value
+		case "TWI_THEME_MUTED":
+			cfg.Features.ThemeCustom.Muted = value
+		case "TWI_THEME_BORDER":
+			cfg.Features.ThemeCustom.Border = value
+		case "TWI_THEME_SURFACE":
+			cfg.Features.ThemeCustom.Surface = value
+		case "TWI_THEME_WARNING":
+			cfg.Features.ThemeCustom.Warning = value
+		case "TWI_THEME_ERROR":
+			cfg.Features.ThemeCustom.Error = value
+		case "TWI_THEME_SUCCESS":
+			cfg.Features.ThemeCustom.Success = value
+		case "TWI_STREAM_STATUS_MODE":
+			cfg.Features.StreamStatusMode = value
+		case "TWI_EMOTE_AUTOCOMPLETE_MODE":
+			cfg.Features.EmoteAutocompleteMode = value
 		case "TWI_DEBUG_LOG":
 			cfg.Debug.Enabled = parseBool(value, cfg.Debug.Enabled)
 		case "TWI_DEBUG_LOG_PATH":
@@ -450,6 +526,30 @@ func applyKey(cfg *Config, key, value string) {
 		cfg.Features.EmoteMode = value
 	case "animation_mode":
 		cfg.Features.AnimationMode = value
+	case "theme_name":
+		cfg.Features.ThemeName = value
+	case "theme_background":
+		cfg.Features.ThemeCustom.Background = value
+	case "theme_foreground":
+		cfg.Features.ThemeCustom.Foreground = value
+	case "theme_accent":
+		cfg.Features.ThemeCustom.Accent = value
+	case "theme_muted":
+		cfg.Features.ThemeCustom.Muted = value
+	case "theme_border":
+		cfg.Features.ThemeCustom.Border = value
+	case "theme_surface":
+		cfg.Features.ThemeCustom.Surface = value
+	case "theme_warning":
+		cfg.Features.ThemeCustom.Warning = value
+	case "theme_error":
+		cfg.Features.ThemeCustom.Error = value
+	case "theme_success":
+		cfg.Features.ThemeCustom.Success = value
+	case "stream_status_mode":
+		cfg.Features.StreamStatusMode = value
+	case "emote_autocomplete_mode":
+		cfg.Features.EmoteAutocompleteMode = value
 	case "debug_logging":
 		cfg.Debug.Enabled = parseBool(value, cfg.Debug.Enabled)
 	case "debug_log_path":

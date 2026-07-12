@@ -565,6 +565,57 @@ func TestDoctorWarnsOnUnknownEmojiProviderEvenWithTemplate(t *testing.T) {
 	}
 }
 
+func TestDoctorWarnsOnUnknownThemeAndStreamStatusModes(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.ThemeName = "not-a-theme"
+	cfg.Features.StreamStatusMode = "sometimes"
+	cfg.Features.EmoteAutocompleteMode = "sometimes"
+
+	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+		Environ:  []string{"TERM=xterm-256color", "COLORTERM=truecolor"},
+		CacheDir: filepath.Join(t.TempDir(), "cache"),
+	})
+
+	check := doctorCheck(t, report, "feature modes")
+	if check.Status != DoctorStatusWarn {
+		t.Fatalf("feature modes status = %q, want warn; detail=%q", check.Status, check.Detail)
+	}
+	for _, want := range []string{"theme=not-a-theme", "stream_status=sometimes", "emote_autocomplete=sometimes"} {
+		if !strings.Contains(check.Detail, want) {
+			t.Fatalf("feature modes detail = %q, want %q", check.Detail, want)
+		}
+	}
+}
+
+func TestDoctorStreamStatusCheckStates(t *testing.T) {
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+
+	off := config.Default()
+	off.Features.StreamStatusMode = "off"
+	report := DoctorWithOptions(context.Background(), off, DoctorOptions{CacheDir: cacheDir})
+	if check := doctorCheck(t, report, "stream status polling"); check.Status != DoctorStatusWarn {
+		t.Fatalf("stream status check with mode off = %q, want warn; detail=%q", check.Status, check.Detail)
+	}
+
+	missingCreds := config.Default()
+	report = DoctorWithOptions(context.Background(), missingCreds, DoctorOptions{CacheDir: cacheDir})
+	check := doctorCheck(t, report, "stream status polling")
+	if check.Status != DoctorStatusWarn {
+		t.Fatalf("stream status check without credentials = %q, want warn; detail=%q", check.Status, check.Detail)
+	}
+	if !strings.Contains(check.Detail, "twitch_client_id") || !strings.Contains(check.Detail, "twitch_oauth_token") {
+		t.Fatalf("stream status detail = %q, want missing client id and oauth token", check.Detail)
+	}
+
+	ready := config.Default()
+	ready.Twitch.ClientID = "client-id"
+	ready.Twitch.OAuthToken = "oauth:token"
+	report = DoctorWithOptions(context.Background(), ready, DoctorOptions{CacheDir: cacheDir})
+	if check := doctorCheck(t, report, "stream status polling"); check.Status != DoctorStatusOK {
+		t.Fatalf("stream status check with credentials = %q, want ok; detail=%q", check.Status, check.Detail)
+	}
+}
+
 func doctorCheck(t *testing.T, report DoctorReport, name string) DoctorCheck {
 	t.Helper()
 	for _, check := range report.Checks {

@@ -28,7 +28,7 @@ func (m mockShellModel) inspectView(layout mockShellLayout) string {
 		Width(clampMin(layout.width-2, 0)).
 		Height(layout.inspectContentHeight).
 		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("#f38ba8")).
+		BorderForeground(lipgloss.Color(m.theme.Accent)).
 		Padding(0, 1).
 		Render(content)
 }
