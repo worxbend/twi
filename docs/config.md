@@ -139,6 +139,7 @@ Supported variables:
 | `TWI_TWITCH_REFRESH_TOKEN` | Yes | Refresh token used for one OAuth refresh after live IRC auth failure. Refreshed tokens are saved through the supported credential store when available; otherwise they stay in memory for the current process with a warning. |
 | `TWI_TWITCH_CLIENT_ID` | Usually no | Twitch app client ID for Helix/API calls. |
 | `TWI_TWITCH_CLIENT_SECRET` | Yes | Client secret used by `twi login` and in-memory OAuth refresh. |
+| `TWI_TWITCH_REDIRECT_URL` | No | Default localhost OAuth callback URL for `twi login`, used when `--redirect-uri` is not passed explicitly. An explicit `--redirect-uri` flag still wins. |
 | `TWITCH_USERNAME` | No | Dotenv alias for Twitch login. Canonical `TWI_TWITCH_USERNAME` wins if both are set. |
 | `TWITCH_ACCESS_TOKEN` | Yes | Dotenv alias for OAuth token. A missing `oauth:` prefix is added for IRC use. Canonical `TWI_TWITCH_OAUTH_TOKEN` wins if both are set. |
 | `TWITCH_REFRESH_TOKEN` | Yes | Dotenv alias for refresh token. Used for one OAuth refresh after live IRC auth failure. Refreshed tokens are saved through the supported credential store when available; otherwise they stay in memory for the current process with a warning. |
@@ -225,6 +226,7 @@ twitch_oauth_token = ""
 twitch_refresh_token = ""
 twitch_client_id = ""
 twitch_client_secret = ""
+twitch_redirect_url = ""
 default_channels = "somechannel"
 enable_kitty_images = true
 enable_mouse = true

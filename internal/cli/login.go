@@ -28,7 +28,7 @@ const (
 )
 
 const loginUsage = `Usage:
-  twi login [--config path] [--redirect-uri url] [--timeout duration] [--dry-run]
+  twi login [--config path] [--redirect-uri url] [--timeout duration] [--dry-run] [--write-default-config]
 
 Starts Twitch OAuth login for the MVP IRC chat scopes:
   chat:read  read Twitch IRC chat
@@ -47,6 +47,13 @@ Behavior:
   saved credentials disabled, so use environment variables or a private flat
   config file there. Environment variables and flat config credentials still
   take precedence when present.
+
+  The redirect URI defaults to --redirect-uri's flag default unless
+  twitch_redirect_url (or TWI_TWITCH_REDIRECT_URL) is set in config, in which
+  case that value is used instead; an explicit --redirect-uri flag always
+  wins over both. --write-default-config writes a starter config.toml (with
+  no secrets) at the effective config path first, but only if that file does
+  not already exist, and never during --dry-run.
 
 Flags:
 `
@@ -77,11 +84,13 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 	var redirectURI string
 	var timeout time.Duration
 	var dryRun bool
+	var writeDefaultConfig bool
 	var debugFlags debugFlagOptions
 	fs.StringVar(&cfgPath, "config", "", "config file path")
 	fs.StringVar(&redirectURI, "redirect-uri", defaultLoginRedirectURI, "localhost OAuth callback URL registered for the Twitch app")
 	fs.DurationVar(&timeout, "timeout", defaultLoginTimeout, "maximum time to wait for browser authorization and callback")
 	fs.BoolVar(&dryRun, "dry-run", false, "explain login requirements without opening a browser, listening for a callback, or contacting Twitch")
+	fs.BoolVar(&writeDefaultConfig, "write-default-config", false, "write a starter config.toml at the effective config path first, only if it does not already exist (skipped during --dry-run)")
 	addDebugFlags(fs, &debugFlags)
 	fs.Usage = func() {
 		fmt.Fprint(stderr, loginUsage)
@@ -106,6 +115,12 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "login timeout must be greater than zero")
 		return 2
 	}
+	redirectURIExplicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "redirect-uri" {
+			redirectURIExplicit = true
+		}
+	})
 
 	overrides := config.Overrides{ConfigPath: cfgPath}
 	applyDebugFlagOverrides(&overrides, debugFlags)
@@ -113,6 +128,23 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
 		return 1
+	}
+	if !redirectURIExplicit {
+		if configured := strings.TrimSpace(cfg.Twitch.RedirectURL); configured != "" {
+			redirectURI = configured
+		}
+	}
+	if writeDefaultConfig && !dryRun {
+		wrote, err := writeDefaultConfigIfMissing(cfg)
+		if err != nil {
+			fmt.Fprintf(stderr, "write default config: %s\n", config.RedactDisplayValue(err.Error()))
+			return 1
+		}
+		if wrote {
+			fmt.Fprintf(stdout, "Default config written to %s.\n", config.RedactDisplayValue(cfg.Path))
+		} else {
+			fmt.Fprintf(stdout, "Config already exists at %s; left unchanged.\n", config.RedactDisplayValue(cfg.Path))
+		}
 	}
 	logger, closeLog, err := openDebugLogger(cfg)
 	if err != nil {
@@ -262,6 +294,26 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 	printLoginSuccess(stdout, result, resultRedactor)
 	logger.Log(context.Background(), "cli.login.complete", slog.Bool("dry_run", false))
 	return 0
+}
+
+// writeDefaultConfigIfMissing writes the effective non-secret config (built-in
+// defaults merged with any already-present env vars) to cfg.Path, but only
+// when no file exists there yet, so a user can inspect and edit a starter
+// config.toml before authenticating. It never overwrites an existing file.
+func writeDefaultConfigIfMissing(cfg config.Config) (wrote bool, err error) {
+	if strings.TrimSpace(cfg.Path) == "" {
+		return false, errors.New("config path is empty")
+	}
+	switch _, statErr := os.Stat(cfg.Path); {
+	case statErr == nil:
+		return false, nil
+	case !errors.Is(statErr, os.ErrNotExist):
+		return false, statErr
+	}
+	if err := config.WriteNonSecretFile(cfg.Path, cfg); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func hasHelpArg(args []string) bool {

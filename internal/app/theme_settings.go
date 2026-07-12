@@ -56,13 +56,15 @@ func (m mockShellModel) handleThemeSettingsKey(msg tea.KeyMsg) (tea.Model, tea.C
 	case tea.KeyEsc:
 		m.theme = m.themeSettings.originalPalette
 		m.themeSettings = themeSettingsState{}
-		return m, nil
+		return m, m.writeThemeBackground()
 	case tea.KeyEnter:
 		return m.persistSelectedTheme()
 	case tea.KeyUp:
 		m.moveThemeSettingsSelection(-1)
+		return m, m.writeThemeBackground()
 	case tea.KeyDown, tea.KeyTab:
 		m.moveThemeSettingsSelection(1)
+		return m, m.writeThemeBackground()
 	}
 	return m, nil
 }

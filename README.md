@@ -173,6 +173,10 @@ By default it opens a browser and listens on `http://127.0.0.1:17643/oauth/twitc
 go run ./cmd/twi login --redirect-uri http://localhost:1337/api/connect/twitch/callback
 ```
 
+To avoid passing `--redirect-uri` every time, set `twitch_redirect_url` in
+`config.toml` or `TWI_TWITCH_REDIRECT_URL` instead — an explicit `--redirect-uri`
+flag still takes precedence over both.
+
 On supported Unix platforms, success validates the returned token, saves it through the private credential store, and prints only identity/scope/storage status. Non-Unix builds stop before opening the browser and direct users to environment variables or a private flat config file. The command does not print access tokens, refresh tokens, callback codes, OAuth state, authorization URLs, or client secrets.
 
 Use the bounded noninteractive smoke path when you only want to check command wiring:
@@ -180,6 +184,12 @@ Use the bounded noninteractive smoke path when you only want to check command wi
 ```sh
 go run ./cmd/twi login --dry-run
 ```
+
+First time here? `go run ./cmd/twi login --write-default-config` writes a
+starter `config.toml` (non-secret keys only, current defaults plus anything
+already in your environment) at the effective config path before continuing —
+but only if that file doesn't already exist yet, so it never clobbers one you
+already have.
 
 The file fallback is Unix-only. It stores a separate private `credentials.json` under a `0700` platform config directory, creates the file with `0600` permissions, rejects symlinked credential paths, and opens existing files with no-follow protection. Existing credential files or directories with different modes are rejected instead of reused. Non-Unix builds keep saved credentials disabled. If you keep duplicate credentials in environment variables or `config.toml`, those sources still win until you remove them.
 
@@ -285,6 +295,7 @@ twitch_oauth_token = ""
 twitch_refresh_token = ""
 twitch_client_id = ""
 twitch_client_secret = ""
+twitch_redirect_url = ""
 default_channels = "somechannel"
 enable_kitty_images = true
 enable_mouse = true
@@ -319,6 +330,13 @@ debug_log_path = ""
 widget, including the full terminal background. Set `theme_name = "custom"`
 and fill in the `theme_*` hex fields above for your own palette; unset custom
 fields fall back to no styling for that role.
+
+The background isn't just painted within the rendered viewport: interactive
+sessions send an OSC 11 escape sequence that overrides the terminal
+emulator's own default background color to match the theme, and restore the
+terminal's original background (OSC 111) when `twi` exits. This is supported
+by xterm, iTerm2, kitty, Alacritty, WezTerm, and VTE-based terminals;
+unsupported terminals simply ignore the sequence.
 
 Manage themes from the CLI:
 

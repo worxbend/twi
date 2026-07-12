@@ -75,6 +75,7 @@ type mockShellModel struct {
 	channels                  *channelStateSet
 	theme                     theme.Palette
 	effectiveConfig           config.Config
+	terminalOutput            io.Writer
 	mentionLogin              string
 	animationMode             string
 	mouseEnabled              bool
@@ -310,9 +311,11 @@ func RunMockWithOptions(w io.Writer, cfg config.Config, opts ClientOptions) erro
 	}
 	model.systemNotifier = opts.SystemNotifier
 	model.splashUntil = splashDeadline(model.animationMode)
+	model.terminalOutput = w
 
 	program := tea.NewProgram(model, programOptions(w, cfg)...)
 	_, err := program.Run()
+	resetTerminalBackground(w)
 	return err
 }
 
@@ -346,9 +349,11 @@ func RunClientWithOptions(w io.Writer, cfg config.Config, client ChatClient, opt
 		return err
 	}
 	model.splashUntil = splashDeadline(model.animationMode)
+	model.terminalOutput = w
 
 	program := tea.NewProgram(model, programOptions(w, cfg)...)
 	_, err := program.Run()
+	resetTerminalBackground(w)
 	return err
 }
 
@@ -583,6 +588,7 @@ func (m mockShellModel) Init() tea.Cmd {
 		m.scheduleFrameTick(),
 		m.resolveStreamStatusCommand(),
 		m.scheduleStreamStatusTick(),
+		m.writeThemeBackground(),
 	)
 }
 

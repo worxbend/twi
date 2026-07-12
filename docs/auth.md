@@ -117,6 +117,18 @@ In the Twitch developer console, type or paste the URL, click **Add**, then
 click **Save** before running `twi login`. The value must match exactly,
 including `localhost` versus `127.0.0.1`, port, path, scheme, and trailing slash.
 
+To avoid passing `--redirect-uri` on every run, set it once in config instead:
+
+```toml
+twitch_redirect_url = "http://localhost:1337/api/connect/twitch/callback"
+```
+
+or `TWI_TWITCH_REDIRECT_URL`. Precedence is: an explicit `--redirect-uri` flag
+wins, then `twitch_redirect_url`/`TWI_TWITCH_REDIRECT_URL`, then the built-in
+default shown above. The redirect URL is not a secret and is not redacted in
+`twi config show`, though credential-shaped query values in it are still
+flagged like any other URL-shaped config value.
+
 For a credential-free or CI-safe command smoke, use:
 
 ```sh
@@ -126,6 +138,20 @@ twi login --dry-run
 `--dry-run` explains the scopes, redirect URI, timeout, and client credential
 presence without opening a browser, starting a callback listener, contacting
 Twitch, printing secrets, or writing files.
+
+To bootstrap a starter config file before your first login, add
+`--write-default-config`:
+
+```sh
+twi login --write-default-config
+```
+
+This writes the effective non-secret config (built-in defaults merged with
+any credentials already present in the environment) to the effective config
+path — but only if no file exists there yet; an existing `config.toml` is
+never overwritten. Combine it with `--dry-run` to inspect the path without
+writing anything (`--write-default-config` is a no-op during `--dry-run`,
+consistent with dry-run never writing files).
 
 The command requests the MVP scopes by default:
 

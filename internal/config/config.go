@@ -32,6 +32,7 @@ type TwitchConfig struct {
 	RefreshToken string
 	ClientID     string
 	ClientSecret string
+	RedirectURL  string
 }
 
 type FeatureConfig struct {
@@ -164,6 +165,7 @@ func WriteNonSecretFile(path string, cfg Config) error {
 	updates := map[string]string{
 		"twitch_username":         quote(strings.TrimSpace(cfg.Twitch.Username)),
 		"twitch_client_id":        quote(strings.TrimSpace(cfg.Twitch.ClientID)),
+		"twitch_redirect_url":     quote(strings.TrimSpace(cfg.Twitch.RedirectURL)),
 		"default_channels":        quote(strings.Join(normalizeChannels(cfg.DefaultChannels), ",")),
 		"enable_kitty_images":     strconv.FormatBool(cfg.Features.EnableKittyImages),
 		"enable_mouse":            strconv.FormatBool(cfg.Features.EnableMouse),
@@ -189,6 +191,7 @@ func WriteNonSecretFile(path string, cfg Config) error {
 	order := []string{
 		"twitch_username",
 		"twitch_client_id",
+		"twitch_redirect_url",
 		"default_channels",
 		"enable_kitty_images",
 		"enable_mouse",
@@ -309,6 +312,7 @@ func (c Config) RedactedString() string {
 		"twitch_refresh_token = " + quote(redact(c.Twitch.RefreshToken)),
 		"twitch_client_id = " + quote(c.Twitch.ClientID),
 		"twitch_client_secret = " + quote(redact(c.Twitch.ClientSecret)),
+		"twitch_redirect_url = " + quote(redactUnsafe(c.Twitch.RedirectURL)),
 		"default_channels = " + quote(strings.Join(c.DefaultChannels, ",")),
 		"enable_kitty_images = " + strconv.FormatBool(c.Features.EnableKittyImages),
 		"enable_mouse = " + strconv.FormatBool(c.Features.EnableMouse),
@@ -433,6 +437,8 @@ func applyEnv(cfg *Config, environ []string) {
 			cfg.Twitch.ClientID = value
 		case "TWI_TWITCH_CLIENT_SECRET":
 			cfg.Twitch.ClientSecret = value
+		case "TWI_TWITCH_REDIRECT_URL":
+			cfg.Twitch.RedirectURL = value
 		case "TWI_DEFAULT_CHANNELS":
 			cfg.DefaultChannels = splitList(value)
 		case "TWI_ENABLE_KITTY_IMAGES":
@@ -506,6 +512,8 @@ func applyKey(cfg *Config, key, value string) {
 		cfg.Twitch.ClientID = value
 	case "twitch_client_secret":
 		cfg.Twitch.ClientSecret = value
+	case "twitch_redirect_url":
+		cfg.Twitch.RedirectURL = value
 	case "default_channels":
 		cfg.DefaultChannels = splitList(value)
 	case "enable_kitty_images":

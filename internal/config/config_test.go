@@ -361,6 +361,56 @@ func TestWriteNonSecretFileCreatesConfigWithoutSecrets(t *testing.T) {
 	}
 }
 
+func TestLoadRedirectURLFromFileAndEnv(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := `twitch_redirect_url = "http://127.0.0.1:9999/file/callback"` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(nil, Overrides{ConfigPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := cfg.Twitch.RedirectURL, "http://127.0.0.1:9999/file/callback"; got != want {
+		t.Fatalf("RedirectURL from file = %q, want %q", got, want)
+	}
+
+	cfg, err = Load([]string{"TWI_TWITCH_REDIRECT_URL=http://127.0.0.1:8888/env/callback"}, Overrides{ConfigPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := cfg.Twitch.RedirectURL, "http://127.0.0.1:8888/env/callback"; got != want {
+		t.Fatalf("RedirectURL from env override = %q, want %q", got, want)
+	}
+}
+
+func TestWriteNonSecretFileRoundTripsRedirectURL(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	cfg := Default()
+	cfg.Twitch.RedirectURL = "http://127.0.0.1:9999/custom/callback"
+
+	if err := WriteNonSecretFile(path, cfg); err != nil {
+		t.Fatalf("WriteNonSecretFile error = %v", err)
+	}
+	loaded, err := Load(nil, Overrides{ConfigPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Twitch.RedirectURL != cfg.Twitch.RedirectURL {
+		t.Fatalf("RedirectURL after round-trip = %q, want %q", loaded.Twitch.RedirectURL, cfg.Twitch.RedirectURL)
+	}
+}
+
+func TestRedactedStringRedirectURLNotTreatedAsSecret(t *testing.T) {
+	cfg := Default()
+	cfg.Twitch.RedirectURL = "http://127.0.0.1:9999/custom/callback"
+	if got := cfg.RedactedString(); !strings.Contains(got, `twitch_redirect_url = "http://127.0.0.1:9999/custom/callback"`) {
+		t.Fatalf("RedactedString() = %q, want plain redirect URL", got)
+	}
+}
+
 func TestWriteNonSecretFileRoundTripsThemeAndFeatureKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "twi", "config.toml")
 	cfg := Default()

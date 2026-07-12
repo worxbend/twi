@@ -470,6 +470,88 @@ func TestLoginDryRunExplainsFlowAndRedactsSecrets(t *testing.T) {
 	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "client-secret", "oauth:access-secret", "access-secret", "refresh-secret", "state-secret", "callback-code")
 }
 
+func TestLoginUsesConfiguredRedirectURLWhenFlagNotExplicit(t *testing.T) {
+	clearTwitchCredentialEnv(t)
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(`twitch_redirect_url = "http://127.0.0.1:9999/custom/callback"`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"login", "--config", cfgPath, "--dry-run"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Redirect URI: http://127.0.0.1:9999/custom/callback") {
+		t.Fatalf("dry-run output missing configured redirect URL:\n%s", stdout.String())
+	}
+}
+
+func TestLoginExplicitRedirectURIFlagOverridesConfig(t *testing.T) {
+	clearTwitchCredentialEnv(t)
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(`twitch_redirect_url = "http://127.0.0.1:9999/custom/callback"`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{
+		"login", "--config", cfgPath, "--dry-run",
+		"--redirect-uri", "http://127.0.0.1:1234/flag/callback",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Redirect URI: http://127.0.0.1:1234/flag/callback") {
+		t.Fatalf("dry-run output missing explicit flag redirect URI:\n%s", stdout.String())
+	}
+}
+
+func TestLoginWriteDefaultConfigCreatesFileOnlyWhenMissing(t *testing.T) {
+	clearTwitchCredentialEnv(t)
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"login", "--config", cfgPath, "--dry-run", "--write-default-config"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if _, err := os.Stat(cfgPath); err == nil {
+		t.Fatal("config file was written during --dry-run, want no write")
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Run([]string{"login", "--config", cfgPath, "--write-default-config"}, &stdout, &stderr)
+	if !strings.Contains(stdout.String(), "Default config written to") {
+		t.Fatalf("stdout missing write confirmation: %q", stdout.String())
+	}
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("ReadFile error = %v", err)
+	}
+	if !strings.Contains(string(data), `theme_name = "claude"`) {
+		t.Fatalf("written default config missing expected key:\n%s", data)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if err := os.WriteFile(cfgPath, append(data, []byte("# user edit\n")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	Run([]string{"login", "--config", cfgPath, "--write-default-config"}, &stdout, &stderr)
+	if !strings.Contains(stdout.String(), "already exists") {
+		t.Fatalf("stdout missing already-exists message: %q", stdout.String())
+	}
+	after, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(after), "# user edit") {
+		t.Fatal("existing config file was overwritten, want it preserved untouched")
+	}
+}
+
 func TestLoginDryRunIgnoresMalformedStoredCredentials(t *testing.T) {
 	clearTwitchCredentialEnv(t)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
