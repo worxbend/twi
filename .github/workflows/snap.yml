@@ -1,0 +1,89 @@
+name: Snap
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and publish snap
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # `if:` conditions cannot reference the secrets context directly; this
+      # computes a plain boolean env var once so the publish steps below can
+      # check it instead.
+      HAVE_SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS != '' }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # snapcraft.yaml derives the snap version from `git describe --tags`,
+          # which needs real tag history, not a shallow clone.
+          fetch-depth: 0
+
+      - name: Build snap
+        uses: snapcore/action-build@v1
+        id: build
+
+      - name: Smoke the built snap
+        env:
+          TWI_TWITCH_USERNAME: ""
+          TWI_TWITCH_OAUTH_TOKEN: ""
+          TWI_TWITCH_REFRESH_TOKEN: ""
+          TWI_TWITCH_CLIENT_ID: ""
+          TWI_TWITCH_CLIENT_SECRET: ""
+          TWITCH_USERNAME: ""
+          TWITCH_ACCESS_TOKEN: ""
+          TWITCH_REFRESH_TOKEN: ""
+          TWITCH_CLIENT_ID: ""
+          TWITCH_CLIENT_SECRET: ""
+        run: |
+          set -eu
+          sudo snap install --dangerous "${{ steps.build.outputs.snap }}"
+          twi --help >/dev/null
+          twi doctor >/dev/null
+          twi chat --mock --channel example >/dev/null
+          sudo snap remove twi
+
+      - name: Upload snap artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: twi-snap
+          path: ${{ steps.build.outputs.snap }}
+          if-no-files-found: error
+
+      # SNAPCRAFT_STORE_CREDENTIALS is a one-time manual setup step: run
+      # `snapcraft export-login --snaps=twi --acls package_access,package_push,
+      # package_update,package_release exported.txt` locally, then paste the
+      # contents of exported.txt into this repo's Settings > Secrets and
+      # variables > Actions as SNAPCRAFT_STORE_CREDENTIALS. Both publish steps
+      # below are skipped (not failed) until that secret exists.
+      - name: Publish to the edge channel
+        if: |
+          github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          env.HAVE_SNAPCRAFT_STORE_CREDENTIALS == 'true'
+        uses: snapcore/action-publish@v1
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        with:
+          snap: ${{ steps.build.outputs.snap }}
+          release: edge
+
+      - name: Publish to the stable channel
+        if: |
+          github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') &&
+          env.HAVE_SNAPCRAFT_STORE_CREDENTIALS == 'true'
+        uses: snapcore/action-publish@v1
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        with:
+          snap: ${{ steps.build.outputs.snap }}
+          release: stable

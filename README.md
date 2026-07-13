@@ -414,9 +414,16 @@ For live Docker runs, put real values only in your local ignored `.env`, pass cr
 
 More detail: [Docker Guide](docs/docker.md).
 
-Release binary and container packaging is covered by
-[Release Packaging](docs/release.md). The release dry-run is a separate
-manual/tag workflow, not part of the default pull-request gate.
+`twi` is also packaged as a snap (`snap/snapcraft.yaml`, strict confinement,
+`amd64`/`arm64`). Once published:
+
+```sh
+sudo snap install twi
+```
+
+Release binary, container, and snap packaging are covered by
+[Release Packaging](docs/release.md). The release dry-run and snap build are
+separate manual/tag workflows, not part of the default pull-request gate.
 
 ## Developer Commands
 

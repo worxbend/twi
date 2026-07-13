@@ -41,3 +41,10 @@ temp/
 # Local agent state
 .agent-loop
 PLAN.md
+
+# Local snapcraft build artifacts
+*.snap
+parts/
+stage/
+prime/
+snap/.snapcraft/

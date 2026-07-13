@@ -1,0 +1,50 @@
+name: twi
+base: core24
+grade: stable
+confinement: strict
+adopt-info: twi
+summary: Terminal Twitch chat client
+description: |
+  twi is a terminal Twitch IRC chat client built with Bubble Tea. It supports
+  live multi-channel chat, inline terminal images (Kitty/Ghostty graphics
+  protocol), 13 built-in themes plus custom hex palettes, emote autocomplete,
+  and Twitch OAuth login.
+
+  Run `twi chat --mock` for a credential-free demo, or `twi setup` for a
+  guided path to live chat. Config and cache live under this snap's own data
+  directory (`~/snap/twi/current/...`) since twi runs under strict
+  confinement; pass `--config` to use a config file elsewhere.
+
+license: MIT
+
+platforms:
+  amd64:
+    build-on: [amd64]
+    build-for: [amd64]
+  arm64:
+    build-on: [amd64, arm64]
+    build-for: [arm64]
+
+apps:
+  twi:
+    command: bin/twi
+    plugs:
+      # Outbound Twitch IRC/Helix/CDN traffic.
+      - network
+      # Local loopback HTTP listener for the `twi login` OAuth callback.
+      - network-bind
+      # Lets --config/--debug-log-path point outside the snap's own data dir.
+      - home
+
+parts:
+  twi:
+    plugin: go
+    source: .
+    build-packages:
+      - golang-go
+    build-environment:
+      - CGO_ENABLED: "0"
+      - GOTOOLCHAIN: auto
+    override-pull: |
+      craftctl default
+      craftctl set version="$(git -C "$CRAFT_PART_SRC" describe --tags --always --dirty 2>/dev/null || echo 0.0.0-unknown)"
