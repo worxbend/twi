@@ -349,6 +349,7 @@ func (m mockShellModel) commandPaletteView(layout mockShellLayout) string {
 		Height(layout.paletteContentHeight).
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color(m.theme.Accent)).
+		BorderBackground(lipgloss.Color(m.theme.Background)).
 		Background(lipgloss.Color(m.theme.Background)).
 		Padding(0, 1).
 		Render(content)

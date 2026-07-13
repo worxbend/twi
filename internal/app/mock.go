@@ -988,6 +988,7 @@ func (m mockShellModel) chatView(layout mockShellLayout) string {
 		Height(layout.chatContentHeight).
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(borderColor).
+		BorderBackground(lipgloss.Color(m.theme.Background)).
 		Background(lipgloss.Color(m.theme.Background)).
 		Padding(0, 1).
 		Render(content)
@@ -1036,6 +1037,7 @@ func (m mockShellModel) sidebarView(layout mockShellLayout) string {
 		Height(layout.sidebarContentHeight).
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(borderColor).
+		BorderBackground(lipgloss.Color(m.theme.Background)).
 		Background(lipgloss.Color(m.theme.Background)).
 		Render(strings.Join(lines, "\n"))
 }
@@ -1183,6 +1185,7 @@ func (m mockShellModel) composerView(layout mockShellLayout) string {
 		Height(layout.composerContentHeight).
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(borderColor).
+		BorderBackground(lipgloss.Color(m.theme.Background)).
 		Background(lipgloss.Color(m.theme.Background)).
 		Padding(0, 1).
 		Render(box)
@@ -1232,6 +1235,7 @@ func (m mockShellModel) emotesView(layout mockShellLayout) string {
 		Height(layout.emotesContentHeight).
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(borderColor).
+		BorderBackground(lipgloss.Color(m.theme.Background)).
 		Background(lipgloss.Color(m.theme.Background)).
 		Padding(0, 1).
 		Render(content)

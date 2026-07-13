@@ -98,6 +98,28 @@ func TestSplashViewWordmarkAndTaglineCarryExplicitBackground(t *testing.T) {
 	}
 }
 
+func TestBorderedFramesApplyBackgroundToBorderCharacters(t *testing.T) {
+	forceColorProfile(t)
+	cfg := config.Default()
+	background := cfg.ResolveTheme().Background
+	backgroundCode := backgroundOnlySGRCode(t, background)
+
+	model := newMockShellModel("alpha", cfg)
+	model.width, model.height = 88, 22
+	layout := model.layout()
+
+	// lipgloss.Style.Background() only colors the content area; border
+	// characters (┌─┐│└┘) are governed by the separate BorderBackground()
+	// property and render with no background at all when that's unset —
+	// even if Background() is set on the same style. Regression test for
+	// that gap: check the actual top-border LINE, not just the content.
+	chat := model.chatView(layout)
+	topBorderLine := strings.SplitN(chat, "\n", 2)[0]
+	if !strings.Contains(topBorderLine, backgroundCode+"m") {
+		t.Fatalf("chatView top border line missing background code %q: %q", backgroundCode, topBorderLine)
+	}
+}
+
 func TestThemeBackgroundSequenceOnlyWhenInteractive(t *testing.T) {
 	model := newMockShellModel("alpha", config.Default())
 	if got := model.themeBackgroundSequence(); got != "" {

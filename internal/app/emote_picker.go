@@ -145,6 +145,7 @@ func (m mockShellModel) emotePickerView(layout mockShellLayout) string {
 		Height(layout.emotePickerContentHeight).
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color(m.theme.Accent)).
+		BorderBackground(lipgloss.Color(m.theme.Background)).
 		Background(lipgloss.Color(m.theme.Background)).
 		Padding(0, 1).
 		Render(content)
