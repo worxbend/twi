@@ -39,8 +39,13 @@ parts:
   twi:
     plugin: go
     source: .
-    build-packages:
-      - golang-go
+    # core24's golang-go apt package predates go.mod's `toolchain go1.26.4`;
+    # with GOTOOLCHAIN=auto that mismatch makes `go version` print a
+    # "downloading go1.26.4" message instead of a parseable version string,
+    # which fails snapcraft's go-plugin environment check. Source Go from the
+    # snap instead, tracking the matching minor release.
+    build-snaps:
+      - go/1.26/stable
     build-environment:
       - CGO_ENABLED: "0"
       - GOTOOLCHAIN: auto
