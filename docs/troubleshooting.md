@@ -31,7 +31,7 @@ Live IRC needs `chat:read` to read chat and `chat:edit` to send chat. `twi chat`
 `twi login` uses a local callback URL by default:
 
 ```text
-http://127.0.0.1:17643/oauth/twitch/callback
+http://localhost:1337/api/connect/twitch/callback
 ```
 
 Register that redirect URI on the Twitch app. On non-Unix builds, saved credentials are unsupported and login stops before opening the browser. Use environment variables or a private flat config file if you manually build for an unsupported platform.

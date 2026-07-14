@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	defaultLoginRedirectURI = "http://127.0.0.1:17643/oauth/twitch/callback"
+	defaultLoginRedirectURI = "http://localhost:1337/api/connect/twitch/callback"
 	defaultLoginTimeout     = 5 * time.Minute
 )
 

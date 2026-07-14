@@ -102,12 +102,12 @@ go run ./cmd/twi login --dry-run
 
 For the real OAuth flow, set `TWITCH_CLIENT_ID`/`TWITCH_CLIENT_SECRET` or the
 canonical `TWI_TWITCH_CLIENT_ID`/`TWI_TWITCH_CLIENT_SECRET` names and register
-`http://127.0.0.1:17643/oauth/twitch/callback` on the Twitch app. If your
+`http://localhost:1337/api/connect/twitch/callback` on the Twitch app. If your
 Twitch app already uses another localhost callback, pass it exactly, for
 example:
 
 ```sh
-go run ./cmd/twi login --redirect-uri http://localhost:1337/api/connect/twitch/callback
+go run ./cmd/twi login --redirect-uri http://127.0.0.1:17643/oauth/twitch/callback
 ```
 
 In the Twitch developer console, click **Add** after entering the callback URL,

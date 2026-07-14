@@ -99,7 +99,7 @@ twi login
 The default redirect URI is:
 
 ```text
-http://127.0.0.1:17643/oauth/twitch/callback
+http://localhost:1337/api/connect/twitch/callback
 ```
 
 Register that URI on the Twitch app, or pass `--redirect-uri` with another
@@ -110,7 +110,7 @@ If your Twitch app already has a different localhost callback, use that exact
 value with `--redirect-uri`. For example:
 
 ```sh
-twi login --redirect-uri http://localhost:1337/api/connect/twitch/callback
+twi login --redirect-uri http://127.0.0.1:17643/oauth/twitch/callback
 ```
 
 In the Twitch developer console, type or paste the URL, click **Add**, then
@@ -120,7 +120,7 @@ including `localhost` versus `127.0.0.1`, port, path, scheme, and trailing slash
 To avoid passing `--redirect-uri` on every run, set it once in config instead:
 
 ```toml
-twitch_redirect_url = "http://localhost:1337/api/connect/twitch/callback"
+twitch_redirect_url = "http://127.0.0.1:17643/oauth/twitch/callback"
 ```
 
 or `TWI_TWITCH_REDIRECT_URL`. Precedence is: an explicit `--redirect-uri` flag

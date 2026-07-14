@@ -178,10 +178,10 @@ export TWI_TWITCH_CLIENT_SECRET="<client secret from Twitch>"
 go run ./cmd/twi login
 ```
 
-By default it opens a browser and listens on `http://127.0.0.1:17643/oauth/twitch/callback`; register that redirect URI on the Twitch app or pass `--redirect-uri` for another localhost HTTP callback. For example, if the Twitch app is registered with `http://localhost:1337/api/connect/twitch/callback`, run:
+By default it opens a browser and listens on `http://localhost:1337/api/connect/twitch/callback`; register that redirect URI on the Twitch app or pass `--redirect-uri` for another localhost HTTP callback. For example, if the Twitch app is registered with `http://127.0.0.1:17643/oauth/twitch/callback`, run:
 
 ```sh
-go run ./cmd/twi login --redirect-uri http://localhost:1337/api/connect/twitch/callback
+go run ./cmd/twi login --redirect-uri http://127.0.0.1:17643/oauth/twitch/callback
 ```
 
 To avoid passing `--redirect-uri` every time, set `twitch_redirect_url` in
