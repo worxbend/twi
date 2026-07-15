@@ -14,8 +14,8 @@ import (
 	"time"
 
 	irc "github.com/gempir/go-twitch-irc/v4"
-	"github.com/w0rxbend/twi/internal/auth"
-	"github.com/w0rxbend/twi/internal/debuglog"
+	"github.com/worxbend/twi/internal/auth"
+	"github.com/worxbend/twi/internal/debuglog"
 )
 
 func TestNewIRCClientValidatesRequiredConfigWithoutLeakingToken(t *testing.T) {

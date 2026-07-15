@@ -12,10 +12,10 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
-	"github.com/w0rxbend/twi/internal/config"
-	"github.com/w0rxbend/twi/internal/storage"
-	"github.com/w0rxbend/twi/internal/theme"
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/config"
+	"github.com/worxbend/twi/internal/storage"
+	"github.com/worxbend/twi/internal/theme"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 // forceColorProfile pins lipgloss's default renderer to TrueColor for the

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/w0rxbend/twi/internal/theme"
+	"github.com/worxbend/twi/internal/theme"
 )
 
 func TestLoadPrecedence(t *testing.T) {
@@ -199,6 +199,7 @@ func TestLoadAcceptsTwitchDotenvAliases(t *testing.T) {
 		"TWITCH_REFRESH_TOKEN=refresh-secret",
 		"TWITCH_CLIENT_ID=client-id",
 		"TWITCH_CLIENT_SECRET=client-secret",
+		"TWITCH_REDIRECT_URL=http://127.0.0.1:9999/alias/callback",
 	}, Overrides{})
 	if err != nil {
 		t.Fatal(err)
@@ -219,6 +220,9 @@ func TestLoadAcceptsTwitchDotenvAliases(t *testing.T) {
 	if cfg.Twitch.ClientSecret != "client-secret" {
 		t.Fatalf("client secret = %q, want client-secret", cfg.Twitch.ClientSecret)
 	}
+	if cfg.Twitch.RedirectURL != "http://127.0.0.1:9999/alias/callback" {
+		t.Fatalf("redirect url = %q, want http://127.0.0.1:9999/alias/callback", cfg.Twitch.RedirectURL)
+	}
 }
 
 func TestCanonicalEnvOverridesTwitchDotenvAliases(t *testing.T) {
@@ -228,11 +232,13 @@ func TestCanonicalEnvOverridesTwitchDotenvAliases(t *testing.T) {
 		"TWITCH_REFRESH_TOKEN=alias-refresh",
 		"TWITCH_CLIENT_ID=alias-client-id",
 		"TWITCH_CLIENT_SECRET=alias-client-secret",
+		"TWITCH_REDIRECT_URL=http://127.0.0.1:9999/alias/callback",
 		"TWI_TWITCH_USERNAME=canonical_user",
 		"TWI_TWITCH_OAUTH_TOKEN=oauth:canonical-token",
 		"TWI_TWITCH_REFRESH_TOKEN=canonical-refresh",
 		"TWI_TWITCH_CLIENT_ID=canonical-client-id",
 		"TWI_TWITCH_CLIENT_SECRET=canonical-client-secret",
+		"TWI_TWITCH_REDIRECT_URL=http://127.0.0.1:9999/canonical/callback",
 	}, Overrides{})
 	if err != nil {
 		t.Fatal(err)
@@ -252,6 +258,9 @@ func TestCanonicalEnvOverridesTwitchDotenvAliases(t *testing.T) {
 	}
 	if cfg.Twitch.ClientSecret != "canonical-client-secret" {
 		t.Fatalf("client secret = %q, want canonical-client-secret", cfg.Twitch.ClientSecret)
+	}
+	if cfg.Twitch.RedirectURL != "http://127.0.0.1:9999/canonical/callback" {
+		t.Fatalf("redirect url = %q, want http://127.0.0.1:9999/canonical/callback", cfg.Twitch.RedirectURL)
 	}
 }
 

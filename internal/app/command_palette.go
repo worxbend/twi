@@ -9,9 +9,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/w0rxbend/twi/internal/animation"
-	"github.com/w0rxbend/twi/internal/render"
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/animation"
+	"github.com/worxbend/twi/internal/render"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 type commandPaletteState struct {

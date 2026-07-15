@@ -13,14 +13,14 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rivo/uniseg"
-	"github.com/w0rxbend/twi/internal/animation"
-	"github.com/w0rxbend/twi/internal/assets"
-	"github.com/w0rxbend/twi/internal/config"
-	"github.com/w0rxbend/twi/internal/debuglog"
-	"github.com/w0rxbend/twi/internal/render"
-	"github.com/w0rxbend/twi/internal/storage"
-	"github.com/w0rxbend/twi/internal/theme"
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/animation"
+	"github.com/worxbend/twi/internal/assets"
+	"github.com/worxbend/twi/internal/config"
+	"github.com/worxbend/twi/internal/debuglog"
+	"github.com/worxbend/twi/internal/render"
+	"github.com/worxbend/twi/internal/storage"
+	"github.com/worxbend/twi/internal/theme"
+	"github.com/worxbend/twi/internal/twitch"
 	"golang.org/x/term"
 )
 
@@ -65,6 +65,9 @@ type ClientOptions struct {
 	StreamStatusResolver StreamStatusResolver
 	EmoteIndex           *assets.EmoteIndex
 	DebugLogger          debuglog.Logger
+	ChannelManager       twitch.ChannelManager
+	GameLookup           twitch.GameLookup
+	SelfUserLookup       twitch.UserLookup
 }
 
 type fdWriter interface {
@@ -140,9 +143,50 @@ type mockShellModel struct {
 	emoteEntries              map[string][]assets.EmoteEntry
 	emoteEntriesRequested     map[string]bool
 	emoteSelected             int
+	activeTab                 shellTab
+	channelManager            twitch.ChannelManager
+	gameLookup                twitch.GameLookup
+	selfUserLookup            twitch.UserLookup
+	streamInfo                streamInfoState
 }
 
 var _ tea.Model = mockShellModel{}
+
+// shellTab is a top-level screen selectable from the tab bar. tabChat is the
+// zero value so a freshly constructed model always starts on Chat.
+type shellTab int
+
+const (
+	tabChat shellTab = iota
+	tabStreamInfo
+)
+
+// shellTabs lists every tab in display/shortcut order: tab N is switched to
+// with Alt+N (1-indexed to match the visible labels).
+var shellTabs = []struct {
+	tab   shellTab
+	label string
+}{
+	{tabChat, "Chat"},
+	{tabStreamInfo, "Stream Info"},
+}
+
+// tabForShortcutRune maps an Alt+<digit> keypress to the tab it selects.
+// Bubble Tea (and most terminals) cannot distinguish Ctrl+1/Ctrl+2 from a
+// plain "1"/"2" keypress, so tab switching uses Alt+<digit> instead - the
+// combination terminals reliably report as a distinct, non-conflicting key.
+func tabForShortcutRune(r rune) (shellTab, bool) {
+	if r < '1' || r > '9' {
+		return 0, false
+	}
+	index := int(r-'1') + 1
+	for _, entry := range shellTabs {
+		if int(entry.tab)+1 == index {
+			return entry.tab, true
+		}
+	}
+	return 0, false
+}
 
 type mockFocus int
 
@@ -181,6 +225,7 @@ type composerReplyContext struct {
 
 type mockShellLayout struct {
 	width                      int
+	tabBarHeight               int
 	statusHeight               int
 	chatHeight                 int
 	chatContentHeight          int
@@ -200,6 +245,9 @@ type mockShellLayout struct {
 	themeSettingsHeight        int
 	themeSettingsContentHeight int
 	themeSettingsFramed        bool
+	streamInfoHeight           int
+	streamInfoContentHeight    int
+	streamInfoFramed           bool
 	composerHeight             int
 	composerContentHeight      int
 	composerFramed             bool
@@ -492,6 +540,9 @@ func newLiveShellModelWithClockOptionsAndCapability(channel string, cfg config.C
 		systemNotifier:        opts.SystemNotifier,
 		streamStatusResolver:  opts.StreamStatusResolver,
 		emoteIndex:            opts.EmoteIndex,
+		channelManager:        opts.ChannelManager,
+		gameLookup:            opts.GameLookup,
+		selfUserLookup:        opts.SelfUserLookup,
 		emoteEntries:          make(map[string][]assets.EmoteEntry),
 		emoteEntriesRequested: make(map[string]bool),
 		debugLogger:           opts.DebugLogger,
@@ -603,6 +654,11 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.splashSkipped = true
 			return m, nil
 		}
+		if msg.Type == tea.KeyRunes && msg.Alt && len(msg.Runes) == 1 {
+			if tab, ok := tabForShortcutRune(msg.Runes[0]); ok {
+				return m.switchToTab(tab)
+			}
+		}
 		if msg.Type == tea.KeyCtrlP {
 			m.toggleCommandPalette()
 			return m, nil
@@ -623,6 +679,9 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.themeSettings.open {
 			return m.handleThemeSettingsKey(msg)
+		}
+		if m.activeTab == tabStreamInfo {
+			return m.handleStreamInfoKey(msg)
 		}
 		switch msg.Type {
 		case tea.KeyTab:
@@ -814,6 +873,10 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case emoteIndexResolvedMsg:
 		m.applyEmoteIndexResult(msg)
 		return m, nil
+	case streamInfoLoadedMsg:
+		return m.applyStreamInfoLoaded(msg), nil
+	case streamInfoSavedMsg:
+		return m.applyStreamInfoSaved(msg), nil
 	case mockAnimationTickMsg:
 		m.revealTickScheduled = false
 		active := m.activeChannelState()
@@ -875,6 +938,9 @@ func (m mockShellModel) View() string {
 	layout := m.layout()
 
 	regions := make([]string, 0, 4)
+	if layout.tabBarHeight > 0 {
+		regions = append(regions, m.tabBarLine(layout.width))
+	}
 	if layout.statusHeight > 0 {
 		regions = append(regions, m.statusLine(layout.width))
 	}
@@ -884,6 +950,9 @@ func (m mockShellModel) View() string {
 			chat = lipgloss.JoinHorizontal(lipgloss.Top, m.sidebarView(layout), chat)
 		}
 		regions = append(regions, chat)
+	}
+	if layout.streamInfoHeight > 0 {
+		regions = append(regions, m.streamInfoView(layout))
 	}
 	if layout.paletteHeight > 0 {
 		regions = append(regions, m.commandPaletteView(layout))
@@ -1387,10 +1456,12 @@ func (m mockShellModel) layout() mockShellLayout {
 	layout := mockShellLayout{
 		width:        width,
 		chatWidth:    width,
+		tabBarHeight: 1,
 		statusHeight: 1,
 		helpHeight:   1,
 	}
 	if height == 1 {
+		layout.tabBarHeight = 0
 		layout.helpHeight = 0
 		return layout
 	}
@@ -1404,45 +1475,49 @@ func (m mockShellModel) layout() mockShellLayout {
 		}
 	}
 
-	layout.composerHeight = 4
-	layout.composerContentHeight = 2
-	if m.activeChannelState().replyTo != nil {
-		layout.composerHeight++
-		layout.composerContentHeight++
-	}
-	layout.composerFramed = width >= 5
-	if height < 10 {
-		layout.composerHeight = 3
-		layout.composerContentHeight = 1
+	onStreamInfo := m.activeTab == tabStreamInfo
+
+	if !onStreamInfo {
+		layout.composerHeight = 4
+		layout.composerContentHeight = 2
+		if m.activeChannelState().replyTo != nil {
+			layout.composerHeight++
+			layout.composerContentHeight++
+		}
+		layout.composerFramed = width >= 5
+		if height < 10 {
+			layout.composerHeight = 3
+			layout.composerContentHeight = 1
+		}
+
+		if height >= 12 {
+			layout.emotesHeight = 3
+			layout.emotesContentHeight = 1
+			layout.emotesFramed = width >= 5
+		}
 	}
 
-	if height >= 12 {
-		layout.emotesHeight = 3
-		layout.emotesContentHeight = 1
-		layout.emotesFramed = width >= 5
-	}
-
-	remaining := height - layout.statusHeight - layout.helpHeight - layout.composerHeight - layout.emotesHeight
+	remaining := height - layout.tabBarHeight - layout.statusHeight - layout.helpHeight - layout.composerHeight - layout.emotesHeight
 	if remaining < 3 && layout.emotesHeight > 0 {
 		layout.emotesHeight = 0
 		layout.emotesContentHeight = 0
 		layout.emotesFramed = false
-		remaining = height - layout.statusHeight - layout.helpHeight - layout.composerHeight
+		remaining = height - layout.tabBarHeight - layout.statusHeight - layout.helpHeight - layout.composerHeight
 	}
 	if remaining < 3 && layout.composerHeight > 3 {
 		layout.composerHeight = 3
 		layout.composerContentHeight = 1
-		remaining = height - layout.statusHeight - layout.helpHeight - layout.composerHeight - layout.emotesHeight
+		remaining = height - layout.tabBarHeight - layout.statusHeight - layout.helpHeight - layout.composerHeight - layout.emotesHeight
 	}
 	if remaining < 1 && layout.helpHeight > 0 {
 		layout.helpHeight = 0
-		remaining = height - layout.statusHeight - layout.composerHeight - layout.emotesHeight
+		remaining = height - layout.tabBarHeight - layout.statusHeight - layout.composerHeight - layout.emotesHeight
 	}
 	if remaining < 1 && layout.composerHeight > 0 {
-		layout.composerHeight = clampMin(height-layout.statusHeight-layout.emotesHeight, 0)
+		layout.composerHeight = clampMin(height-layout.tabBarHeight-layout.statusHeight-layout.emotesHeight, 0)
 		layout.composerContentHeight = clampMin(layout.composerHeight-2, 0)
 		layout.composerFramed = layout.composerHeight >= 3 && width >= 5
-		remaining = height - layout.statusHeight - layout.composerHeight - layout.emotesHeight
+		remaining = height - layout.tabBarHeight - layout.statusHeight - layout.composerHeight - layout.emotesHeight
 	}
 
 	if m.palette.open && remaining >= 4 {
@@ -1537,7 +1612,7 @@ func (m mockShellModel) layout() mockShellLayout {
 		layout.chatContentHeight = 0
 	}
 
-	used := layout.statusHeight + layout.chatHeight + layout.paletteHeight + layout.inspectHeight + layout.emotePickerHeight + layout.themeSettingsHeight + layout.composerHeight + layout.emotesHeight + layout.helpHeight
+	used := layout.tabBarHeight + layout.statusHeight + layout.chatHeight + layout.paletteHeight + layout.inspectHeight + layout.emotePickerHeight + layout.themeSettingsHeight + layout.composerHeight + layout.emotesHeight + layout.helpHeight
 	if used < height {
 		layout.chatHeight += height - used
 		if layout.chatFramed {
@@ -1549,6 +1624,18 @@ func (m mockShellModel) layout() mockShellLayout {
 		if layout.sidebarContentHeight < 0 {
 			layout.sidebarContentHeight = 0
 		}
+	}
+
+	if onStreamInfo {
+		layout.sidebarWidth = 0
+		layout.chatWidth = width
+		layout.sidebarContentHeight = 0
+		layout.streamInfoHeight = layout.chatHeight
+		layout.streamInfoContentHeight = layout.chatContentHeight
+		layout.streamInfoFramed = layout.chatFramed
+		layout.chatHeight = 0
+		layout.chatContentHeight = 0
+		layout.chatFramed = false
 	}
 
 	return layout
@@ -1674,7 +1761,7 @@ func isMouseLeftPress(event tea.MouseEvent) bool {
 }
 
 func (m mockShellModel) mouseInChatRegion(event tea.MouseEvent, layout mockShellLayout) bool {
-	chatTop := layout.statusHeight
+	chatTop := layout.tabBarHeight + layout.statusHeight
 	chatLeft := layout.sidebarWidth
 	return event.X >= chatLeft &&
 		event.X < layout.width &&
@@ -1683,7 +1770,7 @@ func (m mockShellModel) mouseInChatRegion(event tea.MouseEvent, layout mockShell
 }
 
 func (m mockShellModel) mouseInComposer(event tea.MouseEvent, layout mockShellLayout) bool {
-	composerTop := layout.statusHeight + layout.chatHeight
+	composerTop := layout.tabBarHeight + layout.statusHeight + layout.chatHeight
 	return event.X >= 0 &&
 		event.X < layout.width &&
 		event.Y >= composerTop &&
@@ -1694,7 +1781,7 @@ func (m mockShellModel) channelAtMouse(event tea.MouseEvent, layout mockShellLay
 	if layout.sidebarWidth <= 0 || event.X < 0 || event.X >= layout.sidebarWidth {
 		return "", false
 	}
-	chatTop := layout.statusHeight
+	chatTop := layout.tabBarHeight + layout.statusHeight
 	if event.Y < chatTop+1 || event.Y >= chatTop+layout.chatHeight-1 {
 		return "", false
 	}
@@ -1714,7 +1801,7 @@ func (m mockShellModel) messageAtMouse(event tea.MouseEvent, layout mockShellLay
 	if !m.mouseInChatRegion(event, layout) || layout.chatContentHeight <= 0 {
 		return twitch.ChatMessage{}, false
 	}
-	chatTop := layout.statusHeight
+	chatTop := layout.tabBarHeight + layout.statusHeight
 	contentTop := chatTop
 	if layout.chatFramed {
 		contentTop++
@@ -3268,7 +3355,7 @@ func (m mockShellModel) helpLines(width, height int) []string {
 	}
 
 	lines := []string{
-		" tab focus: chat/composer",
+		" alt+1/2: switch tab (chat/stream info) | tab focus: chat/composer",
 		" ctrl+p: commands | [/]: switch channel | 1-4 filters, 0 reset | up/down: select message",
 		" r: reply | i: inspect | pgup/pgdn: scroll | ctrl+l: clear | ctrl+r: reconnect | ?: compact help | q: quit | " + source,
 	}

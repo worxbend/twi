@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/w0rxbend/twi/internal/auth"
+	"github.com/worxbend/twi/internal/auth"
 )
 
 const (

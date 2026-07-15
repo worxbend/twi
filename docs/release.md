@@ -79,14 +79,14 @@ reachable at a stable URL and can be piped straight into `sh`:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -sSf \
-  https://github.com/w0rxbend/twi/releases/latest/download/install.sh | sh
+  https://github.com/worxbend/twi/releases/latest/download/install.sh | sh
 ```
 
 Pin a specific release instead of the latest with `--version`:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -sSf \
-  https://github.com/w0rxbend/twi/releases/download/v0.3.0/install.sh | sh -s -- --version v0.3.0
+  https://github.com/worxbend/twi/releases/download/v0.3.0/install.sh | sh -s -- --version v0.3.0
 ```
 
 ## Container Usage

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/w0rxbend/twi/internal/emoji"
-	"github.com/w0rxbend/twi/internal/storage"
+	"github.com/worxbend/twi/internal/emoji"
+	"github.com/worxbend/twi/internal/storage"
 )
 
 // EmojiAssetKey maps a standard emoji grapheme cluster to a provider-neutral

@@ -17,9 +17,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/w0rxbend/twi/internal/auth"
-	"github.com/w0rxbend/twi/internal/config"
-	"github.com/w0rxbend/twi/internal/storage"
+	"github.com/worxbend/twi/internal/auth"
+	"github.com/worxbend/twi/internal/config"
+	"github.com/worxbend/twi/internal/storage"
 )
 
 const (
@@ -30,9 +30,11 @@ const (
 const loginUsage = `Usage:
   twi login [--config path] [--redirect-uri url] [--timeout duration] [--dry-run] [--write-default-config]
 
-Starts Twitch OAuth login for the MVP IRC chat scopes:
-  chat:read  read Twitch IRC chat
-  chat:edit  send Twitch IRC chat
+Starts Twitch OAuth login for:
+  chat:read                  read Twitch IRC chat
+  chat:edit                  send Twitch IRC chat
+  channel:manage:broadcast   view/edit your stream's title, category,
+                             language, and tags on the Stream Info tab
 
 Required for a real login:
   TWI_TWITCH_CLIENT_ID or TWITCH_CLIENT_ID
@@ -49,11 +51,11 @@ Behavior:
   take precedence when present.
 
   The redirect URI defaults to --redirect-uri's flag default unless
-  twitch_redirect_url (or TWI_TWITCH_REDIRECT_URL) is set in config, in which
-  case that value is used instead; an explicit --redirect-uri flag always
-  wins over both. --write-default-config writes a starter config.toml (with
-  no secrets) at the effective config path first, but only if that file does
-  not already exist, and never during --dry-run.
+  twitch_redirect_url (or TWI_TWITCH_REDIRECT_URL / TWITCH_REDIRECT_URL) is
+  set in config, in which case that value is used instead; an explicit
+  --redirect-uri flag always wins over both. --write-default-config writes a
+  starter config.toml (with no secrets) at the effective config path first,
+  but only if that file does not already exist, and never during --dry-run.
 
 Flags:
 `
@@ -168,7 +170,7 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 		ClientID:     strings.TrimSpace(cfg.Twitch.ClientID),
 		ClientSecret: auth.NewSecret(cfg.Twitch.ClientSecret),
 		RedirectURI:  strings.TrimSpace(redirectURI),
-		Scopes:       auth.RequiredChatScopes(),
+		Scopes:       auth.LoginScopes(),
 	}
 	baseRedactor := auth.NewRedactor(
 		auth.NewSecret(cfg.Twitch.OAuthToken),
@@ -350,7 +352,7 @@ func printLoginDryRun(stdout io.Writer, cfg config.Config, redirectURI string, t
 	)
 
 	fmt.Fprintln(stdout, "Twitch OAuth login dry run")
-	fmt.Fprintf(stdout, "Requested scopes: %s\n", strings.Join(auth.ScopeValues(auth.RequiredChatScopes()), ", "))
+	fmt.Fprintf(stdout, "Requested scopes: %s\n", strings.Join(auth.ScopeValues(auth.LoginScopes()), ", "))
 	fmt.Fprintf(stdout, "Redirect URI: %s\n", redactor.Redact(redirectURI))
 	fmt.Fprintf(stdout, "Timeout: %s\n", timeout)
 	fmt.Fprintf(stdout, "Client ID: %s\n", presentMissing(cfg.Twitch.ClientID))

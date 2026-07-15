@@ -8,7 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 const (

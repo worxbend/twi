@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 func TestMessageFilterMatching(t *testing.T) {

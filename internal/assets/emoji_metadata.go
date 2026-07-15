@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/w0rxbend/twi/internal/storage"
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/storage"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 const (

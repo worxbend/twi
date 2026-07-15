@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/w0rxbend/twi/internal/config"
+	"github.com/worxbend/twi/internal/config"
 )
 
 func TestDecideImageCapabilitiesEnvironmentMatrix(t *testing.T) {

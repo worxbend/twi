@@ -117,7 +117,7 @@ that downloads the matching binary, verifies its checksum, and wires
 
 ```sh
 curl --proto '=https' --tlsv1.2 -sSf \
-  https://github.com/w0rxbend/twi/releases/latest/download/install.sh | sh
+  https://github.com/worxbend/twi/releases/latest/download/install.sh | sh
 ```
 
 More detail, including how to pin a version: [Release Packaging](docs/release.md).
@@ -164,10 +164,11 @@ If Twitch IRC rejects the access token during login, `twi` will try one OAuth re
 
 ### OAuth Login Command
 
-`twi login` starts a Twitch authorization-code login for the MVP IRC scopes:
+`twi login` starts a Twitch authorization-code login for:
 
 - `chat:read`
 - `chat:edit`
+- `channel:manage:broadcast` (view/edit title, category, language, and tags on the Stream Info tab)
 
 The command needs a Twitch app client ID and client secret from environment variables or the flat config file:
 
@@ -185,8 +186,8 @@ go run ./cmd/twi login --redirect-uri http://127.0.0.1:17643/oauth/twitch/callba
 ```
 
 To avoid passing `--redirect-uri` every time, set `twitch_redirect_url` in
-`config.toml` or `TWI_TWITCH_REDIRECT_URL` instead — an explicit `--redirect-uri`
-flag still takes precedence over both.
+`config.toml` or `TWI_TWITCH_REDIRECT_URL`/`TWITCH_REDIRECT_URL` instead — an
+explicit `--redirect-uri` flag still takes precedence over all of them.
 
 On supported Unix platforms, success validates the returned token, saves it through the private credential store, and prints only identity/scope/storage status. Non-Unix builds stop before opening the browser and direct users to environment variables or a private flat config file. The command does not print access tokens, refresh tokens, callback codes, OAuth state, authorization URLs, or client secrets.
 
@@ -243,6 +244,7 @@ records a complete credential set or a compatible graphics terminal session.
 
 | Key | Action |
 | --- | --- |
+| `alt+1` / `alt+2` | Switch the top tab bar between Chat and Stream Info. |
 | `ctrl+p` | Open or close the command palette. |
 | `ctrl+t` | Open or close theme settings; live-preview a theme with `up`/`down`, `enter` to save, `esc` to revert. |
 | `ctrl+e` | Open or close the searchable emote picker; filter by typing, `up`/`down` to select, `enter` to insert. |
@@ -269,6 +271,23 @@ extra alerts unless another in-app panel or channel has the user's attention.
 Desktop notifications are best effort and dependency-free: Linux uses
 `notify-send`, macOS uses `osascript`, Windows uses PowerShell toast APIs, and
 unsupported or unavailable notification commands fall back to a terminal bell.
+
+## Stream Info Tab
+
+`twi` opens with a top tab bar; `alt+1` selects Chat (the default) and `alt+2`
+selects Stream Info, a dedicated screen for viewing and editing your own
+channel's title, category, language, and tags without leaving the terminal.
+On that tab, `up`/`down` selects a field, `enter` edits it (`enter` again
+commits, `esc` cancels), and `ctrl+s` saves every changed field to Twitch.
+Changing the category resolves the typed name to a Twitch game ID through
+Helix "Get Games" before saving; an unrecognized name fails the save with an
+error instead of silently dropping the category change.
+
+The Stream Info tab needs a Twitch app client ID and OAuth token (the same
+credentials live chat uses) and the `channel:manage:broadcast` scope, which
+`twi login` requests automatically alongside `chat:read`/`chat:edit`. Without
+those credentials the tab explains what is missing instead of failing
+silently.
 
 ## Configure It
 

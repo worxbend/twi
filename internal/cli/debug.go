@@ -10,11 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/w0rxbend/twi/internal/app"
-	"github.com/w0rxbend/twi/internal/assets"
-	"github.com/w0rxbend/twi/internal/auth"
-	"github.com/w0rxbend/twi/internal/config"
-	"github.com/w0rxbend/twi/internal/debuglog"
+	"github.com/worxbend/twi/internal/app"
+	"github.com/worxbend/twi/internal/assets"
+	"github.com/worxbend/twi/internal/auth"
+	"github.com/worxbend/twi/internal/config"
+	"github.com/worxbend/twi/internal/debuglog"
 )
 
 const (

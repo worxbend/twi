@@ -5,8 +5,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/w0rxbend/twi/internal/config"
-	"github.com/w0rxbend/twi/internal/theme"
+	"github.com/worxbend/twi/internal/config"
+	"github.com/worxbend/twi/internal/theme"
 )
 
 // themeSettingsState drives the Ctrl+T btop-style theme picker: moving the

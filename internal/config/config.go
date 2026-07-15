@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/w0rxbend/twi/internal/theme"
+	"github.com/worxbend/twi/internal/theme"
 )
 
 const redacted = "[redacted]"
@@ -427,6 +427,8 @@ func applyEnv(cfg *Config, environ []string) {
 			cfg.Twitch.ClientID = value
 		case "TWITCH_CLIENT_SECRET":
 			cfg.Twitch.ClientSecret = value
+		case "TWITCH_REDIRECT_URL":
+			cfg.Twitch.RedirectURL = value
 		case "TWI_TWITCH_USERNAME":
 			cfg.Twitch.Username = value
 		case "TWI_TWITCH_OAUTH_TOKEN":

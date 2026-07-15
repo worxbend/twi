@@ -24,7 +24,7 @@ from source on other platforms.
 USAGE
 }
 
-repo="w0rxbend/twi"
+repo="worxbend/twi"
 version=${TWI_INSTALL_VERSION:-latest}
 install_dir=${TWI_INSTALL_DIR:-"$HOME/.local/bin"}
 

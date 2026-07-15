@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/w0rxbend/twi/internal/assets"
+	"github.com/worxbend/twi/internal/assets"
 )
 
 type broadcasterIDResolvedMsg struct {

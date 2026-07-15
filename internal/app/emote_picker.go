@@ -5,7 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/w0rxbend/twi/internal/assets"
+	"github.com/worxbend/twi/internal/assets"
 )
 
 // emotePickerState mirrors commandPaletteState's shape: a searchable,

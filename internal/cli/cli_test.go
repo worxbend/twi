@@ -14,14 +14,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/w0rxbend/twi/internal/app"
-	"github.com/w0rxbend/twi/internal/assets"
-	"github.com/w0rxbend/twi/internal/auth"
-	"github.com/w0rxbend/twi/internal/config"
-	"github.com/w0rxbend/twi/internal/debuglog"
-	"github.com/w0rxbend/twi/internal/render"
-	"github.com/w0rxbend/twi/internal/storage"
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/app"
+	"github.com/worxbend/twi/internal/assets"
+	"github.com/worxbend/twi/internal/auth"
+	"github.com/worxbend/twi/internal/config"
+	"github.com/worxbend/twi/internal/debuglog"
+	"github.com/worxbend/twi/internal/render"
+	"github.com/worxbend/twi/internal/storage"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 func TestMain(m *testing.M) {

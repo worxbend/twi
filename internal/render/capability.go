@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/w0rxbend/twi/internal/config"
+	"github.com/worxbend/twi/internal/config"
 )
 
 // ImageCapabilityStatus is the resolved state for terminal image support.

@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/w0rxbend/twi/internal/auth"
-	"github.com/w0rxbend/twi/internal/debuglog"
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/auth"
+	"github.com/worxbend/twi/internal/debuglog"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 const defaultLiveChatBuffer = 128

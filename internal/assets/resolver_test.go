@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/w0rxbend/twi/internal/debuglog"
-	"github.com/w0rxbend/twi/internal/storage"
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/debuglog"
+	"github.com/worxbend/twi/internal/storage"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 var errDownloadFailure = errors.New("download failed")

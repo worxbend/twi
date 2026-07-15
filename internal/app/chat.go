@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 // ChatClient is the app-facing boundary for chat input, connection state, and

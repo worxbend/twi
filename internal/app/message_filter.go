@@ -4,7 +4,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 type messageFilter uint8

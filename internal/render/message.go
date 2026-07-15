@@ -9,10 +9,10 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rivo/uniseg"
-	"github.com/w0rxbend/twi/internal/emoji"
-	"github.com/w0rxbend/twi/internal/storage"
-	"github.com/w0rxbend/twi/internal/theme"
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/emoji"
+	"github.com/worxbend/twi/internal/storage"
+	"github.com/worxbend/twi/internal/theme"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 const (

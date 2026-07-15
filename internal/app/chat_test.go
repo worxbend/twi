@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 func TestFakeChatClientStreamsMessagesAndConnectionStates(t *testing.T) {

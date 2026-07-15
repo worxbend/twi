@@ -1,4 +1,4 @@
-module github.com/w0rxbend/twi
+module github.com/worxbend/twi
 
 go 1.26
 

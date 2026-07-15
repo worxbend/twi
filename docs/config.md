@@ -145,6 +145,7 @@ Supported variables:
 | `TWITCH_REFRESH_TOKEN` | Yes | Dotenv alias for refresh token. Used for one OAuth refresh after live IRC auth failure. Refreshed tokens are saved through the supported credential store when available; otherwise they stay in memory for the current process with a warning. |
 | `TWITCH_CLIENT_ID` | Usually no | Dotenv alias for client ID. |
 | `TWITCH_CLIENT_SECRET` | Yes | Dotenv alias for client secret. |
+| `TWITCH_REDIRECT_URL` | No | Dotenv alias for the OAuth callback URL. Canonical `TWI_TWITCH_REDIRECT_URL` wins if both are set. |
 | `TWI_DEFAULT_CHANNELS` | No | Default channel list. |
 | `TWI_ENABLE_KITTY_IMAGES` | No | Enable or disable Kitty protocol image support. |
 | `TWI_ENABLE_MOUSE` | No | Enable or disable terminal mouse reporting and mouse shortcuts. |

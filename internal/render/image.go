@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/w0rxbend/twi/internal/storage"
+	"github.com/worxbend/twi/internal/storage"
 )
 
 const kittyPNGFormat = 100

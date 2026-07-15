@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/w0rxbend/twi/internal/auth"
+	"github.com/worxbend/twi/internal/auth"
 )
 
 func skipIfNotUnix(t *testing.T, reason string) {

@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/w0rxbend/twi/internal/cli"
+	"github.com/worxbend/twi/internal/cli"
 )
 
 func main() {

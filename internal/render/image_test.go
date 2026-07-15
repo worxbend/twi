@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/w0rxbend/twi/internal/storage"
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/storage"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 func TestKittyRendererProducesFixedCellOutput(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/w0rxbend/twi/internal/auth"
+	"github.com/worxbend/twi/internal/auth"
 )
 
 func TestDisabledLoggerWritesNothing(t *testing.T) {

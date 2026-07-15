@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 var (

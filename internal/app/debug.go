@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/w0rxbend/twi/internal/assets"
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/assets"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 func (m mockShellModel) debugAppStart(source string, channels int) {

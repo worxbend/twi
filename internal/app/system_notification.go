@@ -13,7 +13,7 @@ import (
 	"unicode"
 	"unicode/utf16"
 
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 const (

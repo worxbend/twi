@@ -123,8 +123,10 @@ To avoid passing `--redirect-uri` on every run, set it once in config instead:
 twitch_redirect_url = "http://127.0.0.1:17643/oauth/twitch/callback"
 ```
 
-or `TWI_TWITCH_REDIRECT_URL`. Precedence is: an explicit `--redirect-uri` flag
-wins, then `twitch_redirect_url`/`TWI_TWITCH_REDIRECT_URL`, then the built-in
+or `TWI_TWITCH_REDIRECT_URL` (`TWITCH_REDIRECT_URL` also works as a dotenv
+alias; the canonical `TWI_`-prefixed name wins if both are set). Precedence is:
+an explicit `--redirect-uri` flag wins, then `twitch_redirect_url`/
+`TWI_TWITCH_REDIRECT_URL`/`TWITCH_REDIRECT_URL`, then the built-in
 default shown above. The redirect URL is not a secret and is not redacted in
 `twi config show`, though credential-shaped query values in it are still
 flagged like any other URL-shaped config value.
@@ -153,10 +155,11 @@ never overwritten. Combine it with `--dry-run` to inspect the path without
 writing anything (`--write-default-config` is a no-op during `--dry-run`,
 consistent with dry-run never writing files).
 
-The command requests the MVP scopes by default:
+The command requests these scopes by default:
 
 - `chat:read`
 - `chat:edit`
+- `channel:manage:broadcast` (Stream Info tab: view/edit title, category, language, tags)
 
 On supported Unix builds, the command saves successful login results through
 the restrictive credential file fallback. On non-Unix builds, the command stops
@@ -195,10 +198,15 @@ saves them through `CredentialStore`. Token values remain typed secrets until
 the storage-owned marshal path deliberately reveals them for the private Unix
 credential file.
 
-The adapter uses the MVP scopes by default:
+The adapter falls back to the MVP chat scopes when a caller supplies no
+explicit scope list:
 
 - `chat:read`
 - `chat:edit`
+
+`twi login` always supplies its own explicit list (chat scopes plus
+`channel:manage:broadcast`), so this fallback only matters for other callers
+of the `auth` package that omit `LoginRequest.Scopes`.
 
 It rejects missing, mismatched, expired, or duplicate OAuth state, denied
 authorization callbacks, unsupported callback listeners, unsupported browser
@@ -331,6 +339,12 @@ MVP IRC scopes:
 
 - `chat:read`
 - `chat:edit`
+
+Stream Info tab scope (view/edit the broadcaster's own title, category,
+language, and tags; unrelated to IRC readiness, so `twi doctor` and live chat
+startup do not gate on it):
+
+- `channel:manage:broadcast`
 
 Future EventSub or API chat work may require scopes such as:
 

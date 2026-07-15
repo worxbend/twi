@@ -4,10 +4,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/w0rxbend/twi/internal/assets"
-	"github.com/w0rxbend/twi/internal/config"
-	"github.com/w0rxbend/twi/internal/render"
-	"github.com/w0rxbend/twi/internal/storage"
+	"github.com/worxbend/twi/internal/assets"
+	"github.com/worxbend/twi/internal/config"
+	"github.com/worxbend/twi/internal/render"
+	"github.com/worxbend/twi/internal/storage"
 )
 
 // ImageStackStatus describes whether live startup should install async image

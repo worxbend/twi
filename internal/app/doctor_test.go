@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/w0rxbend/twi/internal/config"
-	"github.com/w0rxbend/twi/internal/storage"
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/config"
+	"github.com/worxbend/twi/internal/storage"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 func TestDoctorRunsWithoutCredentialsAndUsesWarnings(t *testing.T) {

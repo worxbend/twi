@@ -9,8 +9,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
-	"github.com/w0rxbend/twi/internal/config"
-	"github.com/w0rxbend/twi/internal/render"
+	"github.com/worxbend/twi/internal/config"
+	"github.com/worxbend/twi/internal/render"
 )
 
 // unstyledGapAfterReset matches an ANSI reset immediately followed by two or

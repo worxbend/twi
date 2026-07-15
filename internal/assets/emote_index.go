@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 const defaultEmoteIndexTTL = 24 * time.Hour

@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/w0rxbend/twi/internal/config"
+	"github.com/worxbend/twi/internal/config"
 )
 
 const setupUsage = `Usage:

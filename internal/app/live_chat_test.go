@@ -11,10 +11,10 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/w0rxbend/twi/internal/auth"
-	"github.com/w0rxbend/twi/internal/config"
-	"github.com/w0rxbend/twi/internal/debuglog"
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/auth"
+	"github.com/worxbend/twi/internal/config"
+	"github.com/worxbend/twi/internal/debuglog"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 func TestLiveChatClientBridgesTransportEvents(t *testing.T) {

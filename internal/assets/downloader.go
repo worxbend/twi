@@ -20,8 +20,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/w0rxbend/twi/internal/debuglog"
-	"github.com/w0rxbend/twi/internal/storage"
+	"github.com/worxbend/twi/internal/debuglog"
+	"github.com/worxbend/twi/internal/storage"
 )
 
 const (

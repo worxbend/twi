@@ -13,15 +13,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/w0rxbend/twi/internal/app"
-	"github.com/w0rxbend/twi/internal/assets"
-	"github.com/w0rxbend/twi/internal/auth"
-	"github.com/w0rxbend/twi/internal/config"
-	"github.com/w0rxbend/twi/internal/debuglog"
-	"github.com/w0rxbend/twi/internal/render"
-	"github.com/w0rxbend/twi/internal/storage"
-	"github.com/w0rxbend/twi/internal/theme"
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/app"
+	"github.com/worxbend/twi/internal/assets"
+	"github.com/worxbend/twi/internal/auth"
+	"github.com/worxbend/twi/internal/config"
+	"github.com/worxbend/twi/internal/debuglog"
+	"github.com/worxbend/twi/internal/render"
+	"github.com/worxbend/twi/internal/storage"
+	"github.com/worxbend/twi/internal/theme"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 const usage = `twi is a terminal Twitch chat client.
@@ -48,6 +48,7 @@ Environment:
   TWITCH_REFRESH_TOKEN
   TWITCH_CLIENT_ID
   TWITCH_CLIENT_SECRET
+  TWITCH_REDIRECT_URL
   TWI_DEFAULT_CHANNELS
   TWI_ENABLE_KITTY_IMAGES
   TWI_ENABLE_MOUSE
@@ -101,7 +102,53 @@ var newLiveClientOptions = func(cfg config.Config) app.ClientOptions {
 	opts := liveClientOptions(cfg, os.Environ(), "")
 	opts.StreamStatusResolver = newStreamStatusResolver(cfg)
 	opts.EmoteIndex = newEmoteIndex(cfg)
+	opts.ChannelManager = newChannelManager(cfg)
+	opts.GameLookup = newGameLookup(cfg)
+	opts.SelfUserLookup = newSelfUserLookup(cfg)
 	return opts
+}
+
+// newChannelManager wires the Stream Info tab's Get/Modify Channel
+// Information calls to real Twitch Helix, gated only on Twitch API
+// credentials (channel:manage:broadcast is requested at login but Twitch
+// still enforces it per-request, so a missing grant simply surfaces as an
+// API error on the tab rather than being pre-checked here).
+func newChannelManager(cfg config.Config) twitch.ChannelManager {
+	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
+		return nil
+	}
+	return twitch.NewHelixChannelsClient(twitch.HelixChannelsClientConfig{
+		HTTPClient: &http.Client{Timeout: 5 * time.Second},
+		ClientID:   cfg.Twitch.ClientID,
+		OAuthToken: cfg.Twitch.OAuthToken,
+	})
+}
+
+// newGameLookup resolves a Stream Info category name to its Twitch game ID
+// when the user changes the category field.
+func newGameLookup(cfg config.Config) twitch.GameLookup {
+	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
+		return nil
+	}
+	return twitch.NewHelixGamesClient(twitch.HelixGamesClientConfig{
+		HTTPClient: &http.Client{Timeout: 5 * time.Second},
+		ClientID:   cfg.Twitch.ClientID,
+		OAuthToken: cfg.Twitch.OAuthToken,
+	})
+}
+
+// newSelfUserLookup resolves the logged-in user's own Twitch user ID (the
+// broadcaster_id Stream Info's Helix calls need), independent of whether
+// avatar images are enabled.
+func newSelfUserLookup(cfg config.Config) twitch.UserLookup {
+	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
+		return nil
+	}
+	return twitch.NewHelixUsersClient(twitch.HelixUsersClientConfig{
+		HTTPClient: &http.Client{Timeout: 2 * time.Second},
+		ClientID:   cfg.Twitch.ClientID,
+		OAuthToken: cfg.Twitch.OAuthToken,
+	})
 }
 
 // newEmoteIndex wires Ctrl+E emote search / the quick-select row to real
@@ -888,7 +935,7 @@ func refreshedCredentialRecord(cfg config.Config, base storage.CredentialRecord,
 	if len(refreshed.Scopes) > 0 {
 		record.Scopes = append([]auth.Scope(nil), refreshed.Scopes...)
 	} else if len(record.Scopes) == 0 {
-		record.Scopes = auth.RequiredChatScopes()
+		record.Scopes = auth.LoginScopes()
 	}
 	if !refreshed.ExpiresAt.IsZero() {
 		record.ExpiresAt = refreshed.ExpiresAt

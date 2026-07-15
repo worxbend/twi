@@ -10,9 +10,15 @@ const (
 	ScopeChatRead Scope = "chat:read"
 	// ScopeChatEdit allows Twitch IRC clients to send chat messages.
 	ScopeChatEdit Scope = "chat:edit"
+	// ScopeChannelManageBroadcast allows reading and updating the
+	// authenticated broadcaster's channel info (title, category, language,
+	// tags) through Twitch Helix "Get/Modify Channel Information".
+	ScopeChannelManageBroadcast Scope = "channel:manage:broadcast"
 )
 
 var requiredChatScopes = []Scope{ScopeChatRead, ScopeChatEdit}
+
+var streamManageScopes = []Scope{ScopeChannelManageBroadcast}
 
 // ChatReadScopes returns the OAuth scopes required for read-only Twitch chat.
 func ChatReadScopes() []Scope {
@@ -28,6 +34,19 @@ func ChatSendScopes() []Scope {
 // and send behavior.
 func RequiredChatScopes() []Scope {
 	return append([]Scope(nil), requiredChatScopes...)
+}
+
+// StreamManageScopes returns the OAuth scopes required to view and edit the
+// broadcaster's own stream info (title, category, language, tags) on the
+// Stream Info tab.
+func StreamManageScopes() []Scope {
+	return append([]Scope(nil), streamManageScopes...)
+}
+
+// LoginScopes returns every OAuth scope `twi login` requests: the required
+// chat read/send scopes plus stream info management for the Stream Info tab.
+func LoginScopes() []Scope {
+	return append(RequiredChatScopes(), StreamManageScopes()...)
 }
 
 // MissingScopes returns required scopes that are absent from granted.

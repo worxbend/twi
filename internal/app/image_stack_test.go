@@ -3,8 +3,8 @@ package app
 import (
 	"testing"
 
-	"github.com/w0rxbend/twi/internal/assets"
-	"github.com/w0rxbend/twi/internal/config"
+	"github.com/worxbend/twi/internal/assets"
+	"github.com/worxbend/twi/internal/config"
 )
 
 func TestDefaultLiveImageStackRequestsEmojiAndEmoteImagesWhenCapable(t *testing.T) {

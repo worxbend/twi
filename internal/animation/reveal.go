@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/rivo/uniseg"
-	"github.com/w0rxbend/twi/internal/render"
+	"github.com/worxbend/twi/internal/render"
 )
 
 const (

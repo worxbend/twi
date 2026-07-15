@@ -7,8 +7,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/w0rxbend/twi/internal/render"
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/render"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 type fakeClock struct {

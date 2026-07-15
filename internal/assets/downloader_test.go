@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/w0rxbend/twi/internal/debuglog"
+	"github.com/worxbend/twi/internal/debuglog"
 )
 
 func TestPublicImageDownloaderDownloadsSniffedPNGToSafePath(t *testing.T) {

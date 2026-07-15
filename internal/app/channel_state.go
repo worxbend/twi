@@ -4,8 +4,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/w0rxbend/twi/internal/animation"
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/animation"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 type channelStateSet struct {

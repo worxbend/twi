@@ -15,13 +15,13 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/w0rxbend/twi/internal/animation"
-	"github.com/w0rxbend/twi/internal/assets"
-	"github.com/w0rxbend/twi/internal/config"
-	"github.com/w0rxbend/twi/internal/render"
-	"github.com/w0rxbend/twi/internal/storage"
-	"github.com/w0rxbend/twi/internal/theme"
-	"github.com/w0rxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/animation"
+	"github.com/worxbend/twi/internal/assets"
+	"github.com/worxbend/twi/internal/config"
+	"github.com/worxbend/twi/internal/render"
+	"github.com/worxbend/twi/internal/storage"
+	"github.com/worxbend/twi/internal/theme"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 type appFakeClock struct {
@@ -362,7 +362,7 @@ func TestMockShellMouseEventsWhenEnabled(t *testing.T) {
 	model = updated.(mockShellModel)
 	layout := model.layout()
 	chatX := layout.sidebarWidth + 2
-	contentY := layout.statusHeight + 1
+	contentY := layout.tabBarHeight + layout.statusHeight + 1
 
 	updated, cmd := model.Update(tea.MouseMsg{
 		X:      chatX,
@@ -381,7 +381,7 @@ func TestMockShellMouseEventsWhenEnabled(t *testing.T) {
 		t.Fatalf("mouse-scrolled viewport missing older row:\n%s", model.View())
 	}
 
-	betaY := layout.statusHeight + 1 + 2
+	betaY := layout.tabBarHeight + layout.statusHeight + 1 + 2
 	updated, cmd = model.Update(tea.MouseMsg{
 		X:      2,
 		Y:      betaY,
@@ -401,7 +401,7 @@ func TestMockShellMouseEventsWhenEnabled(t *testing.T) {
 		t.Fatalf("focus after sidebar click = %v, want %v", got, want)
 	}
 
-	composerY := layout.statusHeight + layout.chatHeight + 1
+	composerY := layout.tabBarHeight + layout.statusHeight + layout.chatHeight + 1
 	updated, _ = model.Update(tea.MouseMsg{
 		X:      10,
 		Y:      composerY,
@@ -418,7 +418,7 @@ func TestMockShellMouseEventsWhenEnabled(t *testing.T) {
 	}
 	model.activeChannelState().scrollOffset = 0
 	layout = model.layout()
-	latestY := layout.statusHeight + 1 + layout.chatContentHeight - 1
+	latestY := layout.tabBarHeight + layout.statusHeight + 1 + layout.chatContentHeight - 1
 	updated, _ = model.Update(tea.MouseMsg{
 		X:      layout.sidebarWidth + 4,
 		Y:      latestY,
@@ -446,10 +446,10 @@ func TestMockShellMouseEventsIgnoredWhenDisabled(t *testing.T) {
 	layout := model.layout()
 
 	events := []tea.MouseMsg{
-		{X: layout.sidebarWidth + 2, Y: layout.statusHeight + 1, Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress},
-		{X: 2, Y: layout.statusHeight + 3, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress},
-		{X: 10, Y: layout.statusHeight + layout.chatHeight + 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress},
-		{X: layout.sidebarWidth + 4, Y: layout.statusHeight + 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress},
+		{X: layout.sidebarWidth + 2, Y: layout.tabBarHeight + layout.statusHeight + 1, Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress},
+		{X: 2, Y: layout.tabBarHeight + layout.statusHeight + 3, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress},
+		{X: 10, Y: layout.tabBarHeight + layout.statusHeight + layout.chatHeight + 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress},
+		{X: layout.sidebarWidth + 4, Y: layout.tabBarHeight + layout.statusHeight + 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress},
 	}
 	for _, event := range events {
 		updated, cmd := model.Update(event)
@@ -1029,7 +1029,7 @@ func TestLiveShellSidebarSwitchesChannelsAndPreservesDrafts(t *testing.T) {
 	client := NewFakeChatClient(1)
 	model := newLiveShellModelWithClock("alpha", cfg, client, nil)
 	model.width = 88
-	model.height = 14
+	model.height = 15
 
 	alpha := model.channels.ensure("alpha")
 	beta := model.channels.ensure("beta")
@@ -2753,7 +2753,7 @@ func TestLiveShellAssetSchedulerBoundsVisibleQueue(t *testing.T) {
 		model.activeChannelState().messages = append(model.activeChannelState().messages, emoteOnlyAssetMessage(fmt.Sprintf("queued-%02d", i), fmt.Sprintf("emote-%02d", i)))
 	}
 
-	updated, _ := model.Update(tea.WindowSizeMsg{Width: 96, Height: assetWorkQueueMax + 12})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 96, Height: assetWorkQueueMax + 13})
 	model = updated.(mockShellModel)
 	requests := model.pendingAssetRequests()
 	if got, want := len(requests), assetWorkQueueMax; got != want {
@@ -3158,7 +3158,7 @@ func TestMockShellChannelSidebarResponsiveLayouts(t *testing.T) {
 		wantWideSize bool
 	}{
 		{name: "narrow", width: 48, height: 10},
-		{name: "normal", width: 88, height: 15, wantSidebar: true},
+		{name: "normal", width: 88, height: 16, wantSidebar: true},
 		{name: "wide", width: 124, height: 17, wantSidebar: true, wantWideSize: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -3400,7 +3400,7 @@ func TestCommandPaletteOpensFiltersExecutesAndCloses(t *testing.T) {
 	cfg.DefaultChannels = []string{"alpha", "beta", "gamma"}
 	model := newMockShellModel("alpha", cfg)
 	model.width = 88
-	model.height = 14
+	model.height = 15
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
 	model = updated.(mockShellModel)
@@ -3416,7 +3416,7 @@ func TestCommandPaletteOpensFiltersExecutesAndCloses(t *testing.T) {
 			t.Fatalf("palette view missing %q:\n%s", want, view)
 		}
 	}
-	if got, want := lineCount(view), 14; got != want {
+	if got, want := lineCount(view), 15; got != want {
 		t.Fatalf("palette view line count = %d, want %d:\n%s", got, want, view)
 	}
 
