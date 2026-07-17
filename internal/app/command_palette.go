@@ -413,7 +413,6 @@ func paletteWindowStart(selected, total, height int) int {
 
 func (m *mockShellModel) switchChannelBy(delta int) tea.Cmd {
 	if m.channels.switchBy(delta) {
-		m.triggerSceneFlash()
 		m.clampScroll()
 		return m.asyncAssetCommand()
 	}
@@ -422,7 +421,6 @@ func (m *mockShellModel) switchChannelBy(delta int) tea.Cmd {
 
 func (m *mockShellModel) switchChannel(channel string) tea.Cmd {
 	if m.channels.setActive(channel) {
-		m.triggerSceneFlash()
 		m.clampScroll()
 		return m.asyncAssetCommand()
 	}

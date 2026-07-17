@@ -105,6 +105,28 @@ func TestGradientDegradesSafelyForInvalidCustomColors(t *testing.T) {
 	}
 }
 
+func TestSeamlessGradientMirrorsBothSidesAndClosesItsLoop(t *testing.T) {
+	for _, steps := range []int{1, 2, 3, 8, 9} {
+		colors := SeamlessGradient("#ff0000", "#0000ff", steps)
+		if len(colors) != steps {
+			t.Fatalf("SeamlessGradient(..., %d) length = %d, want %d", steps, len(colors), steps)
+		}
+		if colors[0] != colors[len(colors)-1] {
+			t.Fatalf("SeamlessGradient(..., %d) endpoints = %q and %q, want a closed loop", steps, colors[0], colors[len(colors)-1])
+		}
+		for left, right := 0, len(colors)-1; left < right; left, right = left+1, right-1 {
+			if colors[left] != colors[right] {
+				t.Fatalf("SeamlessGradient(..., %d) is not mirrored at %d/%d: %q != %q", steps, left, right, colors[left], colors[right])
+			}
+		}
+	}
+
+	colors := SeamlessGradient("#ff0000", "#0000ff", 8)
+	if colors[3] != "#0000ff" || colors[4] != "#0000ff" {
+		t.Fatalf("even seamless gradient center = %q/%q, want the end color at both center cells", colors[3], colors[4])
+	}
+}
+
 func TestDarkenAdjustsValidColorsAndPreservesInvalidValues(t *testing.T) {
 	if got, want := Darken("#204060", 0.25), "#183048"; got != want {
 		t.Fatalf("Darken() = %q, want %q", got, want)

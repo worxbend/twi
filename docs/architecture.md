@@ -86,13 +86,22 @@ quiet frame, and role-colored left rail. Adding a widget therefore means reading
 
 A single shared `animation.FrameMsg` tick (`internal/animation/clock.go`,
 ~10fps, skipped when `animation_mode = "off"`) drives every chrome animation
-effect — the theme-derived top-bar, focused pane-title/rail, and splash
-gradients, pulsing status-bar LIVE/REC and incoming-message rails, the channel-switch flash, the staged
+effect — the theme-derived top-bar, auxiliary focused pane-title/rail, and
+splash gradients, pulsing status-bar LIVE/REC and incoming-message rails, the staged
 block-logo splash, and a command-palette typewriter reveal that reuses the same
 `Sequence`/`Queue` machinery built for chat-row reveals — instead of each
-effect running its own ad hoc ticker. Static messages alternate background
-surfaces and carry a colored rail plus mail glyph; these decorations are added
-at the app layout boundary so the normalized message renderer stays reusable.
+effect running its own ad hoc ticker. The Chat pane frame and title are kept
+static even while its message content reveals. After local filtering, adjacent
+messages are grouped by normalized Twitch login (then stable author ID/display
+name fallbacks); authorless events receive separate message/event-identity
+groups instead of being conflated by event type. Consecutive messages in one author group share the same
+background surface and colored rail; an explicit non-selectable separator row
+is inserted only when the visible author changes. These decorations and their
+scroll/mouse row accounting are added at the app layout boundary so the
+normalized message renderer stays reusable.
+Moving gradients use a mirrored `start → end → start` palette whose first
+and last colors match, avoiding a hard seam when phase rotation wraps at either
+side of a line or rail.
 A borderless, inset composer follows the same boundary: it renders a
 theme-surface panel with a focus rail, shared-clock block cursor, optional reply
 context, and a compact channel/send-state footer without changing the existing

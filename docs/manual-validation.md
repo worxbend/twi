@@ -19,8 +19,8 @@ Commands run:
 go test ./...
 go vet ./...
 go test -race ./internal/app ./internal/render ./internal/theme
-go build -o /tmp/twi-pane ./cmd/twi
-/tmp/twi-pane chat --mock --channel alpha
+go build -o /tmp/twi-message-groups ./cmd/twi
+env TERM=xterm-256color COLORTERM=truecolor /tmp/twi-message-groups chat --mock --channel alpha
 git diff --check
 ```
 
@@ -34,7 +34,10 @@ Results:
   and colored left rails; the inset composer with its channel/state footer; and
   the icon-bearing help strip.
 - Mock authors retained different stable nickname colors while messages
-  revealed. Automated contrast tests cover both alternating chat surfaces.
+  revealed. Consecutive messages from one author retained a shared group
+  surface/rail, and visible author changes rendered a subtle horizontal rule.
+  Automated tests cover grouping identity, separator rows, scrolling, mouse
+  targeting, and contrast against both alternating group surfaces.
 - `ctrl+c` exited cleanly and restored the terminal background with OSC 111.
 
 ## 2026-07-04 T004 Terminal Matrix

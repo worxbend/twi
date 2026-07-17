@@ -41,7 +41,7 @@ func (m mockShellModel) renderPane(spec paneSpec) string {
 
 	railColor := spec.accent
 	if spec.focused {
-		colors := theme.Gradient(spec.accent, m.paneGradientEnd(spec.accent), 12)
+		colors := theme.SeamlessGradient(spec.accent, m.paneGradientEnd(spec.accent), 12)
 		if len(colors) > 0 {
 			railColor = colors[m.gradientPhase(len(colors))%len(colors)]
 		}

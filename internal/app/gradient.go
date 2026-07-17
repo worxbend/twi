@@ -38,7 +38,7 @@ func gradientBackgroundLine(value string, width int, start, end, preferredForegr
 		return ""
 	}
 	plain := fitLine(value, width)
-	colors := theme.Gradient(start, end, width)
+	colors := theme.SeamlessGradient(start, end, width)
 	if len(colors) == 0 {
 		return plain
 	}
@@ -64,7 +64,7 @@ func gradientForegroundText(value, start, end, background string, phase int, bol
 	if width <= 0 {
 		return ""
 	}
-	colors := theme.Gradient(start, end, width)
+	colors := theme.SeamlessGradient(start, end, width)
 	var builder strings.Builder
 	cell := 0
 	graphemes := uniseg.NewGraphemes(value)

@@ -56,6 +56,23 @@ func TestFocusedPaneChromeAnimatesFromSharedFrame(t *testing.T) {
 	}
 }
 
+func TestChatPaneChromeIsStaticAcrossSharedFrames(t *testing.T) {
+	forceColorProfile(t)
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "fast"
+	model := newMockShellModel("alpha", cfg)
+	model.width, model.height = 88, 22
+	layout := model.layout()
+
+	model.lastFrameAt = time.UnixMilli(1600)
+	first := model.chatView(layout)
+	model.lastFrameAt = time.UnixMilli(1800)
+	second := model.chatView(layout)
+	if first != second {
+		t.Fatal("chat pane chrome changed with the shared frame clock; want a static border and title")
+	}
+}
+
 func TestCanvasBackgroundIsDarkerThanThemeBackground(t *testing.T) {
 	model := newMockShellModel("alpha", config.Default())
 	if got := model.canvasBackground(); got == model.theme.Background {

@@ -139,6 +139,28 @@ func Gradient(start, end string, steps int) []string {
 	return colors
 }
 
+// SeamlessGradient returns a mirrored start-to-end-to-start palette. The
+// first and last entries match, so consumers can rotate through the palette
+// without exposing a hard end-to-start seam at the wrap point.
+func SeamlessGradient(start, end string, steps int) []string {
+	if steps <= 0 {
+		return nil
+	}
+	forwardLength := steps/2 + steps%2
+	forward := Gradient(start, end, forwardLength)
+	colors := make([]string, 0, steps)
+	colors = append(colors, forward...)
+
+	reverseStart := len(forward) - 1
+	if steps%2 == 1 {
+		reverseStart--
+	}
+	for index := reverseStart; index >= 0; index-- {
+		colors = append(colors, forward[index])
+	}
+	return colors
+}
+
 // Darken reduces a valid hex color's RGB components by amount. Amount is
 // clamped to [0,1], and invalid custom-theme values are returned unchanged so
 // decorative canvas treatment cannot make a theme unusable.

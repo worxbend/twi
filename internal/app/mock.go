@@ -31,7 +31,6 @@ const (
 	activityLogMinWidth   = 100
 	activityLogNormalSize = 28
 	activityLogWideSize   = 34
-	sceneFlashDuration    = 180 * time.Millisecond
 	splashDuration        = 2 * time.Second
 )
 
@@ -91,7 +90,6 @@ type mockShellModel struct {
 	nextSend                    int
 	frameTickScheduled          bool
 	lastFrameAt                 time.Time
-	sceneFlashUntil             time.Time
 	splashUntil                 time.Time
 	splashSkipped               bool
 	frameTimestamps             []time.Time
@@ -248,9 +246,11 @@ type mockShellLayout struct {
 }
 
 type chatRowBlock struct {
-	message   twitch.ChatMessage
-	rows      []render.Row
-	animating bool
+	message         twitch.ChatMessage
+	rows            []render.Row
+	groupIndex      int
+	separatorBefore bool
+	animating       bool
 }
 
 type mockIncomingMessageMsg struct {
@@ -670,7 +670,6 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.focus == mockFocusChat && len(msg.Runes) == 1 && msg.Runes[0] == ']' {
 				if m.channels.switchBy(1) {
-					m.triggerSceneFlash()
 					m.clampScroll()
 					return m.withAsyncAssetCommands(nil)
 				}
@@ -678,7 +677,6 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.focus == mockFocusChat && len(msg.Runes) == 1 && msg.Runes[0] == '[' {
 				if m.channels.switchBy(-1) {
-					m.triggerSceneFlash()
 					m.clampScroll()
 					return m.withAsyncAssetCommands(nil)
 				}
@@ -961,10 +959,6 @@ func (m mockShellModel) chatView(layout mockShellLayout) string {
 		return fitBlock(content, layout.chatWidth, layout.chatHeight)
 	}
 
-	accent := m.theme.Accent
-	if m.sceneFlashActive() {
-		accent = m.theme.Foreground
-	}
 	return m.renderPane(paneSpec{
 		icon:          "💬",
 		title:         "Chat · #" + m.activeChannelName(),
@@ -972,8 +966,7 @@ func (m mockShellModel) chatView(layout mockShellLayout) string {
 		width:         layout.chatWidth,
 		contentHeight: layout.chatContentHeight,
 		padding:       1,
-		accent:        accent,
-		focused:       m.focus == mockFocusChat && !m.anyOverlayOpen(),
+		accent:        m.theme.Accent,
 	})
 }
 
@@ -1080,13 +1073,16 @@ func (m mockShellModel) chatRows(layout mockShellLayout) []string {
 	blocks := m.visibleChatRowBlocks(layout)
 
 	rows := make([]string, 0, chatRowBlockCount(blocks))
-	for blockIndex, block := range blocks {
+	for _, block := range blocks {
+		if block.separatorBefore {
+			rows = append(rows, m.messageGroupSeparatorString(rowWidth))
+		}
 		if len(block.rows) == 0 {
-			rows = append(rows, m.messageRowString(block, blockIndex, 0, render.Row{}, rowWidth))
+			rows = append(rows, m.messageRowString(block, block.groupIndex, 0, render.Row{}, rowWidth))
 			continue
 		}
 		for rowIndex, row := range block.rows {
-			rows = append(rows, m.messageRowString(block, blockIndex, rowIndex, row, rowWidth))
+			rows = append(rows, m.messageRowString(block, block.groupIndex, rowIndex, row, rowWidth))
 		}
 	}
 	if len(rows) == 0 && active.messageFilters.active() {
@@ -1122,7 +1118,38 @@ func (m mockShellModel) visibleChatRowBlocks(layout mockShellLayout) []chatRowBl
 			animating: true,
 		})
 	}
+	assignChatAuthorGroups(blocks)
 	return blocks
+}
+
+// assignChatAuthorGroups joins adjacent visible messages from the same author
+// into one visual group. Filters are applied before this pass, so grouping
+// reflects exactly what the user can see rather than hidden history.
+func assignChatAuthorGroups(blocks []chatRowBlock) {
+	previousKey := ""
+	groupIndex := -1
+	for index := range blocks {
+		key := chatAuthorGroupKey(blocks[index].message, index)
+		if index == 0 || key != previousKey {
+			groupIndex++
+			blocks[index].separatorBefore = index > 0
+		}
+		blocks[index].groupIndex = groupIndex
+		previousKey = key
+	}
+}
+
+func chatAuthorGroupKey(message twitch.ChatMessage, blockIndex int) string {
+	for _, identity := range []string{message.AuthorLogin, message.AuthorID, message.DisplayName} {
+		if identity = strings.TrimSpace(identity); identity != "" {
+			return "author:" + strings.ToLower(identity)
+		}
+	}
+	if messageID := strings.TrimSpace(message.ID); messageID != "" {
+		return "message:" + strings.ToLower(messageID)
+	}
+	eventID := strings.ToLower(strings.TrimSpace(message.SystemEventID))
+	return fmt.Sprintf("anonymous:%s:%d", eventID, blockIndex)
 }
 
 func (m mockShellModel) messageVisibleForState(state *channelState, message twitch.ChatMessage) bool {
@@ -1135,6 +1162,9 @@ func (m mockShellModel) messageVisibleForState(state *channelState, message twit
 func chatRowBlockCount(blocks []chatRowBlock) int {
 	total := 0
 	for _, block := range blocks {
+		if block.separatorBefore {
+			total++
+		}
 		total += chatRowBlockRowCount(block)
 	}
 	return total
@@ -1645,6 +1675,7 @@ func (m mockShellModel) messageRowString(block chatRowBlock, blockIndex, rowInde
 	railColors := theme.Gradient(m.theme.Accent, m.gradientEndColor(), 8)
 	colorIndex := blockIndex % len(railColors)
 	if block.animating {
+		railColors = theme.SeamlessGradient(m.theme.Accent, m.gradientEndColor(), 8)
 		colorIndex = (colorIndex + m.gradientPhase(len(railColors))) % len(railColors)
 	}
 	railColor := railColors[colorIndex]
@@ -1669,6 +1700,20 @@ func (m mockShellModel) messageRowString(block chatRowBlock, blockIndex, rowInde
 		Background(lipgloss.Color(background)).
 		Bold(block.animating).
 		Render(icon) + content
+}
+
+func (m mockShellModel) messageGroupSeparatorString(rowWidth int) string {
+	if rowWidth <= 0 {
+		return ""
+	}
+	line := strings.Repeat("─", rowWidth)
+	if rowWidth >= 5 {
+		line = "  " + strings.Repeat("─", rowWidth-4) + "  "
+	}
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color(m.theme.Border)).
+		Background(lipgloss.Color(m.theme.Surface)).
+		Render(line)
 }
 
 func (m *mockShellModel) cycleFocus() {
@@ -1842,6 +1887,12 @@ func (m mockShellModel) messageAtVisibleChatRow(layout mockShellLayout, contentR
 
 	cursor := 0
 	for _, block := range blocks {
+		if block.separatorBefore {
+			if target == cursor {
+				return twitch.ChatMessage{}, false
+			}
+			cursor++
+		}
 		next := cursor + chatRowBlockRowCount(block)
 		if target >= cursor && target < next {
 			return selectableMessage(block.message)
@@ -2016,45 +2067,36 @@ func (m *mockShellModel) completeReveals(completed []animation.CompletedReveal) 
 		if !ok {
 			continue
 		}
-		m.appendStaticMessageReplacingRows(message, state.scrollOffset > 0, len(reveal.Rows))
+		preserveScrolledView := state.scrollOffset > 0
+		beforeRows := 0
+		if preserveScrolledView {
+			beforeRows = len(m.chatRows(m.layout()))
+		}
 		delete(state.activeMessages, reveal.ID)
 		m.removeActiveReveal(reveal.ID)
+		m.appendStaticMessage(message, false)
+		if preserveScrolledView {
+			state.scrollOffset = clampMin(state.scrollOffset+len(m.chatRows(m.layout()))-beforeRows, 0)
+		}
 	}
 }
 
 func (m *mockShellModel) appendStaticMessage(message twitch.ChatMessage, preserveScrolledView bool) {
-	m.appendStaticMessageReplacingRows(message, preserveScrolledView, 0)
-}
-
-func (m *mockShellModel) appendStaticMessageReplacingRows(message twitch.ChatMessage, preserveScrolledView bool, replacedRows int) {
 	state := m.channels.ensure(message.Channel)
 	if state == nil {
 		state = m.activeChannelState()
 	}
-	rowCount := 0
-	if preserveScrolledView && m.messageVisibleForState(state, message) {
-		rowCount = m.staticMessageRowCount(message) - replacedRows
-		if rowCount < 0 {
-			rowCount = 0
-		}
+	beforeRows := 0
+	if preserveScrolledView {
+		beforeRows = len(m.chatRows(m.layout()))
 	}
 	if message.Channel == "" {
 		message.Channel = state.name
 	}
 	state.messages = append(state.messages, message)
 	if preserveScrolledView {
-		state.scrollOffset += rowCount
+		state.scrollOffset = clampMin(state.scrollOffset+len(m.chatRows(m.layout()))-beforeRows, 0)
 	}
-}
-
-func (m mockShellModel) staticMessageRowCount(message twitch.ChatMessage) int {
-	layout := m.layout()
-	rowWidth := m.chatMessageContentWidth(layout)
-	rows := render.Rows(message, m.renderOptions(rowWidth))
-	if len(rows) == 0 {
-		return 1
-	}
-	return len(rows)
 }
 
 func (m *mockShellModel) removeActiveReveal(id string) {
@@ -2078,7 +2120,7 @@ func (s *channelState) removeActiveRevealID(id string) {
 
 // scheduleFrameTick starts the shared animation clock. It runs continuously
 // (not just while something is mid-animation) whenever animation is enabled,
-// driving the pulsing status indicators, scene-switch flash, startup splash,
+// driving the pulsing status indicators, startup splash,
 // and command-palette typewriter reveal from one ticker.
 func (m *mockShellModel) scheduleFrameTick() tea.Cmd {
 	if m.frameTickScheduled || m.animationMode == string(animation.ModeOff) {
@@ -2089,9 +2131,9 @@ func (m *mockShellModel) scheduleFrameTick() tea.Cmd {
 }
 
 // advanceFrame runs once per animation-clock tick. It records the frame for
-// FPS measurement and advances the command-palette typewriter reveal; scene
-// flash and splash simply expire based on wall-clock deadlines checked at
-// render time, so they need no per-tick bookkeeping here.
+// FPS measurement and advances the command-palette typewriter reveal. The
+// splash expires based on a wall-clock deadline checked at render time, so it
+// needs no per-tick bookkeeping here.
 func (m *mockShellModel) advanceFrame(now time.Time) {
 	m.lastFrameAt = now
 	m.frameTimestamps = append(m.frameTimestamps, now)
@@ -2108,20 +2150,6 @@ func (m *mockShellModel) advanceFrame(now time.Time) {
 	if m.palette.open {
 		m.refreshPaletteReveal(now)
 	}
-}
-
-// triggerSceneFlash briefly highlights the chat border on channel switch,
-// the TUI's closest analog to an OBS "scene switch" transition. It is a
-// no-op when animation is disabled.
-func (m *mockShellModel) triggerSceneFlash() {
-	if m.animationMode == string(animation.ModeOff) {
-		return
-	}
-	m.sceneFlashUntil = time.Now().Add(sceneFlashDuration)
-}
-
-func (m mockShellModel) sceneFlashActive() bool {
-	return !m.sceneFlashUntil.IsZero() && time.Now().Before(m.sceneFlashUntil)
 }
 
 func (m *mockShellModel) scheduleRevealTick() tea.Cmd {

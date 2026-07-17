@@ -2877,42 +2877,6 @@ func TestScheduleFrameTickDisabledWhenAnimationOff(t *testing.T) {
 	}
 }
 
-func TestChannelSwitchTriggersSceneFlash(t *testing.T) {
-	cfg := config.Default()
-	cfg.Features.AnimationMode = "fast"
-	cfg.DefaultChannels = []string{"alpha", "beta"}
-	model := newMockShellModel("alpha", cfg)
-	model.width, model.height = 88, 22
-
-	if model.sceneFlashActive() {
-		t.Fatal("sceneFlashActive() = true before any channel switch, want false")
-	}
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("]")})
-	model = updated.(mockShellModel)
-	if !model.sceneFlashActive() {
-		t.Fatal("sceneFlashActive() = false immediately after channel switch, want true")
-	}
-
-	model.sceneFlashUntil = time.Now().Add(-time.Millisecond)
-	if model.sceneFlashActive() {
-		t.Fatal("sceneFlashActive() = true after deadline elapsed, want false")
-	}
-}
-
-func TestChannelSwitchDoesNotFlashWhenAnimationOff(t *testing.T) {
-	cfg := config.Default()
-	cfg.Features.AnimationMode = "off"
-	cfg.DefaultChannels = []string{"alpha", "beta"}
-	model := newMockShellModel("alpha", cfg)
-	model.width, model.height = 88, 22
-
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("]")})
-	model = updated.(mockShellModel)
-	if model.sceneFlashActive() {
-		t.Fatal("sceneFlashActive() = true with animation off, want false")
-	}
-}
-
 func TestCommandPaletteRevealProgressesThenSettles(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "fast"
