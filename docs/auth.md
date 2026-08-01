@@ -1,6 +1,6 @@
 # Authentication
 
-This document describes the authentication model for `twi`. It covers the current environment/config-file credential path for Twitch IRC, the OAuth login command, and the restrictive Unix credential-file fallback. For setup symptoms and fixes, read [troubleshooting.md](troubleshooting.md); for the full docs map, read [index.md](index.md).
+This document describes the authentication model for `twi`. It covers the current environment/config-file credential path for Twitch IRC, the OAuth login command, and the restrictive Unix credential-file fallback. To register your own Twitch application and get its client ID/secret (required for `twi login` and Twitch-API features), read [register-twitch-app.md](register-twitch-app.md). For setup symptoms and fixes, read [troubleshooting.md](troubleshooting.md); for the full docs map, read [index.md](index.md).
 
 ## Current State
 

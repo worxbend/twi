@@ -7,6 +7,7 @@ This directory is the product source of truth for `twi`. The README gives the fa
 | Audience | Read this | Purpose |
 | --- | --- | --- |
 | New user | [quickstart.md](quickstart.md) | Run mock chat, configure live Twitch chat, and learn the key bindings. |
+| First live login | [register-twitch-app.md](register-twitch-app.md) | Register your own Twitch application, hand `twi` the client ID/secret, and learn the minimal config to start. |
 | Operator | [config.md](config.md) and [auth.md](auth.md) | Understand config precedence, credential sources, login, token refresh, and redaction. |
 | Docker user | [docker.md](docker.md) | Build and run the local container without baking secrets into the image. |
 | Contributor | [../CONTRIBUTING.md](../CONTRIBUTING.md), [development.md](development.md), and [code-style.md](code-style.md) | Work safely in the codebase, run checks, and preserve package boundaries. |

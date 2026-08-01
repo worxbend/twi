@@ -62,6 +62,13 @@ the primary path.
 
 ## 4. Configure Live Twitch Chat
 
+> `twi` uses **your own** Twitch application, not a bundled one. To have
+> `twi login` fetch a token, or to use any Twitch-API feature (Stream Info,
+> markers, `/clip`, follower/sub counts, emote autocomplete), first register an
+> app and set its client ID/secret — see
+> [register-twitch-app.md](register-twitch-app.md). If you already have a chat
+> OAuth token, the username + token path below is enough to read and send.
+
 Live mode is partially shipped: it supports one or more Twitch channels over IRC with startup token validation when Twitch OAuth validation is reachable, read, send, selected-message replies, `/me` actions, keyboard-first channel switching/sidebar state, command palette actions, optional mouse controls, and selected-message inspect diagnostics. `twi setup` can write non-secret config values and hand off to login. On supported Unix platforms, `twi login` can validate an OAuth browser/callback flow and save returned tokens through the restrictive credential-file fallback without printing them. Non-Unix builds keep saved credentials disabled.
 
 You need:

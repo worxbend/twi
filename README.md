@@ -46,6 +46,7 @@ The docs are split by audience:
 | Need | Read |
 | --- | --- |
 | Run it quickly | [Quickstart](docs/quickstart.md) |
+| Register your own Twitch app | [Twitch App Setup](docs/register-twitch-app.md) |
 | Understand every doc | [Documentation Index](docs/index.md) |
 | Configure auth and secrets | [Authentication](docs/auth.md) and [Configuration](docs/config.md) |
 | Fix setup problems | [Troubleshooting](docs/troubleshooting.md) |
@@ -120,6 +121,13 @@ manifests, signing, notarization, or registry publishing steps in this release
 candidate path yet.
 
 ## Live Twitch Chat
+
+> **Bring your own Twitch app.** `twi` has no built-in Twitch application. For
+> `twi login` and every Twitch-API-backed feature you register a personal app
+> in the [Twitch developer console](https://dev.twitch.tv/console/apps) and give
+> `twi` its client ID and secret. See
+> [docs/register-twitch-app.md](docs/register-twitch-app.md) for the full
+> walkthrough and the minimal config to start.
 
 Live mode needs a Twitch login, an IRC OAuth token, and at least one channel. Repeat `--channel` to join multiple Twitch IRC channels. The token needs `chat:read`; sending from the composer also needs `chat:edit`. Before starting live IRC, `twi chat` validates token identity, expiry, username match, and required scopes when Twitch OAuth validation is reachable. Definitive invalid-token states stop startup with redacted guidance; transient validation failures warn and continue to IRC authentication. Username/token credentials can come from environment variables, the flat config file, or the private credential store created by `twi login` on supported Unix platforms. Unix builds use a restrictive credential file. Non-Unix builds keep saved credentials disabled; use environment variables or a private flat config file there. Environment and flat config values take precedence over saved credentials. CLI flags currently override channels and config path, not username or token values.
 
