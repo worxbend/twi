@@ -494,24 +494,6 @@ func TestRowsNoImageFallbackOutputIsIntentional(t *testing.T) {
 	}
 }
 
-func assetHeavyMessage() twitch.ChatMessage {
-	return twitch.ChatMessage{
-		Timestamp:   time.Date(2026, 7, 1, 20, 0, 0, 0, time.Local),
-		AuthorID:    "user-1",
-		AvatarURL:   "https://static-cdn.example/avatar.png",
-		DisplayName: "viewer_fan",
-		AuthorLogin: "viewer_fan",
-		AuthorColor: "#9146ff",
-		Badges:      []twitch.Badge{{SetID: "moderator", ID: "1"}},
-		Type:        twitch.MessageTypeChat,
-		Fragments: []twitch.MessageFragment{
-			{Type: twitch.FragmentEmote, Text: "Kappa", Ref: twitch.AssetRef{Kind: "twitch_emote", ID: "25"}},
-			{Type: twitch.FragmentText, Text: " "},
-			{Type: twitch.FragmentEmoji, Text: "😀"},
-		},
-	}
-}
-
 func TestRowsMapEmojiAssetKeysAndPreserveGoldenFallback(t *testing.T) {
 	msg := twitch.ChatMessage{
 		Timestamp:   time.Date(2026, 7, 1, 20, 0, 0, 0, time.Local),

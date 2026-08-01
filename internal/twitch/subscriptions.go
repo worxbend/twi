@@ -142,7 +142,10 @@ func (c *HelixSubscriptionsClient) GetBroadcasterSubscriptions(ctx context.Conte
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
 		return SubscriptionsPage{}, credentialSafeUserError("decode Twitch broadcaster subscriptions response", err, c.oauthToken)
 	}
-	return SubscriptionsPage{Total: decoded.Total, Points: decoded.Points}, nil
+	// The wire struct and SubscriptionsPage carry the same fields, so a
+	// conversion keeps them in lockstep: adding a field to one without the
+	// other becomes a compile error rather than a silently dropped value.
+	return SubscriptionsPage(decoded), nil
 }
 
 type helixSubscriptionsResponse struct {

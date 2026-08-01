@@ -457,7 +457,10 @@ func TestLoginWriteDefaultConfigCreatesFileOnlyWhenMissing(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	code = Run([]string{"login", "--config", cfgPath, "--write-default-config"}, &stdout, &stderr)
+	// The exit code is deliberately ignored: --write-default-config writes the
+	// file and reports it, but login itself still exits non-zero without a
+	// client ID/secret. This case is about the file, not the exit status.
+	Run([]string{"login", "--config", cfgPath, "--write-default-config"}, &stdout, &stderr)
 	if !strings.Contains(stdout.String(), "Default config written to") {
 		t.Fatalf("stdout missing write confirmation: %q", stdout.String())
 	}

@@ -885,7 +885,9 @@ func wrap(prefix, content []Fragment, width int) []Row {
 	current := Row{}
 	used := 0
 	rows, current, used = appendWrappedFragments(rows, current, used, prefix, width, 0)
-	rows, current, used = appendWrappedFragments(rows, current, used, content, width, indentWidth)
+	// The final width is not needed: nothing is appended after content, so
+	// the trailing row is emitted as-is.
+	rows, current, _ = appendWrappedFragments(rows, current, used, content, width, indentWidth)
 	rows = append(rows, current)
 	return rows
 }
@@ -1322,17 +1324,4 @@ func emptyFallback(value, fallback string) string {
 
 func compactWhitespace(value string) string {
 	return strings.Join(strings.Fields(value), " ")
-}
-
-func cloneFragments(in []Fragment) []Fragment {
-	out := make([]Fragment, len(in))
-	copy(out, in)
-	return out
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
