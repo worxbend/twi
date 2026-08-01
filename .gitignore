@@ -42,6 +42,9 @@ temp/
 .agent-loop
 PLAN.md
 
+# Generated microsite output (assembled by scripts/build-site.sh)
+_site/
+
 # Local snapcraft build artifacts
 *.snap
 parts/

@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>twi — Twitch chat that lives in your terminal</title>
+<meta name="description" content="twi is a keyboard-first terminal Twitch chat client written in Go. 13 themes, grouped message layouts, @mention autocomplete, and OAuth tokens that never leak into logs.">
+<link rel="icon" href="assets/twi-logo.svg" type="image/svg+xml">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="twi — Twitch chat that lives in your terminal">
+<meta property="og:description" content="Keyboard-first terminal Twitch chat client. 13 themes, grouped layouts, @mention autocomplete, redacted secrets.">
+<meta property="og:image" content="assets/twi-banner.svg">
+<meta name="twitter:card" content="summary_large_image">
+
+<style>
+:root {
+  --bg: #0a0a12;
+  --bg-soft: #12101f;
+  --panel: #161327;
+  --panel-2: #1d1930;
+  --line: #2c2545;
+  --text: #efeaf7;
+  --muted: #a79cc4;
+  --brand: #9146ff;
+  --brand-soft: #c8a2ff;
+  --accent: #f97362;
+  --green: #4ade80;
+  --radius: 16px;
+  --maxw: 1140px;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  --sans: ui-sans-serif, Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f7f5fb;
+    --bg-soft: #ffffff;
+    --panel: #ffffff;
+    --panel-2: #f2eefb;
+    --line: #e0d8f0;
+    --text: #1a1523;
+    --muted: #5c5375;
+    --brand: #7b2fff;
+    --brand-soft: #6524d6;
+  }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; }
+img, svg { max-width: 100%; }
+.wrap { width: min(100% - 2.5rem, var(--maxw)); margin-inline: auto; }
+
+/* ---------- nav ---------- */
+header.nav {
+  position: sticky; top: 0; z-index: 50;
+  backdrop-filter: blur(14px);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  border-bottom: 1px solid var(--line);
+}
+.nav-inner { display: flex; align-items: center; gap: 1rem; padding: .8rem 0; }
+.brand { display: flex; align-items: center; gap: .55rem; font-family: var(--mono); font-weight: 700; font-size: 1.25rem; text-decoration: none; letter-spacing: -.5px; }
+.brand .dot { width: 10px; height: 10px; border-radius: 50%; background: linear-gradient(135deg, var(--brand-soft), var(--accent)); box-shadow: 0 0 14px var(--brand); }
+.nav-links { margin-left: auto; display: flex; gap: 1.4rem; align-items: center; }
+.nav-links a { text-decoration: none; color: var(--muted); font-size: .93rem; font-weight: 500; transition: color .15s; }
+.nav-links a:hover { color: var(--text); }
+.nav-cta {
+  padding: .45rem .95rem; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--brand) 55%, transparent);
+  background: color-mix(in srgb, var(--brand) 16%, transparent);
+  color: var(--brand-soft) !important;
+}
+@media (max-width: 760px) { .nav-links a:not(.nav-cta) { display: none; } }
+
+/* ---------- hero ---------- */
+.hero { position: relative; padding: 4.5rem 0 3rem; overflow: hidden; }
+.hero::before, .hero::after {
+  content: ""; position: absolute; border-radius: 50%; filter: blur(80px); z-index: 0; pointer-events: none;
+}
+.hero::before { width: 620px; height: 460px; left: -180px; top: -160px; background: color-mix(in srgb, var(--brand) 34%, transparent); }
+.hero::after  { width: 560px; height: 420px; right: -180px; top: 120px; background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.hero .wrap { position: relative; z-index: 1; }
+.eyebrow {
+  display: inline-flex; align-items: center; gap: .5rem;
+  font-family: var(--mono); font-size: .78rem; letter-spacing: .06em; text-transform: uppercase;
+  padding: .35rem .8rem; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--brand) 45%, transparent);
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+  color: var(--brand-soft);
+}
+h1 {
+  font-size: clamp(2.5rem, 6vw, 4.25rem); line-height: 1.05; margin: 1.1rem 0 .8rem;
+  letter-spacing: -.03em; font-weight: 800;
+}
+h1 .grad {
+  background: linear-gradient(110deg, var(--brand-soft), var(--brand) 45%, var(--accent));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.lede { font-size: clamp(1.05rem, 2vw, 1.3rem); color: var(--muted); max-width: 62ch; margin: 0 0 1.8rem; }
+.cta-row { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; }
+.btn {
+  display: inline-flex; align-items: center; gap: .5rem;
+  padding: .75rem 1.35rem; border-radius: 12px; text-decoration: none;
+  font-weight: 600; font-size: .97rem; transition: transform .15s, box-shadow .15s, background .15s;
+  border: 1px solid transparent;
+}
+.btn-primary { background: linear-gradient(135deg, var(--brand), var(--accent)); color: #fff; box-shadow: 0 10px 30px -10px var(--brand); }
+.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 16px 36px -12px var(--brand); }
+.btn-ghost { border-color: var(--line); background: var(--panel); color: var(--text); }
+.btn-ghost:hover { border-color: color-mix(in srgb, var(--brand) 50%, transparent); transform: translateY(-2px); }
+
+.hero-shot { margin-top: 2.8rem; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); box-shadow: 0 40px 90px -40px rgba(0,0,0,.85); background: var(--panel); }
+.hero-shot img { display: block; width: 100%; }
+
+/* ---------- generic section ---------- */
+section { padding: 4rem 0; }
+.section-head { max-width: 60ch; margin-bottom: 2.2rem; }
+.section-head h2 { font-size: clamp(1.7rem, 3.4vw, 2.4rem); margin: 0 0 .6rem; letter-spacing: -.02em; }
+.section-head p { color: var(--muted); margin: 0; font-size: 1.05rem; }
+.kicker { font-family: var(--mono); font-size: .8rem; color: var(--brand-soft); letter-spacing: .08em; text-transform: uppercase; }
+
+/* ---------- features ---------- */
+.grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(275px, 1fr)); }
+.card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.4rem; transition: transform .18s, border-color .18s;
+  position: relative; overflow: hidden;
+}
+.card:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--brand) 45%, transparent); }
+.card .ico { font-size: 1.5rem; line-height: 1; display: block; margin-bottom: .7rem; }
+.card h3 { margin: 0 0 .4rem; font-size: 1.08rem; }
+.card p { margin: 0; color: var(--muted); font-size: .95rem; }
+
+/* ---------- screenshot tabs (CSS only) ---------- */
+.shots input { position: absolute; opacity: 0; pointer-events: none; }
+.tabs { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1.2rem; }
+.tabs label {
+  cursor: pointer; padding: .5rem 1rem; border-radius: 999px; font-size: .9rem; font-weight: 600;
+  border: 1px solid var(--line); background: var(--panel); color: var(--muted); transition: all .15s;
+}
+.tabs label:hover { color: var(--text); }
+.panelbox { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--panel); box-shadow: 0 30px 70px -40px rgba(0,0,0,.8); }
+.panelbox > figure { display: none; margin: 0; }
+.panelbox > figure img { display: block; width: 100%; }
+.panelbox figcaption { padding: .85rem 1.1rem; color: var(--muted); font-size: .9rem; border-top: 1px solid var(--line); }
+#s1:checked ~ .tabs label[for=s1],
+#s2:checked ~ .tabs label[for=s2],
+#s3:checked ~ .tabs label[for=s3],
+#s4:checked ~ .tabs label[for=s4] {
+  background: color-mix(in srgb, var(--brand) 18%, transparent);
+  border-color: color-mix(in srgb, var(--brand) 55%, transparent);
+  color: var(--brand-soft);
+}
+#s1:checked ~ .panelbox > figure:nth-of-type(1),
+#s2:checked ~ .panelbox > figure:nth-of-type(2),
+#s3:checked ~ .panelbox > figure:nth-of-type(3),
+#s4:checked ~ .panelbox > figure:nth-of-type(4) { display: block; }
+
+/* ---------- themes ---------- */
+.themes { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+.theme {
+  border: 1px solid var(--line); border-radius: 12px; padding: .85rem; background: var(--panel);
+  transition: transform .18s, border-color .18s;
+}
+.theme:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--brand) 45%, transparent); }
+.theme .name { font-family: var(--mono); font-size: .85rem; margin-bottom: .6rem; display: flex; justify-content: space-between; align-items: center; }
+.theme .name .tag { font-size: .68rem; color: var(--muted); }
+.sw { display: flex; height: 28px; border-radius: 7px; overflow: hidden; border: 1px solid var(--line); }
+.sw span { flex: 1; }
+
+/* ---------- install ---------- */
+.code {
+  font-family: var(--mono); font-size: .9rem; background: var(--bg-soft);
+  border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.15rem;
+  overflow-x: auto; white-space: pre; color: var(--text); margin: 0 0 .9rem;
+}
+.code .c { color: var(--muted); }
+.code .p { color: var(--green); }
+.steps { display: grid; gap: 1.2rem; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.note {
+  border-left: 3px solid var(--brand); background: color-mix(in srgb, var(--brand) 8%, transparent);
+  padding: .9rem 1.1rem; border-radius: 0 10px 10px 0; color: var(--muted); font-size: .95rem;
+}
+.note strong { color: var(--text); }
+
+/* ---------- keys ---------- */
+.keys { display: grid; gap: .55rem; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
+.keyrow { display: flex; align-items: center; gap: .8rem; padding: .6rem .85rem; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+kbd {
+  font-family: var(--mono); font-size: .8rem; padding: .2rem .5rem; border-radius: 6px;
+  background: var(--panel-2); border: 1px solid var(--line); border-bottom-width: 2px; white-space: nowrap;
+}
+.keyrow span { color: var(--muted); font-size: .92rem; }
+
+/* ---------- footer ---------- */
+footer { border-top: 1px solid var(--line); padding: 2.5rem 0; color: var(--muted); font-size: .9rem; }
+.foot { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: space-between; }
+.foot a { color: var(--muted); text-decoration: none; margin-right: 1.1rem; }
+.foot a:hover { color: var(--text); }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#top"><span class="dot"></span>twi</a>
+    <nav class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#shots">Screenshots</a>
+      <a href="#themes">Themes</a>
+      <a href="#install">Install</a>
+      <a href="#keys">Keys</a>
+      <a class="nav-cta" href="https://github.com/worxbend/twi">GitHub ↗</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+<section class="hero">
+  <div class="wrap">
+    <span class="eyebrow">⚡ Terminal-native Twitch chat</span>
+    <h1>Twitch chat that lives in <span class="grad">your terminal</span>.</h1>
+    <p class="lede">
+      twi is a keyboard-first Twitch chat client written in Go. Read and send chat, switch channels,
+      and watch raids roll in — without a browser tab, and without your OAuth token ever showing up in a log.
+    </p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="#install">🚀 Get started</a>
+      <a class="btn btn-ghost" href="https://github.com/worxbend/twi">⭐ Star on GitHub</a>
+      <a class="btn btn-ghost" href="https://github.com/worxbend/twi/blob/main/docs/quickstart.md">📖 Quickstart</a>
+    </div>
+
+    <div class="hero-shot">
+      <img src="assets/screenshots/chat-grouped.svg" alt="twi running in a terminal, showing grouped chat messages with badges, per-user colors, an activity feed, and a channel sidebar">
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="kicker">Why twi</span>
+      <h2>Built for people who already live in a terminal</h2>
+      <p>Every surface is keyboard-reachable, resize-aware, and designed to stay readable when chat is moving fast.</p>
+    </div>
+    <div class="grid">
+      <article class="card">
+        <span class="ico">🎨</span>
+        <h3>13 built-in themes</h3>
+        <p>Claude, Catppuccin Mocha, Dracula, Gruvbox, Nord, Tokyo Night, Solarized and more — plus a custom hex palette. Preview them live with a full-screen picker.</p>
+      </article>
+      <article class="card">
+        <span class="ico">🧩</span>
+        <h3>Three message layouts</h3>
+        <p>Grouped blocks with an author header, dense inline rows, or a stripped-back compact view. Swap between them at runtime with <kbd>ctrl+g</kbd>.</p>
+      </article>
+      <article class="card">
+        <span class="ico">🌈</span>
+        <h3>Per-user color, everywhere</h3>
+        <p>Each chatter gets a stable hash-derived color that carries into their name, the message surface, and the gutter rail — so you recognize regulars at a glance.</p>
+      </article>
+      <article class="card">
+        <span class="ico">💬</span>
+        <h3>@mention autocomplete</h3>
+        <p>Type <code>@</code> and a prefix to complete from people actually in chat, ranked by who spoke most recently. <kbd>tab</kbd> accepts.</p>
+      </article>
+      <article class="card">
+        <span class="ico">🏅</span>
+        <h3>Glyph badges &amp; user context</h3>
+        <p>Broadcaster, mod, VIP and sub badges render as compact icons, alongside sub tenure, follow age, and how long you have seen someone in chat.</p>
+      </article>
+      <article class="card">
+        <span class="ico">⚡</span>
+        <h3>Live activity feed</h3>
+        <p>Raids, subs, cheers, follows, and join/leave events land in a dedicated column with per-kind glyphs — noisy reconnect bursts collapse automatically.</p>
+      </article>
+      <article class="card">
+        <span class="ico">🔐</span>
+        <h3>Secrets stay redacted</h3>
+        <p>OAuth tokens, refresh tokens, client secrets, and callback values are kept out of normal output, debug logs, and diagnostics by design.</p>
+      </article>
+      <article class="card">
+        <span class="ico">🧪</span>
+        <h3>Mock mode, zero setup</h3>
+        <p>Run the whole UI with no credentials and no network. Great for trying twi, taking screenshots, or debugging your terminal setup.</p>
+      </article>
+      <article class="card">
+        <span class="ico">🩺</span>
+        <h3>A doctor that tells the truth</h3>
+        <p><code>twi doctor</code> checks config, credentials, scopes, terminal capability, and API reachability — and reports what it could <em>not</em> verify.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section id="shots">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="kicker">Screenshots</span>
+      <h2>Real frames, not mockups</h2>
+      <p>Every image below is generated by rendering twi's actual view and converting the terminal output to SVG, so it cannot drift from what the app prints.</p>
+    </div>
+
+    <div class="shots">
+      <input type="radio" name="shot" id="s1" checked>
+      <input type="radio" name="shot" id="s2">
+      <input type="radio" name="shot" id="s3">
+      <input type="radio" name="shot" id="s4">
+      <div class="tabs">
+        <label for="s1">🧩 Grouped layout</label>
+        <label for="s2">📜 Inline layout</label>
+        <label for="s3">💬 Autocomplete</label>
+        <label for="s4">🎨 Theme picker</label>
+      </div>
+      <div class="panelbox">
+        <figure>
+          <img src="assets/screenshots/chat-grouped.svg" alt="Grouped layout: each author gets a header row with badges and metadata, with their consecutive messages indented beneath">
+          <figcaption><strong>Grouped layout</strong> — one header per author, consecutive messages collapsed underneath, tinted by that user's color. Theme: <code>claude</code>.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/screenshots/chat-inline.svg" alt="Inline layout: every message on a single row with timestamp, badges, username and text">
+          <figcaption><strong>Inline layout</strong> — the dense classic view, every row self-describing. Theme: <code>tokyo-night</code>.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/screenshots/mention-autocomplete.svg" alt="The composer showing an @mention autocomplete strip with candidate usernames and role glyphs">
+          <figcaption><strong>@mention autocomplete</strong> — candidates come from the live chatter roster, ranked by recency. Theme: <code>catppuccin-mocha</code>.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/screenshots/theme-picker.svg" alt="Full-screen theme picker listing every preset with a swatch strip of its own colors">
+          <figcaption><strong>Theme picker</strong> (<kbd>ctrl+t</kbd>) — every preset with a swatch strip of its own palette, previewed live as you move.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="themes">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="kicker">Themes</span>
+      <h2>Thirteen presets, or bring your own hex</h2>
+      <p>Press <kbd>ctrl+t</kbd> to preview live and <kbd>enter</kbd> to save, or set <code>theme_name</code> in config. Swatches below are the real palette values.</p>
+    </div>
+    <div class="themes">
+      <div class="theme"><div class="name">claude <span class="tag">default</span></div><div class="sw"><span style="background:#1a1523"></span><span style="background:#241d30"></span><span style="background:#f2ede4"></span><span style="background:#d97757"></span><span style="background:#7fbf8e"></span><span style="background:#e0a72e"></span><span style="background:#e0685a"></span></div></div>
+      <div class="theme"><div class="name">catppuccin-mocha</div><div class="sw"><span style="background:#1e1e2e"></span><span style="background:#313244"></span><span style="background:#cdd6f4"></span><span style="background:#cba6f7"></span><span style="background:#a6e3a1"></span><span style="background:#f9e2af"></span><span style="background:#f38ba8"></span></div></div>
+      <div class="theme"><div class="name">tokyo-night</div><div class="sw"><span style="background:#1a1b26"></span><span style="background:#24283b"></span><span style="background:#c0caf5"></span><span style="background:#7aa2f7"></span><span style="background:#9ece6a"></span><span style="background:#e0af68"></span><span style="background:#f7768e"></span></div></div>
+      <div class="theme"><div class="name">dracula</div><div class="sw"><span style="background:#282a36"></span><span style="background:#343746"></span><span style="background:#f8f8f2"></span><span style="background:#bd93f9"></span><span style="background:#50fa7b"></span><span style="background:#f1fa8c"></span><span style="background:#ff5555"></span></div></div>
+      <div class="theme"><div class="name">gruvbox</div><div class="sw"><span style="background:#282828"></span><span style="background:#32302f"></span><span style="background:#ebdbb2"></span><span style="background:#fe8019"></span><span style="background:#b8bb26"></span><span style="background:#fabd2f"></span><span style="background:#fb4934"></span></div></div>
+      <div class="theme"><div class="name">nord</div><div class="sw"><span style="background:#2e3440"></span><span style="background:#3b4252"></span><span style="background:#eceff4"></span><span style="background:#88c0d0"></span><span style="background:#a3be8c"></span><span style="background:#ebcb8b"></span><span style="background:#bf616a"></span></div></div>
+      <div class="theme"><div class="name">one-dark</div><div class="sw"><span style="background:#282c34"></span><span style="background:#21252b"></span><span style="background:#abb2bf"></span><span style="background:#61afef"></span><span style="background:#98c379"></span><span style="background:#e5c07b"></span><span style="background:#e06c75"></span></div></div>
+      <div class="theme"><div class="name">rose-pine</div><div class="sw"><span style="background:#191724"></span><span style="background:#26233a"></span><span style="background:#e0def4"></span><span style="background:#c4a7e7"></span><span style="background:#31748f"></span><span style="background:#f6c177"></span><span style="background:#eb6f92"></span></div></div>
+      <div class="theme"><div class="name">monokai</div><div class="sw"><span style="background:#272822"></span><span style="background:#3e3d32"></span><span style="background:#f8f8f2"></span><span style="background:#f92672"></span><span style="background:#a6e22e"></span><span style="background:#e6db74"></span><span style="background:#f92672"></span></div></div>
+      <div class="theme"><div class="name">solarized-dark</div><div class="sw"><span style="background:#002b36"></span><span style="background:#073642"></span><span style="background:#839496"></span><span style="background:#268bd2"></span><span style="background:#859900"></span><span style="background:#b58900"></span><span style="background:#dc322f"></span></div></div>
+      <div class="theme"><div class="name">codex</div><div class="sw"><span style="background:#0d1117"></span><span style="background:#161b22"></span><span style="background:#e6edf3"></span><span style="background:#3fb950"></span><span style="background:#3fb950"></span><span style="background:#d29922"></span><span style="background:#f85149"></span></div></div>
+      <div class="theme"><div class="name">btop</div><div class="sw"><span style="background:#000000"></span><span style="background:#101010"></span><span style="background:#d3d3d3"></span><span style="background:#00ff00"></span><span style="background:#00ff00"></span><span style="background:#ffdd33"></span><span style="background:#ff3333"></span></div></div>
+      <div class="theme"><div class="name">mono</div><div class="sw"><span style="background:#000000"></span><span style="background:#1a1a1a"></span><span style="background:#ffffff"></span><span style="background:#ffffff"></span><span style="background:#ffffff"></span><span style="background:#c0c0c0"></span><span style="background:#ffffff"></span></div></div>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="kicker">Install</span>
+      <h2>Running in about thirty seconds</h2>
+      <p>Try it with no credentials first — mock mode needs no Twitch app, no token, and no network.</p>
+    </div>
+
+    <div class="steps">
+      <div>
+        <h3>🧪 1. Try it (no credentials)</h3>
+        <div class="code"><span class="c"># run the full UI against mock chat</span>
+<span class="p">$</span> go run ./cmd/twi chat --mock --channel demo</div>
+
+        <h3>📦 2. Install a release binary</h3>
+        <div class="code"><span class="c"># Linux: downloads, verifies checksum, wires ~/.local/bin</span>
+<span class="p">$</span> curl --proto '=https' --tlsv1.2 -sSf \
+    https://github.com/worxbend/twi/releases/latest/download/install.sh | sh</div>
+
+        <h3>🐳 Or use Docker</h3>
+        <div class="code"><span class="p">$</span> docker build -t twi:local .
+<span class="p">$</span> docker run --rm -it twi:local chat --mock --channel demo</div>
+      </div>
+
+      <div>
+        <h3>🔑 3. Connect to real Twitch chat</h3>
+        <p class="note" style="margin-bottom:.9rem">
+          <strong>Bring your own Twitch app.</strong> twi ships without a bundled Twitch application. Register a
+          personal app in the <a href="https://dev.twitch.tv/console/apps">Twitch developer console</a> and give twi
+          its client ID and secret — see the
+          <a href="https://github.com/worxbend/twi/blob/main/docs/register-twitch-app.md">setup walkthrough</a>.
+        </p>
+        <div class="code"><span class="p">$</span> export TWI_TWITCH_CLIENT_ID=<span class="c">"your_client_id"</span>
+<span class="p">$</span> export TWI_TWITCH_CLIENT_SECRET=<span class="c">"your_secret"</span>
+
+<span class="c"># browser OAuth flow; tokens are never printed</span>
+<span class="p">$</span> twi login
+
+<span class="c"># check everything before going live</span>
+<span class="p">$</span> twi doctor
+
+<span class="p">$</span> twi chat --channel yourchannel</div>
+        <p class="note">
+          <strong>Scopes:</strong> reading chat needs <code>chat:read</code>; sending from the composer also needs
+          <code>chat:edit</code>. twi validates token identity, expiry, and scopes before it connects.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="keys">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="kicker">Keyboard</span>
+      <h2>Everything is a keystroke away</h2>
+      <p>Press <kbd>?</kbd> in the app for expanded help — unless you're typing a message, in which case it's just a question mark.</p>
+    </div>
+    <div class="keys">
+      <div class="keyrow"><kbd>ctrl+p</kbd><span>Command palette</span></div>
+      <div class="keyrow"><kbd>ctrl+t</kbd><span>Theme picker (live preview)</span></div>
+      <div class="keyrow"><kbd>ctrl+g</kbd><span>Cycle message layout</span></div>
+      <div class="keyrow"><kbd>ctrl+b</kbd><span>Cycle badge style</span></div>
+      <div class="keyrow"><kbd>ctrl+y</kbd><span>Toggle emote highlight</span></div>
+      <div class="keyrow"><kbd>ctrl+n</kbd><span>Toggle full usernames</span></div>
+      <div class="keyrow"><kbd>ctrl+e</kbd><span>Searchable emote picker</span></div>
+      <div class="keyrow"><kbd>@</kbd> + <kbd>tab</kbd><span>Complete a chatter's name</span></div>
+      <div class="keyrow"><kbd>[</kbd> <kbd>]</kbd><span>Switch channel</span></div>
+      <div class="keyrow"><kbd>tab</kbd><span>Cycle focus</span></div>
+      <div class="keyrow"><kbd>r</kbd> / <kbd>i</kbd><span>Reply / inspect message</span></div>
+      <div class="keyrow"><kbd>ctrl+r</kbd><span>Reconnect</span></div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <div>
+      <a href="https://github.com/worxbend/twi">GitHub</a>
+      <a href="https://github.com/worxbend/twi/blob/main/docs/index.md">Docs</a>
+      <a href="https://github.com/worxbend/twi/blob/main/docs/quickstart.md">Quickstart</a>
+      <a href="https://github.com/worxbend/twi/blob/main/docs/troubleshooting.md">Troubleshooting</a>
+      <a href="https://github.com/worxbend/twi/releases">Releases</a>
+    </div>
+    <div>MIT licensed · built with Go and Bubble Tea</div>
+  </div>
+</footer>
+
+</body>
+</html>

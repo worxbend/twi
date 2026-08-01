@@ -2,6 +2,8 @@
 
 This directory is the product source of truth for `twi`. The README gives the fast path; these documents explain how to run, configure, debug, contribute, validate, and release the project without relying on tribal knowledge.
 
+The [project website](https://worxbend.github.io/twi/) is a visual tour: screenshots, themes, and the fast install path. It is built from `site/` by `scripts/build-site.sh` and deployed by the Pages workflow.
+
 ## Start Here
 
 | Audience | Read this | Purpose |
