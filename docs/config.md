@@ -128,7 +128,7 @@ Supported variables:
 
 | Variable | Secret | Purpose |
 | --- | --- | --- |
-| `TWI_TWITCH_USERNAME` | No | Twitch login for IRC auth. |
+| `TWI_TWITCH_USERNAME` | No | Twitch login for IRC auth. Usually unnecessary: `twi chat` derives the login from whoever the OAuth token belongs to, and only falls back to this value when token validation cannot reach Twitch. A value naming a different account is reported as stale and ignored. |
 | `TWI_TWITCH_OAUTH_TOKEN` | Yes | Twitch IRC OAuth token with `chat:read` for live reads and `chat:edit` for composer sends. |
 | `TWI_TWITCH_REFRESH_TOKEN` | Yes | Refresh token used for one OAuth refresh after live IRC auth failure. Refreshed tokens are saved through the supported credential store when available; otherwise they stay in memory for the current process with a warning. |
 | `TWI_TWITCH_CLIENT_ID` | Usually no | Twitch app client ID for Helix/API calls. |

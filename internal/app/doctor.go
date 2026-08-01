@@ -162,8 +162,8 @@ func tokenValidationCheck(ctx context.Context, cfg config.Config, validator twit
 		missing = twitch.MissingRequiredIRCScopes(validation.Scopes)
 	}
 
-	if mismatch := tokenUsernameMismatch(cfg.Twitch.Username, validation.Identity.Login); mismatch != "" && validation.Status == twitch.TokenValidationValid {
-		return warnCheck("token validation", mismatch)
+	if validation.Status == twitch.TokenValidationValid && staleUsername(cfg.Twitch.Username, validation.Identity.Login) {
+		return warnCheck("token validation", staleUsernameDetail(cfg.Twitch.Username, validation.Identity.Login))
 	}
 
 	switch validation.Status {
@@ -180,8 +180,11 @@ func tokenValidationCheck(ctx context.Context, cfg config.Config, validator twit
 			refreshAvailabilityDetail(validation.RefreshAvailable),
 		))
 	case twitch.TokenValidationWrongUser:
+		// Not a blocker: live chat authenticates as the token's own account
+		// and ignores a stale twitch_username, so this only flags config that
+		// no longer matches reality.
 		return warnCheck("token validation", joinTokenValidationDetails(
-			tokenValidationDetail(validation, usernameOwnershipDetail(cfg.Twitch.Username, validation.Identity.Login)),
+			staleUsernameDetail(cfg.Twitch.Username, validation.Identity.Login),
 			tokenIdentityDetail(validation.Identity),
 			tokenScopeDetail("granted scopes", validation.Scopes),
 			tokenExpiryDetail(validation.ExpiresAt),
@@ -321,6 +324,23 @@ func assetCacheDir(cacheDir string) (string, error) {
 	return storage.DefaultAssetCacheDir()
 }
 
+// staleUsernameDetail explains a configured username that disagrees with the
+// token owner, and what twi will do about it.
+func staleUsernameDetail(configured, actual string) string {
+	configured = strings.TrimSpace(configured)
+	actual = strings.TrimSpace(actual)
+	if actual == "" {
+		return "OAuth token identity is unknown"
+	}
+	if configured == "" || strings.EqualFold(configured, actual) {
+		return "OAuth token belongs to " + actual
+	}
+	return fmt.Sprintf(
+		"configured twitch_username %q is stale; the token belongs to %q and live chat will connect as %q (channels are unaffected)",
+		configured, actual, actual,
+	)
+}
+
 func featureModesCheck(features config.FeatureConfig) DoctorCheck {
 	detail := fmt.Sprintf(
 		"avatar=%s animation=%s theme=%s stream_status=%s emote_autocomplete=%s mouse=%t layout=%s badges=%s highlight_emotes=%t full_username=%t",
@@ -454,20 +474,13 @@ func joinTokenValidationDetails(parts ...string) string {
 	return strings.Join(kept, "; ")
 }
 
-func usernameOwnershipDetail(expected, actual string) string {
-	if mismatch := tokenUsernameMismatch(expected, actual); mismatch != "" {
-		return mismatch
-	}
-	return "OAuth token belongs to a different Twitch user"
-}
-
-func tokenUsernameMismatch(expected, actual string) string {
-	expected = strings.TrimSpace(expected)
+// staleUsername reports a configured username that names a different account
+// than the token's owner. An unset username is not stale - it is the
+// recommended configuration, since the login is derived from the token.
+func staleUsername(configured, actual string) bool {
+	configured = strings.TrimSpace(configured)
 	actual = strings.TrimSpace(actual)
-	if expected == "" || actual == "" || strings.EqualFold(expected, actual) {
-		return ""
-	}
-	return fmt.Sprintf("OAuth token belongs to Twitch user %q, not configured username %q", actual, expected)
+	return configured != "" && actual != "" && !strings.EqualFold(configured, actual)
 }
 
 func tokenScopesCSV(scopes []twitch.TokenScope) string {

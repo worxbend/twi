@@ -146,14 +146,16 @@ func TestDoctorReportsTokenValidationStates(t *testing.T) {
 			wantDetail: "other_viewer",
 		},
 		{
-			name: "valid wrong user fallback",
+			name: "valid but username is stale",
 			result: twitch.TokenValidationResult{
 				Status:    twitch.TokenValidationValid,
 				Identity:  twitch.TokenIdentity{Login: "other_viewer"},
 				Scopes:    twitch.RequiredIRCScopes(),
 				ExpiresAt: expiresAt,
 			},
-			wantDetail: "configured username",
+			// The token owns the identity, so a disagreeing twitch_username is
+			// reported as stale config rather than as a token problem.
+			wantDetail: "is stale; the token belongs to \"other_viewer\"",
 		},
 		{
 			name: "valid",

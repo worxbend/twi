@@ -1022,7 +1022,7 @@ func TestMockChatIgnoresMalformedStoredCredentials(t *testing.T) {
 
 func TestLiveChatMissingCredentialsAreActionableAndRedacted(t *testing.T) {
 	t.Setenv("TWI_TWITCH_USERNAME", "")
-	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
+	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "")
 
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
@@ -1030,7 +1030,9 @@ func TestLiveChatMissingCredentialsAreActionableAndRedacted(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("Run returned %d, want 2; stderr=%q", code, stderr.String())
 	}
-	for _, want := range []string{"TWI_TWITCH_USERNAME", "chat:read", "chat:edit", "--mock"} {
+	// A username is no longer required: the IRC login is derived from the
+	// token, so only the token itself can be missing.
+	for _, want := range []string{"chat:read", "chat:edit", "--mock"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr missing %q: %q", want, stderr.String())
 		}
@@ -1185,8 +1187,102 @@ func TestLiveChatTokenValidationHintsWhenEnvTokenShadowsStoredCredentials(t *tes
 	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "env-secret-token", "stored-access-token", "stored-refresh-secret")
 }
 
-func TestLiveChatTokenValidationWrongUserPreemptsMissingScope(t *testing.T) {
-	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
+func TestLiveChatUsesTokenLoginWhenConfiguredUsernameDisagrees(t *testing.T) {
+	// The account the token belongs to is the only login Twitch IRC will
+	// accept, so a stale twitch_username must not block the connection - twi
+	// connects as the token's owner and warns about the stale setting.
+	t.Setenv("TWI_TWITCH_USERNAME", "worxbend")
+	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
+
+	fakeValidator := twitch.NewFakeTokenValidator(twitch.FakeTokenValidationOutcome{
+		Result: twitch.TokenValidationResult{
+			Status:   twitch.TokenValidationWrongUser,
+			Identity: twitch.TokenIdentity{Login: "recursive_escalator"},
+			Scopes:   []twitch.TokenScope{twitch.ScopeChatRead, twitch.ScopeChatEdit},
+			Detail:   `OAuth token belongs to Twitch user "recursive_escalator", not configured username "worxbend"`,
+		},
+	})
+	oldNewLiveTokenValidator := newLiveTokenValidator
+	oldNewLiveChatClient := newLiveChatClient
+	oldRunLiveChat := runLiveChat
+	t.Cleanup(func() {
+		newLiveTokenValidator = oldNewLiveTokenValidator
+		newLiveChatClient = oldNewLiveChatClient
+		runLiveChat = oldRunLiveChat
+	})
+	newLiveTokenValidator = func() twitch.TokenValidator { return fakeValidator }
+
+	var connectedAs string
+	newLiveChatClient = func(_ context.Context, cfg config.Config, _ debuglog.Logger, _ credentialLoadStatus) (app.ChatClient, error) {
+		connectedAs = cfg.Twitch.Username
+		return app.NewFakeChatClient(1), nil
+	}
+	runLiveChat = func(io.Writer, config.Config, app.ChatClient, app.ClientOptions) error { return nil }
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "someoneelse"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if connectedAs != "recursive_escalator" {
+		t.Fatalf("connected as %q, want the token's own login", connectedAs)
+	}
+	for _, want := range []string{"warning:", "worxbend", "recursive_escalator"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr missing %q: %q", want, stderr.String())
+		}
+	}
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "oauth:secret-token", "secret-token")
+}
+
+func TestLiveChatDerivesUsernameWhenNoneConfigured(t *testing.T) {
+	// With no twitch_username at all, the token alone is enough to start.
+	t.Setenv("TWI_TWITCH_USERNAME", "")
+	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
+
+	fakeValidator := twitch.NewFakeTokenValidator(twitch.FakeTokenValidationOutcome{
+		Result: twitch.TokenValidationResult{
+			Status:   twitch.TokenValidationValid,
+			Identity: twitch.TokenIdentity{Login: "recursive_escalator"},
+			Scopes:   []twitch.TokenScope{twitch.ScopeChatRead, twitch.ScopeChatEdit},
+		},
+	})
+	oldNewLiveTokenValidator := newLiveTokenValidator
+	oldNewLiveChatClient := newLiveChatClient
+	oldRunLiveChat := runLiveChat
+	t.Cleanup(func() {
+		newLiveTokenValidator = oldNewLiveTokenValidator
+		newLiveChatClient = oldNewLiveChatClient
+		runLiveChat = oldRunLiveChat
+	})
+	newLiveTokenValidator = func() twitch.TokenValidator { return fakeValidator }
+
+	var connectedAs string
+	newLiveChatClient = func(_ context.Context, cfg config.Config, _ debuglog.Logger, _ credentialLoadStatus) (app.ChatClient, error) {
+		connectedAs = cfg.Twitch.Username
+		return app.NewFakeChatClient(1), nil
+	}
+	runLiveChat = func(io.Writer, config.Config, app.ChatClient, app.ClientOptions) error { return nil }
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if connectedAs != "recursive_escalator" {
+		t.Fatalf("connected as %q, want the login derived from the token", connectedAs)
+	}
+	// Nothing disagreed, so there is nothing to warn about.
+	if strings.Contains(stderr.String(), "warning: configured twitch_username") {
+		t.Fatalf("unexpected stale-username warning: %q", stderr.String())
+	}
+}
+
+func TestLiveChatMissingScopesStillBlockStartup(t *testing.T) {
+	// Scopes are a real blocker even though the username no longer is.
+	t.Setenv("TWI_TWITCH_USERNAME", "worxbend")
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
 
 	fakeValidator := twitch.NewFakeTokenValidator(twitch.FakeTokenValidationOutcome{
@@ -1195,7 +1291,6 @@ func TestLiveChatTokenValidationWrongUserPreemptsMissingScope(t *testing.T) {
 			Identity:      twitch.TokenIdentity{Login: "other_viewer"},
 			Scopes:        []twitch.TokenScope{twitch.ScopeChatRead},
 			MissingScopes: []twitch.TokenScope{twitch.ScopeChatEdit},
-			Detail:        `OAuth token belongs to Twitch user "other_viewer", not configured username "viewer"`,
 		},
 	})
 	oldNewLiveTokenValidator := newLiveTokenValidator
@@ -1204,11 +1299,9 @@ func TestLiveChatTokenValidationWrongUserPreemptsMissingScope(t *testing.T) {
 		newLiveTokenValidator = oldNewLiveTokenValidator
 		newLiveChatClient = oldNewLiveChatClient
 	})
-	newLiveTokenValidator = func() twitch.TokenValidator {
-		return fakeValidator
-	}
+	newLiveTokenValidator = func() twitch.TokenValidator { return fakeValidator }
 	newLiveChatClient = func(context.Context, config.Config, debuglog.Logger, credentialLoadStatus) (app.ChatClient, error) {
-		t.Fatal("newLiveChatClient called after definitive token validation failure")
+		t.Fatal("newLiveChatClient called despite missing required scopes")
 		return nil, nil
 	}
 
@@ -1218,18 +1311,10 @@ func TestLiveChatTokenValidationWrongUserPreemptsMissingScope(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("Run returned %d, want 2; stderr=%q", code, stderr.String())
 	}
-	for _, want := range []string{"twitch OAuth token validation failed", `OAuth token belongs to Twitch user "other_viewer"`, "twi doctor", "--mock"} {
-		if !strings.Contains(stderr.String(), want) {
-			t.Fatalf("stderr missing %q: %q", want, stderr.String())
-		}
-	}
-	if strings.Contains(stderr.String(), "missing required scopes") {
-		t.Fatalf("stderr reported missing scopes instead of wrong user: %q", stderr.String())
+	if !strings.Contains(stderr.String(), "missing required scopes") {
+		t.Fatalf("stderr missing scope failure: %q", stderr.String())
 	}
 	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "oauth:secret-token", "secret-token")
-	if got := len(fakeValidator.Requests()); got != 1 {
-		t.Fatalf("validator requests = %d, want 1", got)
-	}
 }
 
 func TestLiveChatTokenValidationTransientFailureWarnsAndContinues(t *testing.T) {

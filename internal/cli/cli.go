@@ -380,16 +380,27 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	if warning, err := validateLiveChatToken(context.Background(), cfg, newLiveTokenValidator()); err != nil {
+	resolvedLogin, warning, err := validateLiveChatToken(context.Background(), cfg, newLiveTokenValidator())
+	if err != nil {
 		logger.Log(context.Background(), "cli.chat.token_validation_failed", slog.String("error", err.Error()))
 		if hint := credentialPrecedenceHint(status); hint != "" {
 			err = fmt.Errorf("%w %s", err, hint)
 		}
 		fmt.Fprintln(stderr, err)
 		return 2
-	} else if warning != "" {
+	}
+	if warning != "" {
 		logger.Log(context.Background(), "cli.chat.token_validation_warning", slog.String("warning", warning))
 		fmt.Fprintln(stderr, warning)
+	}
+	// The token owns the IRC identity; the config value is only a fallback for
+	// when validation could not reach Twitch.
+	if resolvedLogin != "" {
+		cfg.Twitch.Username = resolvedLogin
+	}
+	if strings.TrimSpace(cfg.Twitch.Username) == "" {
+		fmt.Fprintln(stderr, "could not determine the Twitch login for this token; run `twi doctor`, or set TWI_TWITCH_USERNAME to the account the token belongs to")
+		return 2
 	}
 
 	client, err := newLiveChatClient(context.Background(), cfg, logger, status)
@@ -407,23 +418,33 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// validateLiveChatConfig checks the credentials live chat cannot start
+// without. A username is deliberately not one of them: the IRC login is
+// derived from whoever the OAuth token belongs to (see validateLiveChatToken),
+// so configuring it is optional and only ever used as a fallback when token
+// validation is unreachable.
 func validateLiveChatConfig(cfg config.Config) error {
-	var missing []string
-	if strings.TrimSpace(cfg.Twitch.Username) == "" {
-		missing = append(missing, "TWI_TWITCH_USERNAME or TWITCH_USERNAME")
-	}
 	if strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
-		missing = append(missing, "TWI_TWITCH_OAUTH_TOKEN or TWITCH_ACCESS_TOKEN")
-	}
-	if len(missing) > 0 {
-		return fmt.Errorf("missing Twitch credentials: set %s for live chat, or run `twi chat --mock`; OAuth token must include chat:read and chat:edit", strings.Join(missing, " and "))
+		return fmt.Errorf("missing Twitch credentials: set %s for live chat, or run `twi chat --mock`; OAuth token must include chat:read and chat:edit", "TWI_TWITCH_OAUTH_TOKEN or TWITCH_ACCESS_TOKEN")
 	}
 	return nil
 }
 
-func validateLiveChatToken(ctx context.Context, cfg config.Config, validator twitch.TokenValidator) (string, error) {
+// validateLiveChatToken validates the configured OAuth token and returns the
+// Twitch login that IRC should authenticate as.
+//
+// Twitch requires the IRC NICK to be the account the token was issued to, and
+// the token is the only authoritative source of that. So the validated login
+// wins over any configured twitch_username: honoring a stale config value
+// here would guarantee Twitch rejects the connection. A configured value that
+// disagrees is reported as a warning, not an error - it is a stale setting,
+// not a reason to refuse to start.
+//
+// The channel being joined is entirely separate: any account can read and
+// send in any channel it is not banned from.
+func validateLiveChatToken(ctx context.Context, cfg config.Config, validator twitch.TokenValidator) (login string, warning string, err error) {
 	if validator == nil {
-		return "warning: Twitch OAuth token validation is unavailable; continuing to IRC authentication. Run `twi doctor` to verify token identity, expiry, and scopes.", nil
+		return "", "warning: Twitch OAuth token validation is unavailable; continuing to IRC authentication. Run `twi doctor` to verify token identity, expiry, and scopes.", nil
 	}
 
 	credentials := twitch.TokenCredentials{
@@ -441,40 +462,51 @@ func validateLiveChatToken(ctx context.Context, cfg config.Config, validator twi
 	)
 	if err != nil {
 		detail := config.RedactDisplayValue(redactor.Redact(err.Error()))
-		return "warning: Twitch OAuth token validation failed (" + detail + "); continuing to IRC authentication. Run `twi doctor` to verify token identity, expiry, and scopes.", nil
+		return "", "warning: Twitch OAuth token validation failed (" + detail + "); continuing to IRC authentication. Run `twi doctor` to verify token identity, expiry, and scopes.", nil
 	}
 
-	mismatch := liveTokenUsernameMismatch(cfg.Twitch.Username, validation.Identity.Login)
-	if validation.Status == twitch.TokenValidationWrongUser {
-		return "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, mismatch))
-	}
-	if validation.Status == twitch.TokenValidationValid && mismatch != "" {
-		return "", liveTokenValidationError(redactor, mismatch)
+	resolved := strings.TrimSpace(validation.Identity.Login)
+	if stale := staleUsernameWarning(cfg.Twitch.Username, resolved); stale != "" {
+		warning = stale
 	}
 
 	missing := validation.MissingScopes
 	if len(missing) == 0 {
 		missing = twitch.MissingRequiredIRCScopes(validation.Scopes)
 	}
-	if validation.Status == twitch.TokenValidationValid && len(missing) == 0 {
-		return "", nil
-	}
 	if len(missing) > 0 {
-		return "", liveTokenValidationError(redactor, "missing required scopes: "+strings.Join(auth.ScopeValues(missing), ", "))
+		return "", "", liveTokenValidationError(redactor, "missing required scopes: "+strings.Join(auth.ScopeValues(missing), ", "))
 	}
 
 	switch validation.Status {
+	case twitch.TokenValidationValid, twitch.TokenValidationWrongUser:
+		// WrongUser only means the configured username disagrees with the
+		// token. The token is authoritative, so this is survivable.
+		return resolved, warning, nil
 	case twitch.TokenValidationMalformed:
-		return "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, "malformed OAuth token"))
+		return "", "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, "malformed OAuth token"))
 	case twitch.TokenValidationExpired:
-		return "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, "OAuth token expired"))
-	case twitch.TokenValidationWrongUser:
-		return "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, mismatch))
+		return "", "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, "OAuth token expired"))
 	case twitch.TokenValidationMissingScope:
-		return "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, "missing required IRC scope"))
+		return "", "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, "missing required IRC scope"))
 	default:
-		return "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, "token validation returned unknown state"))
+		return "", "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, "token validation returned unknown state"))
 	}
+}
+
+// staleUsernameWarning reports a configured twitch_username that disagrees
+// with the token's owner. twi uses the token's login regardless; the warning
+// exists so the stale setting is visible rather than silently overridden.
+func staleUsernameWarning(configured, resolved string) string {
+	configured = strings.TrimSpace(configured)
+	resolved = strings.TrimSpace(resolved)
+	if configured == "" || resolved == "" || strings.EqualFold(configured, resolved) {
+		return ""
+	}
+	return fmt.Sprintf(
+		"warning: configured twitch_username %q is not the OAuth token's account; connecting as %q instead. Update or remove twitch_username to silence this.",
+		configured, resolved,
+	)
 }
 
 func liveTokenValidationError(redactor auth.Redactor, detail string) error {
@@ -491,15 +523,6 @@ func liveTokenValidationDetail(validation twitch.TokenValidationResult, fallback
 		return detail
 	}
 	return fallback
-}
-
-func liveTokenUsernameMismatch(configured, actual string) string {
-	configured = strings.TrimSpace(configured)
-	actual = strings.TrimSpace(actual)
-	if configured == "" || actual == "" || strings.EqualFold(configured, actual) {
-		return ""
-	}
-	return fmt.Sprintf("configured username %q does not match token identity %q", configured, actual)
 }
 
 func runConfig(args []string, stdout, stderr io.Writer) int {
