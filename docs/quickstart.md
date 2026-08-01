@@ -51,6 +51,11 @@ docker compose run --rm mock
 | `0` | Reset active-channel message filters. |
 | `r` | Reply to the selected message. |
 | `i` | Open or close the selected-message inspect panel. |
+| `ctrl+g` | Cycle the message layout: `grouped`, `inline`, `compact`. Saved to config. |
+| `ctrl+b` | Cycle badge style: `glyph`, `text`, `off`. Saved to config. |
+| `ctrl+y` | Toggle the highlight chip behind emotes and emoji. Saved to config. |
+| `ctrl+n` | Toggle full usernames (`DisplayName (login)`). Saved to config. |
+| `@` + `tab` | Complete a chatter's name from the live roster. |
 | `ctrl+l` | Clear the active channel's local chat history. |
 | `ctrl+r` | Request a reconnect when the active chat source supports it. |
 | `esc` | Close inspect mode or cancel reply mode. |
@@ -197,7 +202,7 @@ Docker:
 docker run --rm twi:local doctor
 ```
 
-`doctor` reports config, credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, username mismatch, terminal hints, cache writability, and Twitch IRC reachability. It does not print raw OAuth tokens or client secrets.
+`doctor` reports config, credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, stale-username warnings, terminal hints, cache writability, and Twitch IRC reachability. It does not print raw OAuth tokens or client secrets.
 
 ## 7. Use The Dotfile Shape
 

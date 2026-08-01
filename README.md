@@ -109,6 +109,7 @@ The docs are split by audience:
 | Report sensitive issues | [Security Policy](SECURITY.md) |
 | Understand package boundaries | [Architecture](docs/architecture.md) |
 | Cut release artifacts | [Release Packaging](docs/release.md) |
+| See what changed | [Changelog](CHANGELOG.md) |
 
 <a id="quickstart"></a>
 

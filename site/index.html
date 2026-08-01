@@ -217,6 +217,7 @@ footer { border-top: 1px solid var(--line); padding: 2.5rem 0; color: var(--mute
       <a href="#themes">Themes</a>
       <a href="#install">Install</a>
       <a href="#keys">Keys</a>
+      <a href="#whatsnew">What's new</a>
       <a class="nav-cta" href="https://github.com/worxbend/twi">GitHub ↗</a>
     </nav>
   </div>
@@ -409,9 +410,14 @@ footer { border-top: 1px solid var(--line); padding: 2.5rem 0; color: var(--mute
 <span class="p">$</span> twi doctor
 
 <span class="p">$</span> twi chat --channel yourchannel</div>
-        <p class="note">
+        <p class="note" style="margin-bottom:.9rem">
           <strong>Scopes:</strong> reading chat needs <code>chat:read</code>; sending from the composer also needs
           <code>chat:edit</code>. twi validates token identity, expiry, and scopes before it connects.
+        </p>
+        <p class="note">
+          <strong>No username to configure.</strong> twi authenticates as whichever account the token belongs to —
+          Twitch requires the IRC login to be the token's own account. The channels you join are independent: sign in
+          as one account and read or send in any channel you aren't banned from.
         </p>
       </div>
     </div>
@@ -442,6 +448,53 @@ footer { border-top: 1px solid var(--line); padding: 2.5rem 0; color: var(--mute
   </div>
 </section>
 
+<section id="whatsnew">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="kicker">Release notes</span>
+      <h2>What's new</h2>
+      <p>Full history in the <a href="https://github.com/worxbend/twi/blob/main/CHANGELOG.md">changelog</a>.</p>
+    </div>
+
+    <div class="grid">
+      <article class="card">
+        <span class="ico">🔑</span>
+        <h3>v0.12 · Sign in once, chat anywhere</h3>
+        <p>
+          The IRC login is now derived from your OAuth token instead of config, so
+          <code>twitch_username</code> is optional. Signing in as one account and chatting in another
+          channel just works — a stale username is a warning, not a startup failure.
+        </p>
+      </article>
+      <article class="card">
+        <span class="ico">👥</span>
+        <h3>v0.11 · Chat roster</h3>
+        <p>
+          Membership tracking powers <code>@mention</code> autocomplete, per-author context
+          (role, sub tenure, follow age), a live chatter count, and join/leave rows in the
+          activity column.
+        </p>
+      </article>
+      <article class="card">
+        <span class="ico">🧩</span>
+        <h3>v0.11 · Layouts &amp; badges</h3>
+        <p>
+          Grouped, inline, and compact message layouts, glyph badges, emote highlight chips, and
+          full usernames — each toggleable at runtime and saved to config.
+        </p>
+      </article>
+      <article class="card">
+        <span class="ico">🌈</span>
+        <h3>v0.11 · Color that means something</h3>
+        <p>
+          Each chatter's stable color now carries into the message surface and gutter rail, and the
+          theme picker became a full-screen page with a swatch strip per preset.
+        </p>
+      </article>
+    </div>
+  </div>
+</section>
+
 </main>
 
 <footer>
@@ -451,6 +504,7 @@ footer { border-top: 1px solid var(--line); padding: 2.5rem 0; color: var(--mute
       <a href="https://github.com/worxbend/twi/blob/main/docs/index.md">Docs</a>
       <a href="https://github.com/worxbend/twi/blob/main/docs/quickstart.md">Quickstart</a>
       <a href="https://github.com/worxbend/twi/blob/main/docs/troubleshooting.md">Troubleshooting</a>
+      <a href="https://github.com/worxbend/twi/blob/main/CHANGELOG.md">Changelog</a>
       <a href="https://github.com/worxbend/twi/releases">Releases</a>
     </div>
     <div>MIT licensed · built with Go and Bubble Tea</div>

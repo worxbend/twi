@@ -24,7 +24,13 @@ Flat config and environment values take precedence over saved credentials. If ol
 
 ## Invalid Or Missing Scopes
 
-Live IRC needs `chat:read` to read chat and `chat:edit` to send chat. `twi chat` validates token identity, expiry, username match, and scopes before IRC startup when Twitch OAuth validation is reachable. Definitive invalid states stop startup with redacted guidance. Transient validation failures warn and let IRC authentication decide.
+Live IRC needs `chat:read` to read chat and `chat:edit` to send chat. `twi chat` validates token identity, expiry, and scopes before IRC startup when Twitch OAuth validation is reachable. Definitive invalid states stop startup with redacted guidance. Transient validation failures warn and let IRC authentication decide.
+
+### `OAuth token belongs to Twitch user "...", not configured username "..."`
+
+Seen on `twi` before 0.12.0. `twitch_username` is not the channel you join — it is the IRC login, and Twitch requires it to be the account the token was issued to. Since 0.12.0 twi derives that login from the token, so this is a warning rather than a failure and the connection proceeds as the token's own account.
+
+To silence the warning, remove `twitch_username` from your config (recommended — it is derived) or set it to the account the token belongs to. `twi doctor` names that account. The channels you join are unaffected either way: any account can read and send in any channel it is not banned from.
 
 ## Login Does Not Open Or Save
 
@@ -84,4 +90,4 @@ On Unix, the credential directory must be exactly `0700` and the credential file
 
 ## Mock Mode Works But Live Mode Fails
 
-Mock mode does not use Twitch credentials, network clients, or terminal image support. If mock mode works but live mode fails, check credentials, scopes, Twitch reachability, username mismatch, and local network access with `twi doctor`.
+Mock mode does not use Twitch credentials, network clients, or terminal image support. If mock mode works but live mode fails, check credentials, scopes, Twitch reachability, and local network access with `twi doctor`.

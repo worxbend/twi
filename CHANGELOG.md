@@ -1,0 +1,156 @@
+# Changelog
+
+All notable changes to `twi` are recorded here.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
+this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+While the major version is `0`, minor releases may change behavior.
+
+Versions are derived from git tags (`git describe`); there is no version
+constant in the source tree.
+
+## [Unreleased]
+
+## [0.12.1] — 2026-08-01
+
+Documentation and website only. No behavior changes; the `v0.12.0` binaries
+remain current.
+
+### Added
+
+- This changelog.
+- A "What's new" section on the [project website](https://worxbend.github.io/twi/).
+
+### Changed
+
+- Documented that `twitch_username` is optional and derived from the OAuth
+  token, across the README, quickstart, auth, config, and troubleshooting docs.
+
+## [0.12.0] — 2026-08-01
+
+### Changed
+
+- **The IRC login is derived from the OAuth token instead of config.** Twitch
+  requires the IRC login to be the account a token was issued to, and the
+  validation response already reports that account, so honoring a configured
+  `twitch_username` that disagreed could only ever produce a login rejection.
+  `twitch_username` is now optional and acts as a fallback for when token
+  validation cannot reach Twitch.
+- A `twitch_username` naming a different account is now a warning that names
+  both accounts, not a startup failure. `twi doctor` reports it as stale config
+  rather than as a token problem.
+
+  This removes a confusing failure mode: signing in as one account and chatting
+  in another channel is normal and always was allowed — the channels you join
+  have never been tied to the account you authenticate as.
+
+### Added
+
+- A [project website](https://worxbend.github.io/twi/) with screenshots, the
+  full theme set, an install path, and a keyboard reference, deployed to GitHub
+  Pages from `site/`.
+- Terminal screenshots generated from twi itself: `TestWriteDocsScreenshots`
+  renders the real view and converts the ANSI output to SVG, so the images
+  cannot drift from what the app prints. Regenerate with
+  `TWI_WRITE_SCREENSHOTS=1 go test ./internal/app -run TestWriteDocsScreenshots`.
+
+### Fixed
+
+- Six pre-existing static-analysis findings that had been failing the CI quality
+  gate on every push since mid-July.
+
+### Unchanged
+
+- Missing `chat:read`/`chat:edit` scopes still stop startup. Scopes are a real
+  blocker; the username was not.
+
+## [0.11.0] — 2026-08-01
+
+### Added
+
+- **Chatter roster.** Twitch membership (`JOIN`/`PART`) is now normalized into a
+  per-channel roster that backs mention autocomplete, author metadata, the
+  active-chatter count, and join/leave activity rows. It is best-effort by
+  construction: Twitch batches membership, delays it, and stops sending it
+  entirely for busy channels, so presence falls back to a message-recency
+  window when membership is silent.
+- **`@mention` autocomplete.** Type `@` and a prefix to complete from people
+  actually in chat, ranked by who spoke most recently. <kbd>tab</kbd> accepts,
+  arrows move, <kbd>esc</kbd> dismisses for that word only. The strip claims
+  those keys only while it is open, so <kbd>enter</kbd> still sends.
+- **Three message layouts** — `grouped` (one author header per run of
+  messages), `inline` (the dense classic), and `compact` (text only) — cycled
+  with <kbd>ctrl+g</kbd>.
+- **Glyph badges** for broadcaster, moderator, VIP, subscriber and more,
+  cycled with <kbd>ctrl+b</kbd> between `glyph`, `text`, and `off`.
+- **Emote and emoji highlight chips**, toggled with <kbd>ctrl+y</kbd>.
+- **Full usernames** (`DisplayName (login)`), toggled with <kbd>ctrl+n</kbd>.
+- **Author context** beside each message: role, subscriber tenure, follow age,
+  and how long twi has seen that person. Anything twi does not actually know is
+  omitted rather than guessed — an absent "follows" note means "no follower
+  data", never "does not follow".
+- **A live active-chatter count** in the chat pane title, marked `~` when it is
+  inferred from recency rather than membership.
+- **Join/leave rows in the activity column**, with per-kind glyphs. Reconnect
+  bursts collapse into a single rolling summary row rather than hundreds of
+  lines.
+- **Mouse focus for the emotes strip**, including selecting the emote under the
+  cursor.
+- New settings: `message_layout`, `badge_mode`, `highlight_emotes`, and
+  `full_username`, each with a `TWI_`-prefixed environment variable. Runtime
+  toggles persist to the config file; a failed write keeps the change and says
+  so.
+
+### Changed
+
+- **Per-user color now carries into the message surface and gutter rail**, not
+  just the nickname, so a person's block is recognizable at a glance. Notices
+  and system rows keep neutral treatment rather than being tinted by a
+  fabricated identity.
+- **The theme picker is a full-screen page** rather than a strip docked under
+  the chat, listing every preset with a swatch strip of its own palette.
+  <kbd>home</kbd>/<kbd>end</kbd> jump to the ends of the list.
+- **Badges default to glyphs** instead of bracketed `[moderator]` labels. Set
+  `badge_mode = "text"` or press <kbd>ctrl+b</kbd> to restore the old look.
+- **`?` no longer toggles help while the composer has focus**, where it is an
+  ordinary character in the message being typed.
+
+### Fixed
+
+- **Request the `twitch.tv/membership` IRC capability.** twi overrode the
+  library default with tags and commands only, so `JOIN`/`PART` never arrived.
+- **Attach the user's own badges, display name, and color to local echoes**,
+  sourced from `USERSTATE`. Twitch never echoes a user's own message back, so
+  the broadcaster was the one person in chat whose own badge never rendered.
+
+## [0.10.0] — 2026-07-17
+
+### Added
+
+- Grouped chat messages and refined UI motion.
+
+## [0.9.0] — 2026-07-17
+
+### Changed
+
+- Refreshed TUI surfaces and nickname colors.
+
+## [0.8.0] — 2026-07-17
+
+### Changed
+
+- Polished animated chat visuals.
+
+---
+
+Releases before `0.8.0` predate this changelog; see the
+[commit history](https://github.com/worxbend/twi/commits/main) and the
+[releases page](https://github.com/worxbend/twi/releases).
+
+[Unreleased]: https://github.com/worxbend/twi/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/worxbend/twi/compare/v0.12.0...v0.12.1
+[0.12.0]: https://github.com/worxbend/twi/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/worxbend/twi/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/worxbend/twi/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/worxbend/twi/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/worxbend/twi/releases/tag/v0.8.0

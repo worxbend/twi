@@ -9,7 +9,7 @@ This document describes the authentication model for `twi`. It covers the curren
 - The MVP accepts Twitch credentials from environment variables, a local flat config file, or saved credentials on supported Unix platforms. CLI flags currently override the config path and channels, not username or token values.
 - Multi-channel live IRC read/send is partially shipped for configured credentials, including startup token validation when Twitch OAuth validation is reachable, composer sends, selected-message replies, and `/me` actions.
 - Multi-channel UX is partially shipped: the keyboard-first sidebar, command palette, optional mouse controls, and selected-message inspect panel are current behavior.
-- Twitch OAuth validation is wired into both `twi doctor` and live chat startup. It reports or enforces identity, expiry, required IRC scopes, username mismatch, and refresh availability without printing credential values.
+- Twitch OAuth validation is wired into both `twi doctor` and live chat startup. It reports or enforces identity, expiry, required IRC scopes, and refresh availability without printing credential values, and supplies the IRC login that live chat authenticates with.
 - The internal credential storage boundary and Unix-only restrictive file
   fallback are wired into `twi login`, `twi chat`, `twi config show`, and
   `twi doctor`. `twi setup` can update
@@ -298,8 +298,12 @@ Refresh tokens should be used when available and appropriate for the selected OA
 
 ## Startup And Doctor Checks
 
-Startup currently checks that username and OAuth token are present after
-applying env/config and saved credential values. `twi doctor` reports
+Startup requires an OAuth token after applying env/config and saved credential
+values. A username is not required: the IRC login is derived from whichever
+account the validated token belongs to, because Twitch requires the IRC login
+to be that account. A configured `twitch_username` is only a fallback for when
+token validation cannot reach Twitch, and one naming a different account is
+reported as stale and ignored. `twi doctor` reports
 credential and credential-store presence without printing raw credential values.
 On Unix this check names the credential file path. On non-Unix platforms it
 warns that saved credential persistence is disabled and points to env/config
