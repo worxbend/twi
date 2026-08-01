@@ -422,6 +422,8 @@ func (s *fakeIRCSession) OnRoomStateMessage(func(irc.RoomStateMessage))   {}
 func (s *fakeIRCSession) OnClearChatMessage(func(irc.ClearChatMessage))   {}
 func (s *fakeIRCSession) OnClearMessage(func(irc.ClearMessage))           {}
 func (s *fakeIRCSession) OnUserStateMessage(func(irc.UserStateMessage))   {}
+func (s *fakeIRCSession) OnUserJoinMessage(func(irc.UserJoinMessage))     {}
+func (s *fakeIRCSession) OnUserPartMessage(func(irc.UserPartMessage))     {}
 func (s *fakeIRCSession) OnReconnectMessage(func(irc.ReconnectMessage))   {}
 func (s *fakeIRCSession) OnUnsetMessage(func(irc.RawMessage))             {}
 
@@ -429,4 +431,32 @@ func (s *fakeIRCSession) connectCalls() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.connects
+}
+
+// The roster's JOIN/PART tracking only works if twi actually asks Twitch for
+// the membership capability. The library default includes it, but twi sets
+// Capabilities explicitly, so an override that drops membership would
+// silently disable chat presence.
+func TestIRCClientRequestsMembershipCapability(t *testing.T) {
+	session := newIRCClient("user", "oauth:token", []string{"alpha"})
+	real, ok := session.(*irc.Client)
+	if !ok {
+		t.Fatalf("newIRCClient returned %T, want *irc.Client", session)
+	}
+
+	want := map[string]bool{
+		irc.TagsCapability:       false,
+		irc.CommandsCapability:   false,
+		irc.MembershipCapability: false,
+	}
+	for _, capability := range real.Capabilities {
+		if _, known := want[capability]; known {
+			want[capability] = true
+		}
+	}
+	for capability, requested := range want {
+		if !requested {
+			t.Errorf("capability %q not requested; got %v", capability, real.Capabilities)
+		}
+	}
 }

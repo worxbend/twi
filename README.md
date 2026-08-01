@@ -35,7 +35,8 @@ What makes this project different:
 
 - A real TUI shell with mock mode, multi-channel state, command palette, selected-message inspect, reply context, local filters, and resize-aware layouts.
 - Live Twitch IRC read/send plumbing behind internal interfaces, with startup token validation and redacted auth-refresh behavior.
-- Text-first rendering for avatars, badges, emotes, emoji, replies, mentions, moderation notices, and system events: initials chips, stable per-username colors, compact badge labels, matched emote tokens, and native Unicode emoji glyphs, with no inline-image rendering path.
+- Text-first rendering for avatars, badges, emotes, emoji, replies, mentions, moderation notices, and system events: initials chips, stable per-username colors, glyph or text badges, matched emote tokens, and native Unicode emoji glyphs, with no inline-image rendering path.
+- Three switchable message layouts (`inline`, `grouped`, `compact`), per-user color carried into the message surface and gutter rail, `@name` autocomplete drawn from who is actually in chat, and always-visible author context (role, sub tenure, follow age) plus a live chatter count.
 - Async asset plumbing for Twitch avatar/emote/badge metadata without blocking the UI.
 - A security posture that keeps OAuth tokens, refresh tokens, client secrets, callback values, and private config out of normal output and debug logs.
 
@@ -234,7 +235,7 @@ Do not paste real tokens into commits, screenshots, issue comments, terminal rec
 | Login/setup | Partial | `twi setup` creates or updates non-secret flat config values and can hand off to `twi login`; on supported Unix builds, `twi login` saves through the restrictive credential-file fallback. Non-Unix builds keep env/config credentials as the supported path. |
 | Multi-channel UX | Partial | Messages, unread counts, scroll, drafts, replies, sends, and local view filters are per-channel. Normal and wide terminals show a keyboard-first channel sidebar with connection indicators, unread counts, and filter markers; `ctrl+p` opens a keyboard command palette for common actions, panel toggles, channel switching, local filters, local clear, and live reconnect restart. Optional mouse support can scroll chat, click channels, focus the composer, and select messages. Twitch `USERNOTICE` events such as raids carry normalized event IDs; when the relevant chat is not active, the terminal is blurred, or another panel has focus, `twi` attempts a desktop system notification, falls back to a terminal bell, and shows a status-line notification summary. Selected messages can be inspected in a redacted diagnostics panel even when filters hide them from the chat view. Narrow terminals collapse channel state into the status line. Twitch IRC connect/reconnect/disconnect callbacks are connection-level and are shown on configured channel states rather than as independent per-channel transport events. Manual reconnect tears down the active live IRC transport before creating a fresh one while preserving per-channel UI state. |
 | Text-only asset rendering | Ready | Avatars, badges, emotes, and emoji always render as text: `[XY]` initials chips (or nothing when `avatar_mode = "off"`), compact badge labels, matched emote text tokens, and native Unicode emoji glyphs. There is no image decode, cache, or terminal-graphics rendering path; missing metadata, missing credentials, or lookup failures simply keep the text fallback. |
-| Theming | Ready | 13 built-in presets (Claude, Codex, Btop, Nord, Dracula, Gruvbox, Solarized Dark, Monokai, One Dark, Tokyo Night, Catppuccin Mocha, Rose Pine, Mono) plus a custom hex palette apply across every widget. The application canvas is derived slightly darker than the selected background, while icon-titled panes use the raised surface color, quiet frames, independently colored left rails, and shared-clock focus gradients on auxiliary panes. The Chat pane frame and title remain static. Consecutive messages from the same author share one surface/rail group; a subtle horizontal rule and alternating group surface appear only when the visible author changes. Each username also keeps a stable hash-derived readable color. The borderless composer uses a raised surface, focus rail, block cursor, and `Chat · #channel · state` footer inspired by modern coding TUIs. `ctrl+t` opens a btop-style settings view that live-previews a theme as you move the selection and persists it with `enter` (`esc` reverts); `twi profile list\|show\|set` manages the same setting from the CLI. |
+| Theming | Ready | 13 built-in presets (Claude, Codex, Btop, Nord, Dracula, Gruvbox, Solarized Dark, Monokai, One Dark, Tokyo Night, Catppuccin Mocha, Rose Pine, Mono) plus a custom hex palette apply across every widget. The application canvas is derived slightly darker than the selected background, while icon-titled panes use the raised surface color, quiet frames, independently colored left rails, and shared-clock focus gradients on auxiliary panes. The Chat pane frame and title remain static. Consecutive messages from the same author share one surface/rail group; a subtle horizontal rule and alternating group surface appear only when the visible author changes. Each username also keeps a stable hash-derived readable color. The borderless composer uses a raised surface, focus rail, block cursor, and `Chat · #channel · state` footer inspired by modern coding TUIs. `ctrl+t` opens a btop-style full-screen theme page that lists every preset with a swatch strip of its own colors, live-previews the highlighted theme as you move the selection, and persists it with `enter` (`esc` reverts); `twi profile list\|show\|set` manages the same setting from the CLI. |
 | Animation | Ready | A shared ~10fps clock (disabled when `animation_mode = "off"`) drives seamless mirrored gradients, pulsing LIVE/REC and incoming-message rails, typewriter chat and command-palette reveals, and a staged ~2s block-logo startup sequence (skippable by any keypress). Moving gradients travel through a `start → end → start` palette so either side wraps without a visible color seam. The Chat pane border/title are deliberately excluded. Reduced mode slows decorative gradient motion. |
 | Live status telemetry | Partial | The status bar shows real Twitch broadcast status via Helix "Get Streams" polling (LIVE + elapsed on-air time + viewer count) when `stream_status_mode` and Twitch API credentials allow it, otherwise OFFLINE; follower and subscriber counts poll Helix "Get Channel Followers"/"Get Broadcaster Subscriptions" every 2 minutes when credentials and the `moderator:read:followers`/`channel:read:subscriptions` scopes allow it; REC reflects `debug_logging`; CPU%/memory/FPS are twi's own process stats; "chat" bitrate is derived chat-message throughput, not stream encode bitrate. `--mock` simulates a fixed demo LIVE state. |
 | Emote autocomplete | Partial | `ctrl+e` opens a searchable emote/emoji picker and a persistent quick-select row (third `tab` stop). A built-in emoji set is always available; real Twitch global/channel emotes merge into it when `emote_autocomplete_mode` and credentials allow. Mock mode demonstrates the combined workflow and emoji-rich messages without network access. |
@@ -251,8 +252,13 @@ is only claimed when that document records a complete credential set.
 | --- | --- |
 | `alt+1` / `alt+2` / `alt+3` | Switch the top tab bar between Chat, Stream Info, and Misc. |
 | `ctrl+p` | Open or close the command palette. |
-| `ctrl+t` | Open or close theme settings; live-preview a theme with `up`/`down`, `enter` to save, `esc` to revert. |
+| `ctrl+t` | Open or close the full-screen theme page; live-preview a theme with `up`/`down`, jump with `home`/`end`, `enter` to save, `esc` to revert. |
 | `ctrl+e` | Open or close the searchable emote picker; filter by typing, `up`/`down` to select, `enter` to insert. |
+| `ctrl+g` | Cycle the chat message layout: `inline` → `grouped` → `compact`. Saved to the config file. |
+| `ctrl+b` | Cycle badge rendering beside usernames: `glyph` → `text` → `off`. Saved to the config file. |
+| `ctrl+y` | Toggle the tinted background chip behind emotes and emoji. Saved to the config file. |
+| `ctrl+n` | Toggle full usernames (`DisplayName (login)`). Saved to the config file. |
+| `@` + `tab` | Complete a chat username. Type `@` and a prefix, `up`/`down` to pick, `tab` to insert, `esc` to dismiss. |
 | `tab` | Cycle focus between chat, composer, and the emotes quick-select row. |
 | `left` / `right` | Move the emotes quick-select row's highlighted emote (when it has focus). |
 | `?` | Toggle expanded help. |
@@ -406,9 +412,11 @@ twi profile set nord             # persist a built-in preset
 twi profile set custom --background '#000000' --foreground '#ffffff' --accent '#ff00ff'
 ```
 
-Or interactively: press `ctrl+t` in the chat shell for a btop-style settings
-view that live-previews each theme as you move the selection, `enter` to save,
-`esc` to revert.
+Or interactively: press `ctrl+t` in the chat shell for a btop-style theme page.
+It takes over the whole terminal rather than docking under the chat, lists every
+preset with a swatch strip of its own colors, and live-previews the highlighted
+one as you move the selection. `up`/`down` and `home`/`end` move, `enter` saves,
+`esc` reverts.
 
 The status bar's LIVE indicator reflects the channel's real Twitch broadcast
 status (polled via Helix "Get Streams" every 60s when `stream_status_mode`

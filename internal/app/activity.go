@@ -29,7 +29,18 @@ const (
 	activityClip         activityKind = "clip"
 	activityCheer        activityKind = "cheer"
 	activityStreamStatus activityKind = "stream_status"
+	activityMembership   activityKind = "membership"
 )
+
+// membershipActivityBurst is the number of membership entries twi will log in
+// one burst window before collapsing the rest into a single summary row.
+// Twitch delivers JOINs in large batches on connect - logging each one would
+// bury every other activity kind under hundreds of "x joined" rows.
+const membershipActivityBurst = 5
+
+// membershipBurstWindow is how close together membership events must arrive
+// to count as one burst.
+const membershipBurstWindow = 2 * time.Second
 
 // activityEntry is one row in the activity log column.
 type activityEntry struct {
@@ -93,13 +104,80 @@ func cheerActivityText(message twitch.ChatMessage) string {
 	return fmt.Sprintf("%s cheered %d %s", name, message.Bits, unit)
 }
 
+// applyMembershipEvent folds a JOIN/PART into the target channel's roster and
+// logs it in the activity column.
+//
+// Bursts are collapsed: Twitch sends membership for everyone already in the
+// channel immediately after connecting, so the first few are logged
+// individually and the remainder of the burst becomes one rolling
+// "N more joined" row that is rewritten in place.
+func (m *mockShellModel) applyMembershipEvent(event twitch.MembershipEvent) {
+	state := m.channels.applyMembership(event)
+	if state == nil {
+		return
+	}
+	at := event.At
+	if at.IsZero() {
+		at = time.Now()
+	}
+	login := strings.TrimSpace(event.Login)
+	if login == "" {
+		return
+	}
+
+	if at.Sub(m.membershipBurstAt) > membershipBurstWindow {
+		m.membershipBurstCount = 0
+		m.membershipBurstIndex = -1
+	}
+	m.membershipBurstAt = at
+	m.membershipBurstCount++
+
+	if m.membershipBurstCount <= membershipActivityBurst {
+		verb := "joined"
+		if event.Type == twitch.MembershipPart {
+			verb = "left"
+		}
+		m.appendActivity(activityEntry{
+			Kind:    activityMembership,
+			Channel: state.name,
+			Text:    login + " " + verb,
+			At:      at,
+		})
+		return
+	}
+
+	collapsed := m.membershipBurstCount - membershipActivityBurst
+	summary := activityEntry{
+		Kind:    activityMembership,
+		Channel: state.name,
+		Text:    fmt.Sprintf("+%d more joined/left", collapsed),
+		At:      at,
+	}
+	// Rewrite the existing summary row in place while the burst continues so
+	// one noisy reconnect costs the log a single line, not hundreds.
+	if m.membershipBurstIndex >= 0 && m.membershipBurstIndex < len(m.activityLog) &&
+		m.activityLog[m.membershipBurstIndex].Kind == activityMembership {
+		m.activityLog[m.membershipBurstIndex] = summary
+		return
+	}
+	m.appendActivity(summary)
+	m.membershipBurstIndex = len(m.activityLog) - 1
+}
+
 func (m *mockShellModel) appendActivity(entry activityEntry) {
 	if entry.At.IsZero() {
 		entry.At = time.Now()
 	}
 	m.activityLog = append(m.activityLog, entry)
 	if len(m.activityLog) > maxActivityEntries {
-		m.activityLog = m.activityLog[len(m.activityLog)-maxActivityEntries:]
+		trimmed := len(m.activityLog) - maxActivityEntries
+		m.activityLog = m.activityLog[trimmed:]
+		// Trimming shifts every index left; keep the in-place membership
+		// summary row pointing at the same entry, or drop it if it aged out.
+		m.membershipBurstIndex -= trimmed
+		if m.membershipBurstIndex < 0 {
+			m.membershipBurstIndex = -1
+		}
 	}
 }
 

@@ -24,10 +24,12 @@ type LiveChatClient struct {
 	factory LiveChatTransportFactory
 	baseCtx context.Context
 
-	messages chan twitch.ChatMessage
-	states   chan ConnectionState
-	done     chan struct{}
-	closed   chan struct{}
+	messages    chan twitch.ChatMessage
+	states      chan ConnectionState
+	memberships chan twitch.MembershipEvent
+	userStates  chan twitch.UserState
+	done        chan struct{}
+	closed      chan struct{}
 
 	mu           sync.RWMutex
 	session      *liveChatSession
@@ -99,6 +101,8 @@ func newLiveChatClient(ctx context.Context, reconnectFactory, initialFactory Liv
 		baseCtx:     ctx,
 		messages:    make(chan twitch.ChatMessage, buffer),
 		states:      make(chan ConnectionState, buffer),
+		memberships: make(chan twitch.MembershipEvent, buffer),
+		userStates:  make(chan twitch.UserState, buffer),
 		done:        make(chan struct{}),
 		closed:      make(chan struct{}),
 		debugLogger: opts.DebugLogger,
@@ -122,6 +126,8 @@ func newLiveChatClient(ctx context.Context, reconnectFactory, initialFactory Liv
 		})
 		close(client.messages)
 		close(client.states)
+		close(client.memberships)
+		close(client.userStates)
 		close(client.closed)
 		return nil, safeErr
 	}
@@ -137,6 +143,20 @@ func (c *LiveChatClient) Messages() <-chan twitch.ChatMessage {
 
 func (c *LiveChatClient) ConnectionStates() <-chan ConnectionState {
 	return c.states
+}
+
+// UserStates implements UserStateSource. Twitch sends USERSTATE on join and
+// after each message the authenticated user sends; it is the only source of
+// that user's own badges, because Twitch never echoes their PRIVMSGs back.
+func (c *LiveChatClient) UserStates() <-chan twitch.UserState {
+	return c.userStates
+}
+
+// Memberships implements MembershipSource. The channel stays open for the
+// client's lifetime even when Twitch never sends membership for a channel,
+// so callers can select on it unconditionally.
+func (c *LiveChatClient) Memberships() <-chan twitch.MembershipEvent {
+	return c.memberships
 }
 
 func (c *LiveChatClient) Send(ctx context.Context, req SendRequest) (SendResult, error) {
@@ -196,6 +216,8 @@ func (c *LiveChatClient) Close() error {
 		c.lifecycleMu.Unlock()
 		close(c.messages)
 		close(c.states)
+		close(c.memberships)
+		close(c.userStates)
 		close(c.closed)
 	})
 	return err
@@ -482,6 +504,10 @@ func (c *LiveChatClient) handleEvent(ctx context.Context, event twitch.Event) {
 		c.emitMessage(ctx, messageFromUserNotice(event.UserNotice))
 	case twitch.EventModeration:
 		c.emitMessage(ctx, messageFromModeration(event.Moderation))
+	case twitch.EventMembership:
+		c.emitMembership(ctx, event.Membership)
+	case twitch.EventUserState:
+		c.emitUserState(ctx, event.UserState)
 	case twitch.EventConnection:
 		c.emitState(ctx, stateFromConnectionEvent(event.Connection))
 	case twitch.EventError:
@@ -507,6 +533,30 @@ func (c *LiveChatClient) emitMessage(ctx context.Context, msg twitch.ChatMessage
 	case c.messages <- msg:
 	case <-ctx.Done():
 	case <-c.done:
+	}
+}
+
+// emitUserState drops the event rather than blocking when the buffer is
+// full: USERSTATE repeats after every message the user sends, so the newest
+// one always supersedes anything a stalled consumer has not read yet.
+func (c *LiveChatClient) emitUserState(ctx context.Context, state twitch.UserState) {
+	select {
+	case c.userStates <- state:
+	case <-ctx.Done():
+	case <-c.done:
+	default:
+	}
+}
+
+// emitMembership drops the event rather than blocking when the buffer is
+// full. Busy channels can burst thousands of JOINs after a reconnect, and a
+// stalled membership consumer must never wedge the message stream behind it.
+func (c *LiveChatClient) emitMembership(ctx context.Context, membership twitch.MembershipEvent) {
+	select {
+	case c.memberships <- membership:
+	case <-ctx.Done():
+	case <-c.done:
+	default:
 	}
 }
 

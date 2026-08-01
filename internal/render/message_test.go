@@ -133,7 +133,9 @@ func TestRowsSnapshotNormalWidth(t *testing.T) {
 					{Type: twitch.FragmentEmote, Text: "Kappa", Ref: twitch.AssetRef{Kind: "twitch_emote", ID: "25"}},
 				},
 			},
-			want: []string{"20:00 [moderator] alice: hello @bob 😀 Kappa"},
+			// Badges default to single-cell glyphs; BadgeModeText still
+			// renders "[moderator]" (see TestBadgeModesRenderBadgesDifferently).
+			want: []string{"20:00 ⚔ alice: hello @bob 😀 Kappa"},
 		},
 		{
 			name: "reply",
@@ -435,6 +437,9 @@ func TestRowsReserveStableAssetFallbackWidths(t *testing.T) {
 	}
 	opts := DefaultOptions(80)
 	opts.Assets = FallbackAssetOptions()
+	// This case is about the fixed-width text fallbacks, so it pins the text
+	// badge mode rather than riding on whatever the default happens to be.
+	opts.Badges = BadgeModeText
 
 	rows := Rows(msg, opts)
 	if got := rows[0].Plain(); !strings.Contains(got, "[AL] 20:00 [mod] ") {

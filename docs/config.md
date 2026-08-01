@@ -145,6 +145,10 @@ Supported variables:
 | `TWI_AVATAR_MODE` | No | Avatar rendering mode: `off` or `initials`. There is no image mode. |
 | `TWI_ANIMATION_MODE` | No | Animation behavior: gradient motion, pulsing status/message indicators, scene-switch flash, staged startup splash, and command-palette typewriter reveal, in addition to chat-row reveal speed. |
 | `TWI_THEME_NAME` | No | Active theme: one of the 13 built-in preset names, or `custom` to use the `TWI_THEME_*` hex fields below. Defaults to `claude`. |
+| `TWI_MESSAGE_LAYOUT` | No | Chat message arrangement: `inline` (author and text on one row), `grouped` (author header row with text indented beneath, repeated authors collapsed), or `compact` (no avatars, timestamps, or badges). Defaults to `inline`. |
+| `TWI_BADGE_MODE` | No | Badge rendering beside usernames: `glyph` (single-cell icons), `text` (`[mod]` labels), or `off`. Defaults to `glyph`. |
+| `TWI_HIGHLIGHT_EMOTES` | No | Draw emotes and emoji on a tinted chip background. Defaults to `true`. |
+| `TWI_FULL_USERNAME` | No | Append the login when it differs from the display name (`アリス (alice_l)`). Defaults to `false`. |
 | `TWI_THEME_BACKGROUND` / `TWI_THEME_FOREGROUND` / `TWI_THEME_ACCENT` / `TWI_THEME_MUTED` / `TWI_THEME_BORDER` / `TWI_THEME_SURFACE` / `TWI_THEME_WARNING` / `TWI_THEME_ERROR` / `TWI_THEME_SUCCESS` | No | Custom palette hex values, only applied when `TWI_THEME_NAME=custom`. |
 | `TWI_STREAM_STATUS_MODE` | No | Enables (`auto`, default) or disables (`off`) polling Twitch Helix "Get Streams" for the status bar's real LIVE indicator. Requires `TWI_TWITCH_CLIENT_ID`/`TWI_TWITCH_OAUTH_TOKEN` either way. |
 | `TWI_EMOTE_AUTOCOMPLETE_MODE` | No | Enables (`auto`, default) or disables (`off`) fetching real Twitch global/channel emotes for the Ctrl+E picker and quick-select row. Requires Twitch API credentials either way; `--mock` always uses a built-in sample list regardless of this setting. |
@@ -200,6 +204,10 @@ default_channels = "somechannel"
 enable_mouse = true
 avatar_mode = "initials"
 animation_mode = "fast"
+message_layout = "inline"
+badge_mode = "glyph"
+highlight_emotes = true
+full_username = false
 theme_name = "claude"
 theme_background = ""
 theme_foreground = ""

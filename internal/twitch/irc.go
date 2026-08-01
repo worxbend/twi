@@ -33,6 +33,10 @@ func NormalizeIRCMessage(message irc.Message) Event {
 		return NormalizeIRCClearMessage(*message)
 	case *irc.UserStateMessage:
 		return NormalizeIRCUserStateMessage(*message)
+	case *irc.UserJoinMessage:
+		return NormalizeIRCUserJoinMessage(*message, time.Now())
+	case *irc.UserPartMessage:
+		return NormalizeIRCUserPartMessage(*message, time.Now())
 	case *irc.ReconnectMessage:
 		return NormalizeIRCReconnectMessage(*message, time.Now())
 	case *irc.RawMessage:
@@ -161,6 +165,31 @@ func NormalizeIRCUserStateMessage(message irc.UserStateMessage) Event {
 			Badges:      normalizeIRCBadges(message.User.Badges, message.Tags),
 			EmoteSets:   cloneStringSlice(message.EmoteSets),
 			RawTags:     cloneStringMap(message.Tags),
+		},
+	}
+}
+
+// NormalizeIRCUserJoinMessage converts a membership JOIN into a normalized
+// event. JOIN/PART carry no IRC tags, so at is supplied by the caller rather
+// than read from the message.
+func NormalizeIRCUserJoinMessage(message irc.UserJoinMessage, at time.Time) Event {
+	return membershipEvent(MembershipJoin, message.Channel, message.User, at)
+}
+
+// NormalizeIRCUserPartMessage converts a membership PART into a normalized
+// event.
+func NormalizeIRCUserPartMessage(message irc.UserPartMessage, at time.Time) Event {
+	return membershipEvent(MembershipPart, message.Channel, message.User, at)
+}
+
+func membershipEvent(membership MembershipType, channel, login string, at time.Time) Event {
+	return Event{
+		Kind: EventMembership,
+		Membership: MembershipEvent{
+			Type:    membership,
+			Channel: strings.TrimPrefix(strings.TrimSpace(channel), "#"),
+			Login:   strings.ToLower(strings.TrimSpace(login)),
+			At:      at,
 		},
 	}
 }

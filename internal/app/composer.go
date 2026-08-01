@@ -93,6 +93,13 @@ func (m mockShellModel) composerPanelLines(height, width int) [][]composerSegmen
 	if m.activeChannelState().replyTo != nil && height >= 3 {
 		lines = append(lines, m.composerReplySegments())
 	}
+	// The @mention strip sits directly above the draft so the candidate list
+	// is adjacent to the word being completed. It is skipped rather than
+	// truncated when the composer is too short to hold it without evicting
+	// the input row itself.
+	if mentions := m.composerMentionSegments(m.mentionSuggestions()); len(mentions) > 0 && height >= len(lines)+3 {
+		lines = append(lines, mentions)
+	}
 	lines = append(lines, m.composerInputSegments(width))
 	for len(lines) < height-1 {
 		lines = append(lines, nil)

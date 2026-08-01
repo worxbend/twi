@@ -17,12 +17,19 @@ type channelStateSet struct {
 }
 
 type channelState struct {
-	name                   string
-	status                 ConnectionState
-	messages               []twitch.ChatMessage
-	scrollOffset           int
-	messageFilters         messageFilterSet
-	revealQueue            *animation.Queue
+	name           string
+	status         ConnectionState
+	messages       []twitch.ChatMessage
+	scrollOffset   int
+	messageFilters messageFilterSet
+	revealQueue    *animation.Queue
+	roster         *chatterRoster
+	// selfBadges/selfDisplayName/selfColor mirror the latest USERSTATE for
+	// this channel: the authenticated user's own identity, which their local
+	// echo has no other source for.
+	selfBadges             []twitch.Badge
+	selfDisplayName        string
+	selfColor              string
 	activeOrder            []string
 	activeMessages         map[string]twitch.ChatMessage
 	localEchoes            map[string]struct{}
@@ -90,6 +97,7 @@ func (s *channelStateSet) ensure(channel string) *channelState {
 		name:           name,
 		status:         ConnectionState{Status: ConnectionDisconnected, Channel: name},
 		revealQueue:    animation.NewQueue(s.animationConfig, s.clock),
+		roster:         newChatterRoster(),
 		activeMessages: make(map[string]twitch.ChatMessage),
 		localEchoes:    make(map[string]struct{}),
 	}
@@ -140,6 +148,7 @@ func (s *channelStateSet) applyMessage(message twitch.ChatMessage) (*channelStat
 		return nil, false
 	}
 	message.Channel = state.name
+	state.roster.observeMessage(message)
 	inactive := channelKey(state.name) != s.active
 	if inactive {
 		state.messages = append(state.messages, message)
@@ -147,6 +156,20 @@ func (s *channelStateSet) applyMessage(message twitch.ChatMessage) (*channelStat
 		return state, false
 	}
 	return state, true
+}
+
+// applyMembership folds a JOIN/PART into the target channel's roster and
+// returns the affected state so the caller can log the event.
+func (s *channelStateSet) applyMembership(event twitch.MembershipEvent) *channelState {
+	if s == nil {
+		return nil
+	}
+	state := s.ensure(event.Channel)
+	if state == nil {
+		return nil
+	}
+	state.roster.observeMembership(event)
+	return state
 }
 
 func (s *channelStateSet) applyConnectionState(state ConnectionState) *channelState {

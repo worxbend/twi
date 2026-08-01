@@ -43,6 +43,16 @@ type FeatureConfig struct {
 	ThemeCustom           theme.Palette
 	StreamStatusMode      string
 	EmoteAutocompleteMode string
+	// MessageLayout selects the chat message arrangement: "inline",
+	// "grouped", or "compact". See internal/render.LayoutMode.
+	MessageLayout string
+	// BadgeMode selects how badges render beside a username: "glyph",
+	// "text", or "off". See internal/render.BadgeMode.
+	BadgeMode string
+	// HighlightEmotes draws emotes and emoji on a tinted chip background.
+	HighlightEmotes bool
+	// FullUsername appends the login when it differs from the display name.
+	FullUsername bool
 }
 
 // ResolveTheme returns the effective palette for cfg: the named preset, or
@@ -123,6 +133,10 @@ func Default() Config {
 			ThemeName:             "claude",
 			StreamStatusMode:      "auto",
 			EmoteAutocompleteMode: "auto",
+			MessageLayout:         "inline",
+			BadgeMode:             "glyph",
+			HighlightEmotes:       true,
+			FullUsername:          false,
 		},
 	}
 }
@@ -171,6 +185,10 @@ func WriteNonSecretFile(path string, cfg Config) error {
 		"theme_success":           quote(strings.TrimSpace(cfg.Features.ThemeCustom.Success)),
 		"stream_status_mode":      quote(strings.TrimSpace(cfg.Features.StreamStatusMode)),
 		"emote_autocomplete_mode": quote(strings.TrimSpace(cfg.Features.EmoteAutocompleteMode)),
+		"message_layout":          quote(strings.TrimSpace(cfg.Features.MessageLayout)),
+		"badge_mode":              quote(strings.TrimSpace(cfg.Features.BadgeMode)),
+		"highlight_emotes":        strconv.FormatBool(cfg.Features.HighlightEmotes),
+		"full_username":           strconv.FormatBool(cfg.Features.FullUsername),
 	}
 	order := []string{
 		"twitch_username",
@@ -192,6 +210,10 @@ func WriteNonSecretFile(path string, cfg Config) error {
 		"theme_success",
 		"stream_status_mode",
 		"emote_autocomplete_mode",
+		"message_layout",
+		"badge_mode",
+		"highlight_emotes",
+		"full_username",
 	}
 	return writeFlatConfigUpdates(path, order, updates)
 }
@@ -444,6 +466,14 @@ func applyEnv(cfg *Config, environ []string) {
 			cfg.Features.ThemeCustom.Success = value
 		case "TWI_STREAM_STATUS_MODE":
 			cfg.Features.StreamStatusMode = value
+		case "TWI_MESSAGE_LAYOUT":
+			cfg.Features.MessageLayout = value
+		case "TWI_BADGE_MODE":
+			cfg.Features.BadgeMode = value
+		case "TWI_HIGHLIGHT_EMOTES":
+			cfg.Features.HighlightEmotes = parseBool(value, cfg.Features.HighlightEmotes)
+		case "TWI_FULL_USERNAME":
+			cfg.Features.FullUsername = parseBool(value, cfg.Features.FullUsername)
 		case "TWI_EMOTE_AUTOCOMPLETE_MODE":
 			cfg.Features.EmoteAutocompleteMode = value
 		case "TWI_DEBUG_LOG":
@@ -509,6 +539,14 @@ func applyKey(cfg *Config, key, value string) {
 		cfg.Features.StreamStatusMode = value
 	case "emote_autocomplete_mode":
 		cfg.Features.EmoteAutocompleteMode = value
+	case "message_layout":
+		cfg.Features.MessageLayout = value
+	case "badge_mode":
+		cfg.Features.BadgeMode = value
+	case "highlight_emotes":
+		cfg.Features.HighlightEmotes = parseBool(value, cfg.Features.HighlightEmotes)
+	case "full_username":
+		cfg.Features.FullUsername = parseBool(value, cfg.Features.FullUsername)
 	case "debug_logging":
 		cfg.Debug.Enabled = parseBool(value, cfg.Debug.Enabled)
 	case "debug_log_path":

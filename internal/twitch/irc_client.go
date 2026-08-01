@@ -75,6 +75,8 @@ type ircSession interface {
 	OnClearChatMessage(func(irc.ClearChatMessage))
 	OnClearMessage(func(irc.ClearMessage))
 	OnUserStateMessage(func(irc.UserStateMessage))
+	OnUserJoinMessage(func(irc.UserJoinMessage))
+	OnUserPartMessage(func(irc.UserPartMessage))
 	OnReconnectMessage(func(irc.ReconnectMessage))
 	OnUnsetMessage(func(irc.RawMessage))
 }
@@ -216,6 +218,12 @@ func registerIRCHandlers(client ircSession, emit func(Event), now func() time.Ti
 	client.OnUserStateMessage(func(message irc.UserStateMessage) {
 		emit(NormalizeIRCUserStateMessage(message))
 	})
+	client.OnUserJoinMessage(func(message irc.UserJoinMessage) {
+		emit(NormalizeIRCUserJoinMessage(message, now()))
+	})
+	client.OnUserPartMessage(func(message irc.UserPartMessage) {
+		emit(NormalizeIRCUserPartMessage(message, now()))
+	})
 	client.OnReconnectMessage(func(message irc.ReconnectMessage) {
 		emit(NormalizeIRCReconnectMessage(message, now()))
 	})
@@ -326,7 +334,17 @@ func (c *IRCClient) currentClient() ircSession {
 
 var newIRCClient = func(username, token string, channels []string) ircSession {
 	client := irc.NewClient(username, token)
-	client.Capabilities = []string{irc.TagsCapability, irc.CommandsCapability}
+	// Tags carry badges, colors, emote spans, and reply metadata; commands
+	// carry moderation and room-state events; membership carries the
+	// JOIN/PART lines the chatter roster is built from. Membership is
+	// best-effort on Twitch's side - it is batched, delayed, and dropped
+	// entirely for large channels - but without requesting it here twi
+	// receives none at all.
+	client.Capabilities = []string{
+		irc.TagsCapability,
+		irc.CommandsCapability,
+		irc.MembershipCapability,
+	}
 	client.Join(channels...)
 	return client
 }

@@ -183,6 +183,39 @@ func Darken(color string, amount float64) string {
 	})
 }
 
+// Mix blends overlay into base by amount, where 0 returns base unchanged and
+// 1 returns overlay. Invalid hex values return base unchanged, matching
+// Darken's rule that a broken custom-theme color degrades the decoration
+// instead of the whole UI.
+//
+// It exists for tinting a surface with a user's identity color: at a low
+// amount the result stays a background (text drawn on it keeps its contrast)
+// while still carrying enough hue to be recognizable as that user.
+func Mix(base, overlay string, amount float64) string {
+	baseRGB, ok := parseHexColor(base)
+	if !ok {
+		return base
+	}
+	overlayRGB, ok := parseHexColor(overlay)
+	if !ok {
+		return base
+	}
+	if amount < 0 {
+		amount = 0
+	}
+	if amount > 1 {
+		amount = 1
+	}
+	blend := func(a, b uint8) uint8 {
+		return uint8(math.Round(float64(a)*(1-amount) + float64(b)*amount))
+	}
+	return canonicalHex(rgb{
+		r: blend(baseRGB.r, overlayRGB.r),
+		g: blend(baseRGB.g, overlayRGB.g),
+		b: blend(baseRGB.b, overlayRGB.b),
+	})
+}
+
 // IdentityColor returns a deterministic, random-looking color for identity
 // that meets text contrast against every valid background when possible. It
 // keeps nickname colors stable across frames and sessions without mutable UI

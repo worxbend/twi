@@ -150,7 +150,10 @@ func TestDifferentAuthorAppendPreservesScrolledViewport(t *testing.T) {
 	if state.scrollOffset == 0 {
 		t.Fatal("test setup failed: expected a scrolled viewport")
 	}
-	beforeView := model.View()
+	// Compare the visible chat rows rather than the whole view: the chat pane
+	// title carries a live active-chatter count, which correctly changes when
+	// a new author speaks even though the scrolled page must not move.
+	beforeVisible := visibleChatPage(model)
 	beforeRows := len(model.chatRows(model.layout()))
 	beforeOffset := state.scrollOffset
 
@@ -167,9 +170,17 @@ func TestDifferentAuthorAppendPreservesScrolledViewport(t *testing.T) {
 	if got := model.activeChannelState().scrollOffset; got != wantOffset {
 		t.Fatalf("scroll offset after different-author append = %d, want %d including separator delta", got, wantOffset)
 	}
-	if afterView := model.View(); afterView != beforeView {
-		t.Fatalf("different-author append changed the visible scrolled page:\nbefore:\n%s\nafter:\n%s", beforeView, afterView)
+	if afterVisible := visibleChatPage(model); afterVisible != beforeVisible {
+		t.Fatalf("different-author append changed the visible scrolled page:\nbefore:\n%s\nafter:\n%s", beforeVisible, afterVisible)
 	}
+}
+
+// visibleChatPage returns the chat rows currently on screen, which is what
+// "the visible scrolled page" means for scroll-stability assertions.
+func visibleChatPage(model mockShellModel) string {
+	layout := model.layout()
+	rows := visibleRows(model.chatRows(layout), layout.chatContentHeight, model.activeChannelState().scrollOffset)
+	return strings.Join(rows, "\n")
 }
 
 func TestMessageGroupSeparatorPreservesResponsiveWidth(t *testing.T) {

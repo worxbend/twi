@@ -323,13 +323,17 @@ func assetCacheDir(cacheDir string) (string, error) {
 
 func featureModesCheck(features config.FeatureConfig) DoctorCheck {
 	detail := fmt.Sprintf(
-		"avatar=%s animation=%s theme=%s stream_status=%s emote_autocomplete=%s mouse=%t",
+		"avatar=%s animation=%s theme=%s stream_status=%s emote_autocomplete=%s mouse=%t layout=%s badges=%s highlight_emotes=%t full_username=%t",
 		features.AvatarMode,
 		features.AnimationMode,
 		features.ThemeName,
 		features.StreamStatusMode,
 		features.EmoteAutocompleteMode,
 		features.EnableMouse,
+		features.MessageLayout,
+		features.BadgeMode,
+		features.HighlightEmotes,
+		features.FullUsername,
 	)
 	if unknown := unknownFeatureModes(features); len(unknown) > 0 {
 		return warnCheck("feature modes", detail+"; unknown: "+strings.Join(unknown, ", "))
@@ -353,6 +357,12 @@ func unknownFeatureModes(features config.FeatureConfig) []string {
 	}
 	if !oneOf(features.EmoteAutocompleteMode, "auto", "off") {
 		unknown = append(unknown, "emote_autocomplete="+features.EmoteAutocompleteMode)
+	}
+	if !oneOf(features.MessageLayout, "inline", "grouped", "compact") {
+		unknown = append(unknown, "message_layout="+features.MessageLayout)
+	}
+	if !oneOf(features.BadgeMode, "glyph", "text", "off") {
+		unknown = append(unknown, "badge_mode="+features.BadgeMode)
 	}
 	return unknown
 }

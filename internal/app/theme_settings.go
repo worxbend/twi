@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/rivo/uniseg"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/theme"
 )
@@ -19,6 +20,13 @@ type themeSettingsState struct {
 	originalPalette theme.Palette
 	saveError       string
 }
+
+// themeSwatchCell is one swatch column. Every entry draws the same number of
+// cells so the color columns line up row-for-row down the page.
+const (
+	themeSwatchCell      = "██"
+	themeSwatchEmptyCell = "··"
+)
 
 // themeSettingsNames lists the selectable entries: every built-in preset in
 // stable order, plus a trailing "custom" entry that previews whatever
@@ -66,6 +74,10 @@ func (m mockShellModel) handleThemeSettingsKey(msg tea.KeyMsg) (tea.Model, tea.C
 		m.moveThemeSettingsSelection(-1)
 	case tea.KeyDown, tea.KeyTab:
 		m.moveThemeSettingsSelection(1)
+	case tea.KeyHome:
+		m.setThemeSettingsSelection(0)
+	case tea.KeyEnd:
+		m.setThemeSettingsSelection(len(themeSettingsNames()) - 1)
 	}
 	return m, nil
 }
@@ -81,6 +93,14 @@ func (m *mockShellModel) moveThemeSettingsSelection(delta int) {
 	}
 	if selected >= len(names) {
 		selected = 0
+	}
+	m.setThemeSettingsSelection(selected)
+}
+
+func (m *mockShellModel) setThemeSettingsSelection(selected int) {
+	names := themeSettingsNames()
+	if selected < 0 || selected >= len(names) {
+		return
 	}
 	m.themeSettings.selected = selected
 	m.theme, _ = theme.ResolvePalette(names[selected], m.effectiveConfig.Features.ThemeCustom)
@@ -107,61 +127,166 @@ func (m mockShellModel) persistSelectedTheme() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m mockShellModel) themeSettingsView(layout mockShellLayout) string {
-	contentWidth := layout.width
-	if layout.themeSettingsFramed {
-		contentWidth = clampMin(layout.width-4, 1)
+// themeSettingsPageView renders the picker as its own full-screen page rather
+// than a strip docked under the chat. Sizing off m.width/m.height (the splash
+// pattern) means View() returns this instead of the dashboard, so the palette
+// never has to be judged through a chat pane squeezed down to make room for
+// it, and the list gets the whole terminal for swatches.
+func (m mockShellModel) themeSettingsPageView() string {
+	width := clampMin(m.width, 1)
+	height := clampMin(m.height, 1)
+	if height < 3 || width < 5 {
+		lines := m.themeSettingsLines(width, height, m.canvasBackground())
+		return fitBlock(strings.Join(lines, "\n"), width, height)
 	}
-	lines := m.themeSettingsLines(contentWidth, layout.themeSettingsContentHeight)
-	content := strings.Join(lines, "\n")
-	if !layout.themeSettingsFramed {
-		return fitBlock(content, layout.width, layout.themeSettingsHeight)
-	}
+	contentHeight := height - 2
+	lines := m.themeSettingsLines(clampMin(width-4, 1), contentHeight, m.theme.Surface)
 	return m.renderPane(paneSpec{
 		icon:          "🎨",
 		title:         "Themes",
-		content:       content,
-		width:         layout.width,
-		contentHeight: layout.themeSettingsContentHeight,
+		content:       strings.Join(lines, "\n"),
+		width:         width,
+		contentHeight: contentHeight,
 		padding:       1,
 		accent:        m.theme.Accent,
 		focused:       true,
 	})
 }
 
-func (m mockShellModel) themeSettingsLines(width, height int) []string {
-	if height <= 0 {
+// themeSettingsLines lays out the page body: a status header, the windowed
+// entry list, and a key-hint footer. Lines are pre-styled against background
+// because the swatches need per-segment color, which the pane body style
+// cannot apply on its own.
+func (m mockShellModel) themeSettingsLines(width, height int, background string) []string {
+	if height <= 0 || width <= 0 {
 		return nil
 	}
-	header := " Theme (enter=save, esc=cancel)"
-	if m.themeSettings.saveError != "" {
-		header = " Theme: " + m.themeSettings.saveError
-	}
-	lines := []string{fitLine(header, width)}
-	if height == 1 {
-		return lines
-	}
-
 	names := themeSettingsNames()
 	selected := m.themeSettings.selected
 	if selected < 0 || selected >= len(names) {
 		selected = 0
 	}
-	maxNames := height - 1
-	start := paletteWindowStart(selected, len(names), maxNames)
-	for i := start; i < len(names) && len(lines) < height; i++ {
-		prefix := "  "
-		if i == selected {
-			prefix = "> "
-		}
-		label := prefix + names[i]
-		if strings.EqualFold(names[i], m.effectiveConfig.Features.ThemeName) {
-			label += " (active)"
-		}
-		lines = append(lines, fitLine(label, width))
+
+	header, headerColor := "Select a theme — the preview applies live", m.theme.Muted
+	if m.themeSettings.saveError != "" {
+		header, headerColor = m.themeSettings.saveError, m.theme.Error
 	}
-	for len(lines) < height {
-		lines = append(lines, fitLine("", width))
+	lines := []string{paneStyledText(fitLine(header, width), headerColor, background, false)}
+	if height == 1 {
+		return lines
 	}
-	return lines[:height]
+
+	blank := paneStyledText(fitLine("", width), m.theme.Muted, background, false)
+	footer := ""
+	if height >= 4 {
+		footer = paneStyledText(
+			fitLine("↑/↓ move · home/end jump · enter save · esc cancel", width),
+			m.theme.Muted,
+			background,
+			false,
+		)
+	}
+	if height >= 7 {
+		lines = append(lines, blank)
+	}
+
+	listHeight := height - len(lines)
+	if footer != "" {
+		listHeight--
+	}
+	start := paletteWindowStart(selected, len(names), listHeight)
+	for i := start; i < len(names) && listHeight > 0; i++ {
+		lines = append(lines, m.themeSettingsEntryLine(names[i], width, i == selected, background))
+		listHeight--
+	}
+	for listHeight > 0 {
+		lines = append(lines, blank)
+		listHeight--
+	}
+	if footer != "" {
+		lines = append(lines, footer)
+	}
+	return lines
+}
+
+// themeSettingsEntryLine draws one row: selection marker, theme name, and a
+// swatch strip rendered in that preset's own colors so the list doubles as a
+// palette comparison without having to select each entry in turn.
+func (m mockShellModel) themeSettingsEntryLine(name string, width int, selected bool, background string) string {
+	if width <= 0 {
+		return ""
+	}
+
+	prefix, prefixColor := "  ", m.theme.Muted
+	if selected {
+		prefix, prefixColor = "❯ ", m.theme.Accent
+	}
+	label := name
+	if strings.EqualFold(name, m.effectiveConfig.Features.ThemeName) {
+		label += " (active)"
+	}
+
+	var builder strings.Builder
+	used := 0
+	write := func(text, color string, bold bool) {
+		text = fitLine(text, minInt(uniseg.StringWidth(text), clampMin(width-used, 0)))
+		if text == "" {
+			return
+		}
+		builder.WriteString(paneStyledText(text, color, background, bold))
+		used += uniseg.StringWidth(text)
+	}
+
+	write(prefix, prefixColor, selected)
+	write(fitLine(label, themeSettingsLabelWidth(m.effectiveConfig.Features.ThemeName)), m.theme.Foreground, selected)
+	if width-used >= themeSwatchWidth()+2 {
+		write("  ", m.theme.Muted, false)
+		palette, _ := theme.ResolvePalette(name, m.effectiveConfig.Features.ThemeCustom)
+		for _, color := range themeSwatchColors(palette) {
+			// An unset slot (an empty "custom" palette) would otherwise paint a
+			// solid block in the terminal's default foreground and read as a
+			// real color; dots make "nothing configured here" legible instead.
+			if strings.TrimSpace(color) == "" {
+				write(themeSwatchEmptyCell, m.theme.Muted, false)
+				continue
+			}
+			write(themeSwatchCell, color, false)
+		}
+	}
+	if used < width {
+		builder.WriteString(paneStyledText(strings.Repeat(" ", width-used), m.theme.Muted, background, false))
+	}
+	return builder.String()
+}
+
+// themeSwatchColors samples each palette in a fixed order so the swatch
+// columns mean the same thing on every row.
+func themeSwatchColors(palette theme.Palette) []string {
+	return []string{
+		palette.Accent,
+		palette.Foreground,
+		palette.Muted,
+		palette.Success,
+		palette.Warning,
+		palette.Error,
+		palette.Border,
+	}
+}
+
+func themeSwatchWidth() int {
+	return len(themeSwatchColors(theme.Palette{})) * uniseg.StringWidth(themeSwatchCell)
+}
+
+// themeSettingsLabelWidth pads every name to a shared column so the swatch
+// strips start at the same offset regardless of name length.
+func themeSettingsLabelWidth(activeName string) int {
+	widest := 0
+	for _, name := range themeSettingsNames() {
+		width := uniseg.StringWidth(name)
+		if strings.EqualFold(name, activeName) {
+			width += uniseg.StringWidth(" (active)")
+		}
+		widest = maxInt(widest, width)
+	}
+	return widest
 }

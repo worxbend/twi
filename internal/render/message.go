@@ -1,6 +1,7 @@
 package render
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -131,11 +132,96 @@ func fragmentWithDefaultBackground(fragment Fragment, background string) Fragmen
 	return fragment
 }
 
+// LayoutMode selects how a message's author and text are arranged.
+type LayoutMode string
+
+const (
+	// LayoutInline puts the author and the message on one row:
+	// "12:00 [AB] Name: message text". Densest layout; every row is
+	// self-describing, which suits fast-moving chat.
+	LayoutInline LayoutMode = "inline"
+	// LayoutGrouped puts the author on their own header row with the
+	// message text indented beneath it, and omits the header entirely for
+	// consecutive messages from the same author (see Options.ContinuesGroup).
+	// Trades vertical space for a much clearer read of who said what.
+	LayoutGrouped LayoutMode = "grouped"
+	// LayoutCompact drops avatars, timestamps, and badges, leaving
+	// "Name: message". For narrow terminals and side-by-side panes.
+	LayoutCompact LayoutMode = "compact"
+)
+
+// DefaultLayoutMode is used when a config value is missing or unrecognized.
+const DefaultLayoutMode = LayoutInline
+
+// NormalizeLayoutMode maps a config string onto a known layout, falling back
+// to DefaultLayoutMode so an unrecognized value degrades instead of failing.
+func NormalizeLayoutMode(value string) LayoutMode {
+	switch LayoutMode(strings.ToLower(strings.TrimSpace(value))) {
+	case LayoutInline:
+		return LayoutInline
+	case LayoutGrouped:
+		return LayoutGrouped
+	case LayoutCompact:
+		return LayoutCompact
+	default:
+		return DefaultLayoutMode
+	}
+}
+
+// AuthorMeta is per-user context the renderer cannot derive from a message on
+// its own. It is resolved by the app from its channel roster (badges seen so
+// far, membership, polled follower data) and handed in per message.
+//
+// Every field is optional: a zero AuthorMeta renders no metadata rather than
+// claiming a user has no roles or does not follow.
+type AuthorMeta struct {
+	// Role is the highest-precedence role label ("mod", "vip", ...) or "".
+	Role string
+	// SubscribedMonths is subscriber tenure in months, or 0 when unknown.
+	SubscribedMonths int
+	// FollowsSince is when the author followed the channel. It is only
+	// meaningful when FollowKnown is set; twi usually has follower data for
+	// just the most recent page of followers.
+	FollowsSince time.Time
+	FollowKnown  bool
+	// FirstSeen is when twi first saw this author in this session. It is not
+	// when they joined the channel - that is not knowable from IRC.
+	FirstSeen time.Time
+	// Now anchors relative durations. Zero means "use wall clock", which
+	// tests override for determinism.
+	Now time.Time
+}
+
+func (a AuthorMeta) empty() bool {
+	return a.Role == "" && a.SubscribedMonths == 0 && !a.FollowKnown && a.FirstSeen.IsZero()
+}
+
+func (a AuthorMeta) now() time.Time {
+	if a.Now.IsZero() {
+		return time.Now()
+	}
+	return a.Now
+}
+
 // Options controls message rendering and wrapping.
 type Options struct {
 	Width   int
 	Palette theme.Palette
 	Assets  AssetOptions
+	Layout  LayoutMode
+	Badges  BadgeMode
+	// ContinuesGroup marks a message as following another from the same
+	// author. LayoutGrouped uses it to suppress the repeated author header.
+	ContinuesGroup bool
+	// FullUsername renders "DisplayName (login)" when Twitch's display name
+	// differs from the login by more than capitalization, so localized or
+	// stylized display names stay traceable to a real account.
+	FullUsername bool
+	// HighlightEmotes draws emotes and emoji on a tinted background so they
+	// separate visually from surrounding text.
+	HighlightEmotes bool
+	// Meta is optional author context rendered beside the username.
+	Meta AuthorMeta
 }
 
 // DefaultOptions returns renderer options using the default theme palette.
@@ -144,6 +230,40 @@ func DefaultOptions(width int) Options {
 		Width:   width,
 		Palette: theme.DefaultPalette(),
 	}
+}
+
+func (o Options) layout() LayoutMode {
+	return NormalizeLayoutMode(string(o.Layout))
+}
+
+func (o Options) badgeMode() BadgeMode {
+	return NormalizeBadgeMode(string(o.Badges))
+}
+
+// emoteHighlightBlend is how far the emote/emoji chip background is pulled
+// from the message surface toward the accent color. It is deliberately small:
+// the chip must read as a raised surface behind the token, not as a block of
+// solid color that overwhelms the text drawn on it.
+const emoteHighlightBlend = 0.22
+
+// emoteHighlight returns the background for emote tokens, or "" when
+// highlighting is off. Blending from the theme's own surface keeps the chip
+// legible in every preset instead of hard-coding a color that only works on
+// dark themes.
+func (o Options) emoteHighlight() string {
+	if !o.HighlightEmotes {
+		return ""
+	}
+	return theme.Mix(o.Palette.Surface, o.Palette.Accent, emoteHighlightBlend)
+}
+
+// emojiHighlight mirrors emoteHighlight for emoji, tinted toward the warning
+// hue so emoji and channel emotes stay distinguishable from each other.
+func (o Options) emojiHighlight() string {
+	if !o.HighlightEmotes {
+		return ""
+	}
+	return theme.Mix(o.Palette.Surface, o.Palette.Warning, emoteHighlightBlend)
 }
 
 // AssetOptions controls fixed placeholder widths for the text fallbacks
@@ -198,6 +318,10 @@ func Rows(msg twitch.ChatMessage, opts Options) []Row {
 	}
 	opts.Assets = opts.Assets.withFallbackWidths()
 
+	if opts.layout() == LayoutGrouped {
+		return groupedRows(msg, opts)
+	}
+
 	prefix := messagePrefix(msg, opts)
 	content := messageContent(msg, opts)
 	rows := wrap(prefix, content, opts.Width)
@@ -205,6 +329,69 @@ func Rows(msg twitch.ChatMessage, opts Options) []Row {
 		return []Row{{Fragments: prefix}}
 	}
 	return rows
+}
+
+// groupedRows renders LayoutGrouped: an author header row followed by the
+// message text indented beneath it. Consecutive messages from the same author
+// (Options.ContinuesGroup) skip the header, so a run of messages reads as one
+// block under a single name.
+func groupedRows(msg twitch.ChatMessage, opts Options) []Row {
+	indent := groupedIndentWidth(opts.Width)
+	var rows []Row
+	if !opts.ContinuesGroup {
+		header := groupedHeaderFragments(msg, opts)
+		headerRows, current, _ := appendWrappedFragments(nil, Row{}, 0, header, opts.Width, indent)
+		rows = append(headerRows, current)
+	}
+
+	content := messageContent(msg, opts)
+	indentFragment := []Fragment{{Kind: FragmentText, Text: strings.Repeat(" ", indent)}}
+	bodyRows, current, _ := appendWrappedFragments(nil, Row{}, 0, indentFragment, opts.Width, 0)
+	bodyRows, current, _ = appendWrappedFragments(bodyRows, current, indent, content, opts.Width, indent)
+	rows = append(rows, append(bodyRows, current)...)
+	return rows
+}
+
+// groupedIndentWidth is how far grouped message text is inset under its
+// author header. It scales down on narrow terminals so the indent never eats
+// the message.
+func groupedIndentWidth(width int) int {
+	switch {
+	case width >= 40:
+		return 3
+	case width >= 20:
+		return 2
+	default:
+		return 0
+	}
+}
+
+// groupedHeaderFragments builds the author row for LayoutGrouped: avatar
+// chip, username, badges, then muted metadata (timestamp and author context).
+// The username carries the heading weight here - a terminal cannot vary font
+// size, so the visual hierarchy between "who" and "what" comes from putting
+// the name on its own bold, colored row above unemphasized body text.
+func groupedHeaderFragments(msg twitch.ChatMessage, opts Options) []Fragment {
+	var fragments []Fragment
+	if opts.Assets.ShowAvatars && opts.Width >= 28 {
+		fragments = append(fragments, avatarFallbackFragment(msg, opts, displayAuthor(msg)))
+	}
+	fragments = append(fragments, usernameFragment(msg, opts))
+	if badges := badgeFragments(msg, opts); len(badges) > 0 && opts.Width >= 24 {
+		fragments = append(fragments, Fragment{Kind: FragmentText, Text: " "})
+		fragments = append(fragments, badges...)
+	}
+	if opts.Width >= 30 {
+		fragments = append(fragments, Fragment{
+			Kind:  FragmentTimestamp,
+			Text:  " " + timestampText(msg.Timestamp),
+			Style: FragmentStyle{Foreground: opts.Palette.Muted},
+		})
+	}
+	if opts.Width >= 46 {
+		fragments = append(fragments, authorMetaFragments(opts)...)
+	}
+	return fragments
 }
 
 // PlainRows renders fallback text rows for callers that do their own styling.
@@ -236,17 +423,144 @@ func TextRow(msg twitch.ChatMessage, width int) string {
 	return rows[0]
 }
 
+// usernameFragment renders the author name in their stable identity color.
+//
+// FullUsername appends the login when the display name is not simply a
+// recapitalization of it - Twitch allows CJK and stylized display names that
+// are otherwise impossible to tie back to an account you can mention.
+func usernameFragment(msg twitch.ChatMessage, opts Options) Fragment {
+	author := displayAuthor(msg)
+	if opts.FullUsername {
+		login := strings.TrimSpace(msg.AuthorLogin)
+		if login != "" && !strings.EqualFold(login, author) {
+			author += " (" + login + ")"
+		}
+	}
+	return Fragment{
+		Kind: FragmentUsername,
+		Text: author,
+		Style: FragmentStyle{
+			Foreground: usernameColor(msg, opts.Palette),
+			Bold:       true,
+		},
+	}
+}
+
+// badgeFragments renders a message's badges according to the active badge
+// mode: bracketed text labels, single-cell glyphs, or nothing.
+func badgeFragments(msg twitch.ChatMessage, opts Options) []Fragment {
+	mode := opts.badgeMode()
+	if mode == BadgeModeOff || len(msg.Badges) == 0 {
+		return nil
+	}
+	// Each glyph fragment reserves BadgeGlyphWidth (icon plus one trailing
+	// pad cell), so callers supply any leading separator themselves rather
+	// than getting a doubled space after an element that already ends in one.
+	fragments := make([]Fragment, 0, len(msg.Badges))
+	if mode == BadgeModeGlyph {
+		for _, badge := range msg.Badges {
+			fragments = append(fragments, badgeGlyphFragment(badge, opts))
+		}
+		return fragments
+	}
+	for _, badge := range msg.Badges {
+		fragments = append(fragments, badgeFallbackFragment(badge, opts))
+	}
+	return fragments
+}
+
+// badgeGlyphFragment renders one badge as a colored icon. The fixed
+// BadgeGlyphWidth keeps badge columns aligned between rows even when a badge
+// set has no glyph mapping and falls back to a neutral marker.
+func badgeGlyphFragment(badge twitch.Badge, opts Options) Fragment {
+	glyph, _ := BadgeGlyph(badge.SetID)
+	return Fragment{
+		Kind:       FragmentBadge,
+		Text:       glyph,
+		WidthCells: BadgeGlyphWidth,
+		Style: FragmentStyle{
+			Foreground: badgeGlyphColor(badge.SetID, opts.Palette),
+			Bold:       true,
+		},
+		Ref: badgeAssetRef(badge),
+	}
+}
+
+// authorMetaFragments renders the muted author context: role, subscriber
+// tenure, whether they follow the channel, and how long twi has seen them.
+//
+// Anything twi does not actually know is omitted rather than guessed, so an
+// absent "follows" note means "no follower data", never "does not follow".
+func authorMetaFragments(opts Options) []Fragment {
+	meta := opts.Meta
+	if meta.empty() {
+		return nil
+	}
+	parts := make([]string, 0, 4)
+	if meta.Role != "" {
+		parts = append(parts, meta.Role)
+	}
+	if meta.SubscribedMonths > 0 {
+		parts = append(parts, fmt.Sprintf("sub %dmo", meta.SubscribedMonths))
+	}
+	if meta.FollowKnown {
+		if meta.FollowsSince.IsZero() {
+			parts = append(parts, "follows")
+		} else {
+			parts = append(parts, "follows "+humanizeDuration(meta.now().Sub(meta.FollowsSince)))
+		}
+	}
+	if !meta.FirstSeen.IsZero() {
+		parts = append(parts, "seen "+humanizeDuration(meta.now().Sub(meta.FirstSeen)))
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	return []Fragment{{
+		Kind: FragmentText,
+		Text: " · " + strings.Join(parts, " · "),
+		Style: FragmentStyle{
+			Foreground: opts.Palette.Muted,
+			Italic:     true,
+		},
+	}}
+}
+
+// humanizeDuration renders an age at one significant unit ("3mo", "5d",
+// "2h"). Chat metadata only needs a sense of scale, and a single short unit
+// keeps the header from crowding out the message.
+func humanizeDuration(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	case d < 30*24*time.Hour:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	case d < 365*24*time.Hour:
+		return fmt.Sprintf("%dmo", int(d.Hours()/(24*30)))
+	default:
+		return fmt.Sprintf("%dy", int(d.Hours()/(24*365)))
+	}
+}
+
 func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 	foreground := opts.Palette.Foreground
 	muted := opts.Palette.Muted
 	accent := opts.Palette.Accent
-	authorColor := usernameColor(msg, opts.Palette)
 
 	author := displayAuthor(msg)
 	avatarAuthor := author
 	includeTimestamp := opts.Width >= 16
-	includeBadges := opts.Width >= 28 && len(msg.Badges) > 0
+	includeBadges := opts.Width >= 28 && len(msg.Badges) > 0 && opts.badgeMode() != BadgeModeOff
 	includeAvatar := opts.Assets.ShowAvatars && opts.Width >= 24
+	// LayoutCompact trades every decoration for message text.
+	if opts.layout() == LayoutCompact {
+		includeTimestamp, includeBadges, includeAvatar = false, false, false
+	}
 
 	for {
 		fixedWidth := 2
@@ -257,9 +571,7 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 			fixedWidth += 6
 		}
 		if includeBadges {
-			for _, badge := range msg.Badges {
-				fixedWidth += badgeFallbackWidth(badge, opts.Assets)
-			}
+			fixedWidth += badgeSetWidth(msg.Badges, opts)
 		}
 		if includeAvatar {
 			fixedWidth += opts.Assets.AvatarWidthCells
@@ -293,9 +605,7 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 		})
 	}
 	if includeBadges {
-		for _, badge := range msg.Badges {
-			fragments = append(fragments, badgeFallbackFragment(badge, opts))
-		}
+		fragments = append(fragments, badgeFragments(msg, opts)...)
 	}
 	if msg.Type == twitch.MessageTypeAction {
 		fragments = append(fragments, Fragment{
@@ -308,14 +618,7 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 		})
 	}
 
-	fragments = append(fragments, Fragment{
-		Kind: FragmentUsername,
-		Text: author,
-		Style: FragmentStyle{
-			Foreground: authorColor,
-			Bold:       true,
-		},
-	})
+	fragments = append(fragments, usernameFragment(msg, opts))
 
 	separator := ": "
 	if msg.Type == twitch.MessageTypeAction {
@@ -408,6 +711,7 @@ func normalizedFragments(in []twitch.MessageFragment, opts Options) []Fragment {
 				WidthCells: opts.Assets.EmoteWidthCells,
 				Style: FragmentStyle{
 					Foreground: opts.Palette.Success,
+					Background: opts.emoteHighlight(),
 					Bold:       true,
 				},
 				Ref: emoteFragmentRef(fragment),
@@ -419,6 +723,7 @@ func normalizedFragments(in []twitch.MessageFragment, opts Options) []Fragment {
 				WidthCells: opts.Assets.EmojiWidthCells,
 				Style: FragmentStyle{
 					Foreground: opts.Palette.Foreground,
+					Background: opts.emojiHighlight(),
 				},
 				Ref: emojiAssetRef(text, fragment.Ref),
 			})
@@ -489,6 +794,7 @@ func emoteFallbackFragments(msg twitch.ChatMessage, opts Options) []Fragment {
 			WidthCells: opts.Assets.EmoteWidthCells,
 			Style: FragmentStyle{
 				Foreground: opts.Palette.Success,
+				Background: opts.emoteHighlight(),
 				Bold:       true,
 			},
 			Ref: emoteAssetRef(emote),
@@ -550,6 +856,7 @@ func splitTextFragments(text string, opts Options) []Fragment {
 				WidthCells: opts.Assets.EmojiWidthCells,
 				Style: FragmentStyle{
 					Foreground: opts.Palette.Foreground,
+					Background: opts.emojiHighlight(),
 				},
 				Ref: emojiAssetRef(cluster, twitch.AssetRef{}),
 			})
@@ -834,6 +1141,23 @@ func badgeFallbackFragment(badge twitch.Badge, opts Options) Fragment {
 			Bold:       true,
 		},
 		Ref: badgeAssetRef(badge),
+	}
+}
+
+// badgeSetWidth is the total width a message's badges will occupy under the
+// active badge mode, used to budget the message prefix before rendering.
+func badgeSetWidth(badges []twitch.Badge, opts Options) int {
+	switch opts.badgeMode() {
+	case BadgeModeOff:
+		return 0
+	case BadgeModeGlyph:
+		return len(badges) * BadgeGlyphWidth
+	default:
+		width := 0
+		for _, badge := range badges {
+			width += badgeFallbackWidth(badge, opts.Assets)
+		}
+		return width
 	}
 }
 

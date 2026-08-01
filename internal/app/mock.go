@@ -106,6 +106,14 @@ type mockShellModel struct {
 	channelMetricsTickScheduled bool
 	activityLog                 []activityEntry
 	seenFollowerIDs             map[string]bool
+	membershipBurstAt           time.Time
+	membershipBurstCount        int
+	membershipBurstIndex        int
+	mentionAutocomplete         mentionAutocompleteState
+	messageLayout               render.LayoutMode
+	badgeMode                   render.BadgeMode
+	highlightEmotes             bool
+	fullUsername                bool
 	debugRecording              bool
 	cpuSampleAt                 time.Time
 	cpuSampleTime               time.Duration
@@ -228,9 +236,6 @@ type mockShellLayout struct {
 	categoryPickerHeight        int
 	categoryPickerContentHeight int
 	categoryPickerFramed        bool
-	themeSettingsHeight         int
-	themeSettingsContentHeight  int
-	themeSettingsFramed         bool
 	streamInfoHeight            int
 	streamInfoContentHeight     int
 	streamInfoFramed            bool
@@ -250,7 +255,13 @@ type chatRowBlock struct {
 	rows            []render.Row
 	groupIndex      int
 	separatorBefore bool
-	animating       bool
+	// continuesGroup marks a message that follows another from the same
+	// author, so LayoutGrouped can omit the repeated author header.
+	continuesGroup bool
+	animating      bool
+	// revealed marks a block whose rows are an in-progress animation frame
+	// and must not be re-rendered from the message.
+	revealed bool
 }
 
 type mockIncomingMessageMsg struct {
@@ -268,6 +279,16 @@ type chatClientMessageMsg struct {
 
 type chatClientConnectionStateMsg struct {
 	state ConnectionState
+	ok    bool
+}
+
+type chatClientMembershipMsg struct {
+	membership twitch.MembershipEvent
+	ok         bool
+}
+
+type chatClientUserStateMsg struct {
+	state twitch.UserState
 	ok    bool
 }
 
@@ -402,21 +423,26 @@ func newMockShellModelWithClock(channel string, cfg config.Config, clock animati
 		emoteEntries[channelKey(channelName)] = sampleEmoteEntries()
 	}
 	return mockShellModel{
-		channels:        channels,
-		theme:           cfg.ResolveTheme(),
-		mentionLogin:    cfg.Twitch.Username,
-		animationMode:   string(animationConfig.Mode),
-		mouseEnabled:    cfg.Features.EnableMouse,
-		avatarMode:      cfg.Features.AvatarMode,
-		sourceDetail:    "mock source: no network",
-		incoming:        incomingMockMessages(channels.activeName(), connectedAt),
-		width:           defaultMockWidth,
-		height:          defaultMockHeight,
-		focus:           mockFocusChat,
-		terminalFocused: true,
-		debugRecording:  cfg.Debug.Enabled,
-		emoteEntries:    emoteEntries,
-		effectiveConfig: cfg,
+		channels:             channels,
+		theme:                cfg.ResolveTheme(),
+		membershipBurstIndex: -1,
+		mentionLogin:         cfg.Twitch.Username,
+		animationMode:        string(animationConfig.Mode),
+		mouseEnabled:         cfg.Features.EnableMouse,
+		avatarMode:           cfg.Features.AvatarMode,
+		messageLayout:        render.NormalizeLayoutMode(cfg.Features.MessageLayout),
+		badgeMode:            render.NormalizeBadgeMode(cfg.Features.BadgeMode),
+		highlightEmotes:      cfg.Features.HighlightEmotes,
+		fullUsername:         cfg.Features.FullUsername,
+		sourceDetail:         "mock source: no network",
+		incoming:             incomingMockMessages(channels.activeName(), connectedAt),
+		width:                defaultMockWidth,
+		height:               defaultMockHeight,
+		focus:                mockFocusChat,
+		terminalFocused:      true,
+		debugRecording:       cfg.Debug.Enabled,
+		emoteEntries:         emoteEntries,
+		effectiveConfig:      cfg,
 	}
 }
 
@@ -556,6 +582,8 @@ func (m mockShellModel) Init() tea.Cmd {
 		m.nextIncomingCommand(),
 		m.nextClientMessageCommand(),
 		m.nextConnectionStateCommand(),
+		m.nextClientMembershipCommand(),
+		m.nextClientUserStateCommand(),
 		m.scheduleFrameTick(),
 		m.resolveStreamStatusCommand(),
 		m.scheduleStreamStatusTick(),
@@ -591,6 +619,9 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toggleThemeSettings()
 			return m, nil
 		}
+		if m.handleDisplayToggleKey(msg) {
+			return m, nil
+		}
 		if m.palette.open {
 			return m.handleCommandPaletteKey(msg)
 		}
@@ -609,6 +640,28 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.activeTab == tabMisc {
 			return m.handleMiscKey(msg)
 		}
+		// The @mention strip claims tab/arrows/esc only while it is actually
+		// offering completions, so every one of those keys keeps its normal
+		// meaning the rest of the time.
+		if len(m.mentionSuggestions()) > 0 {
+			switch msg.Type {
+			case tea.KeyTab:
+				if m.acceptMentionSuggestion() {
+					return m, nil
+				}
+			case tea.KeyDown:
+				m.moveMentionSelection(1)
+				return m, nil
+			case tea.KeyUp:
+				m.moveMentionSelection(-1)
+				return m, nil
+			case tea.KeyEsc:
+				if m.dismissMentionSuggestions() {
+					return m, nil
+				}
+			}
+		}
+
 		switch msg.Type {
 		case tea.KeyTab:
 			m.cycleFocus()
@@ -623,6 +676,7 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyBackspace:
 			if m.focus == mockFocusComposer {
 				m.deleteComposerRune()
+				m.resetMentionSelection()
 			}
 		case tea.KeyEsc:
 			if m.inspectOpen {
@@ -663,7 +717,10 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.activeChannelState().composerText += " "
 			}
 		case tea.KeyRunes:
-			if len(msg.Runes) == 1 && msg.Runes[0] == '?' {
+			// "?" toggles help everywhere except in the composer, where it is
+			// an ordinary character in the message being typed. Every other
+			// rune shortcut below is likewise gated on focus.
+			if m.focus != mockFocusComposer && len(msg.Runes) == 1 && msg.Runes[0] == '?' {
 				m.helpExpanded = !m.helpExpanded
 				m.clampScroll()
 				return m, nil
@@ -707,6 +764,7 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.focus == mockFocusComposer {
 				m.activeChannelState().composerText += string(msg.Runes)
+				m.resetMentionSelection()
 			}
 		}
 	case tea.MouseMsg:
@@ -778,6 +836,21 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.channels.applyConnectionState(msg.state)
 		m.debugConnectionState("app.connection_state.received", msg.state)
 		return m, m.nextConnectionStateCommand()
+	case chatClientMembershipMsg:
+		// A closed membership stream is not a chat failure: Twitch simply
+		// stops sending membership for busy channels. Stop listening and
+		// leave the roster on its message-recency fallback.
+		if !msg.ok {
+			return m, nil
+		}
+		m.applyMembershipEvent(msg.membership)
+		return m, m.nextClientMembershipCommand()
+	case chatClientUserStateMsg:
+		if !msg.ok {
+			return m, nil
+		}
+		m.applyUserState(msg.state)
+		return m, m.nextClientUserStateCommand()
 	case composerSendCompletedMsg:
 		return m.completeComposerSend(msg)
 	case reconnectCompletedMsg:
@@ -840,6 +913,11 @@ func (m mockShellModel) View() string {
 	if m.splashActive() {
 		return backgroundOverride + m.splashView()
 	}
+	// The theme picker is a full-screen page, not a docked strip: it replaces
+	// the dashboard the same way the splash does.
+	if m.themeSettings.open {
+		return backgroundOverride + m.themeSettingsPageView()
+	}
 	layout := m.layout()
 
 	regions := make([]string, 0, 4)
@@ -876,9 +954,6 @@ func (m mockShellModel) View() string {
 	}
 	if layout.categoryPickerHeight > 0 {
 		regions = append(regions, m.categoryPickerView(layout))
-	}
-	if layout.themeSettingsHeight > 0 {
-		regions = append(regions, m.themeSettingsView(layout))
 	}
 	if layout.composerHeight > 0 {
 		regions = append(regions, m.composerView(layout))
@@ -961,13 +1036,33 @@ func (m mockShellModel) chatView(layout mockShellLayout) string {
 
 	return m.renderPane(paneSpec{
 		icon:          "💬",
-		title:         "Chat · #" + m.activeChannelName(),
+		title:         "Chat · #" + m.activeChannelName() + " · " + m.activeChatterLabel(),
 		content:       content,
 		width:         layout.chatWidth,
 		contentHeight: layout.chatContentHeight,
 		padding:       1,
 		accent:        m.theme.Accent,
 	})
+}
+
+// activeChatterLabel renders the live count of chatters twi considers active
+// in the current channel. It lives in the chat pane title so it is visible on
+// every frame rather than being dropped by the status bar's width budget.
+//
+// The count is best-effort by construction (see chatterRoster): with
+// membership it is JOIN/PART presence, without it, recent speakers. The "~"
+// marks the second case so a small number does not read as an authoritative
+// viewer count.
+func (m mockShellModel) activeChatterLabel() string {
+	state := m.activeChannelState()
+	if state == nil {
+		return "👥 0"
+	}
+	count := state.roster.activeCount(m.metricsNow())
+	if state.roster != nil && state.roster.membershipSeen {
+		return fmt.Sprintf("👥 %d", count)
+	}
+	return fmt.Sprintf("👥 ~%d", count)
 }
 
 func (m mockShellModel) sidebarView(layout mockShellLayout) string {
@@ -1031,11 +1126,7 @@ func (m mockShellModel) activityLogView(layout mockShellLayout) string {
 		entries = entries[len(entries)-maxRows:]
 	}
 	for _, entry := range entries {
-		text := entry.Text
-		if entry.Channel != "" {
-			text = "#" + entry.Channel + " " + text
-		}
-		lines = append(lines, fitLine(" "+text, contentWidth))
+		lines = append(lines, m.activityLogLine(entry, contentWidth))
 	}
 	for len(lines) < layout.activityContentHeight {
 		lines = append(lines, fitLine("", contentWidth))
@@ -1052,6 +1143,65 @@ func (m mockShellModel) activityLogView(layout mockShellLayout) string {
 		contentHeight: layout.activityContentHeight,
 		accent:        m.theme.Warning,
 	})
+}
+
+// activityLogLine renders one activity row as "HH:MM ◆ text", where the
+// glyph and its color identify the event kind. The pane is narrow, so the
+// timestamp is dropped before the glyph and the glyph before the text as
+// width shrinks - the text is the part that always survives.
+func (m mockShellModel) activityLogLine(entry activityEntry, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	glyph, color := activityKindGlyph(entry.Kind, m.theme)
+	text := entry.Text
+	// The channel prefix only disambiguates when more than one channel is
+	// joined; with a single channel it just eats width in a narrow pane.
+	if entry.Channel != "" && len(m.channels.channelNames()) > 1 {
+		text = "#" + entry.Channel + " " + text
+	}
+
+	var builder strings.Builder
+	used := 0
+	write := func(value, foreground string, bold bool) {
+		value = fitLine(value, minInt(uniseg.StringWidth(value), clampMin(width-used, 0)))
+		if value == "" {
+			return
+		}
+		builder.WriteString(paneStyledText(value, foreground, m.theme.Surface, bold))
+		used += uniseg.StringWidth(value)
+	}
+
+	if width >= 18 && !entry.At.IsZero() {
+		write(" "+entry.At.Local().Format("15:04"), m.theme.Muted, false)
+	}
+	if width >= 12 {
+		write(" "+glyph, color, true)
+	}
+	write(" "+text, m.theme.Foreground, false)
+	if used < width {
+		builder.WriteString(paneStyledText(strings.Repeat(" ", width-used), m.theme.Muted, m.theme.Surface, false))
+	}
+	return builder.String()
+}
+
+func activityKindGlyph(kind activityKind, palette theme.Palette) (string, string) {
+	switch kind {
+	case activityFollow:
+		return "♥", palette.Success
+	case activityIRCEvent:
+		return "★", palette.Accent
+	case activityClip:
+		return "✂", palette.Warning
+	case activityCheer:
+		return "◈", palette.Warning
+	case activityStreamStatus:
+		return "●", palette.Success
+	case activityMembership:
+		return "⇄", palette.Muted
+	default:
+		return "·", palette.Muted
+	}
 }
 
 func channelStatusIndicator(status ConnectionStatus) string {
@@ -1094,17 +1244,13 @@ func (m mockShellModel) chatRows(layout mockShellLayout) []string {
 func (m mockShellModel) visibleChatRowBlocks(layout mockShellLayout) []chatRowBlock {
 	active := m.activeChannelState()
 	rowWidth := m.chatMessageContentWidth(layout)
-	options := m.renderOptions(rowWidth)
 
 	blocks := make([]chatRowBlock, 0, len(active.messages)+len(active.activeOrder))
 	for _, message := range active.messages {
 		if !m.messageVisibleForState(active, message) {
 			continue
 		}
-		blocks = append(blocks, chatRowBlock{
-			message: message,
-			rows:    render.Rows(message, options),
-		})
+		blocks = append(blocks, chatRowBlock{message: message})
 	}
 	frames := active.revealQueue.Frames()
 	for _, id := range active.activeOrder {
@@ -1116,9 +1262,22 @@ func (m mockShellModel) visibleChatRowBlocks(layout mockShellLayout) []chatRowBl
 			message:   message,
 			rows:      frames[id],
 			animating: true,
+			revealed:  true,
 		})
 	}
 	assignChatAuthorGroups(blocks)
+	// Rendering happens after grouping because LayoutGrouped needs to know
+	// whether a message continues the previous author's block. Reveal frames
+	// are already-rendered partial rows, so they are left as-is.
+	for index := range blocks {
+		if blocks[index].revealed {
+			continue
+		}
+		blocks[index].rows = render.Rows(
+			blocks[index].message,
+			m.messageRenderOptions(rowWidth, blocks[index].message, blocks[index].continuesGroup),
+		)
+	}
 	return blocks
 }
 
@@ -1133,6 +1292,8 @@ func assignChatAuthorGroups(blocks []chatRowBlock) {
 		if index == 0 || key != previousKey {
 			groupIndex++
 			blocks[index].separatorBefore = index > 0
+		} else {
+			blocks[index].continuesGroup = true
 		}
 		blocks[index].groupIndex = groupIndex
 		previousKey = key
@@ -1405,7 +1566,11 @@ func (m mockShellModel) layout() mockShellLayout {
 	}
 
 	if m.helpExpanded {
+		// The expanded help has four lines; taller terminals show all of
+		// them, shorter ones keep the most important prefix.
 		switch {
+		case height >= 18:
+			layout.helpHeight = 4
 		case height >= 14:
 			layout.helpHeight = 3
 		case height >= 10:
@@ -1530,25 +1695,6 @@ func (m mockShellModel) layout() mockShellLayout {
 		remaining -= layout.categoryPickerHeight
 	}
 
-	if !m.palette.open && !m.inspectOpen && !m.emotePicker.open && !m.categoryPicker.open && m.themeSettings.open && remaining >= 4 {
-		layout.themeSettingsHeight = 5
-		if height >= 18 {
-			layout.themeSettingsHeight = 7
-		}
-		if layout.themeSettingsHeight > remaining-1 {
-			layout.themeSettingsHeight = remaining - 1
-		}
-		if layout.themeSettingsHeight < 3 {
-			layout.themeSettingsHeight = 0
-		}
-		layout.themeSettingsFramed = layout.themeSettingsHeight >= 3 && width >= 5
-		layout.themeSettingsContentHeight = layout.themeSettingsHeight
-		if layout.themeSettingsFramed {
-			layout.themeSettingsContentHeight = layout.themeSettingsHeight - 2
-		}
-		remaining -= layout.themeSettingsHeight
-	}
-
 	layout.chatHeight = clampMin(remaining, 0)
 	layout.sidebarWidth = m.sidebarWidth(width, layout.chatHeight)
 	layout.activityWidth = m.activityWidthFor(width, layout.chatHeight)
@@ -1567,7 +1713,7 @@ func (m mockShellModel) layout() mockShellLayout {
 		layout.chatContentHeight = 0
 	}
 
-	used := layout.tabBarHeight + layout.statusHeight + layout.chatHeight + layout.paletteHeight + layout.inspectHeight + layout.emotePickerHeight + layout.categoryPickerHeight + layout.themeSettingsHeight + layout.composerHeight + layout.emotesHeight + layout.helpHeight
+	used := layout.tabBarHeight + layout.statusHeight + layout.chatHeight + layout.paletteHeight + layout.inspectHeight + layout.emotePickerHeight + layout.categoryPickerHeight + layout.composerHeight + layout.emotesHeight + layout.helpHeight
 	if used < height {
 		layout.chatHeight += height - used
 		if layout.chatFramed {
@@ -1662,23 +1808,14 @@ func messageGutterWidth(rowWidth int) int {
 
 func (m mockShellModel) messageRowString(block chatRowBlock, blockIndex, rowIndex int, row render.Row, rowWidth int) string {
 	gutterWidth := messageGutterWidth(rowWidth)
-	background := m.theme.Background
-	if blockIndex%2 == 1 {
-		background = m.theme.Surface
-	}
+	background := m.messageGroupBackground(block, blockIndex)
 	contentWidth := clampMin(rowWidth-gutterWidth, 1)
 	content := terminalRowString(row, contentWidth, background)
 	if gutterWidth == 0 {
 		return content
 	}
 
-	railColors := theme.Gradient(m.theme.Accent, m.gradientEndColor(), 8)
-	colorIndex := blockIndex % len(railColors)
-	if block.animating {
-		railColors = theme.SeamlessGradient(m.theme.Accent, m.gradientEndColor(), 8)
-		colorIndex = (colorIndex + m.gradientPhase(len(railColors))) % len(railColors)
-	}
-	railColor := railColors[colorIndex]
+	railColor := m.messageRailColor(block, blockIndex)
 	rail := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(railColor)).
 		Background(lipgloss.Color(background)).
@@ -1700,6 +1837,68 @@ func (m mockShellModel) messageRowString(block chatRowBlock, blockIndex, rowInde
 		Background(lipgloss.Color(background)).
 		Bold(block.animating).
 		Render(icon) + content
+}
+
+// messageGroupTint is how far a message group's surface is pulled toward its
+// author's identity color. It is small on purpose: the tint has to stay a
+// background that message text remains readable on, while still making a
+// user's block recognizable at a glance.
+const messageGroupTint = 0.10
+
+// messageRailTint is stronger than the surface tint because the rail is a
+// solid two-cell glyph rather than a text background, so it can carry much
+// more of the author's color without hurting legibility.
+const messageRailTint = 0.65
+
+// messageGroupBackground returns the surface a message group is drawn on:
+// the alternating base/surface stripe, tinted toward the author's stable
+// identity color so consecutive messages from one person read as one block.
+func (m mockShellModel) messageGroupBackground(block chatRowBlock, blockIndex int) string {
+	background := m.theme.Background
+	if blockIndex%2 == 1 {
+		background = m.theme.Surface
+	}
+	color := m.messageAuthorColor(block.message)
+	if color == "" {
+		return background
+	}
+	return theme.Mix(background, color, messageGroupTint)
+}
+
+// messageRailColor returns the left rail color for a message group. The rail
+// carries the author's identity color so the same person is recognizable
+// down the gutter; animating messages keep the shared-clock gradient shimmer
+// that marks a message as still arriving.
+func (m mockShellModel) messageRailColor(block chatRowBlock, blockIndex int) string {
+	if block.animating {
+		railColors := theme.SeamlessGradient(m.theme.Accent, m.gradientEndColor(), 8)
+		index := (blockIndex + m.gradientPhase(len(railColors))) % len(railColors)
+		return railColors[index]
+	}
+	color := m.messageAuthorColor(block.message)
+	if color == "" {
+		railColors := theme.Gradient(m.theme.Accent, m.gradientEndColor(), 8)
+		return railColors[blockIndex%len(railColors)]
+	}
+	return theme.Mix(m.theme.Border, color, messageRailTint)
+}
+
+// messageAuthorColor returns a message author's stable identity color, or ""
+// for rows with no real author (notices, system placeholders) so those keep
+// the neutral accent treatment instead of being tinted by a fake identity.
+func (m mockShellModel) messageAuthorColor(message twitch.ChatMessage) string {
+	switch message.Type {
+	case twitch.MessageTypeNotice, twitch.MessageTypeSystem:
+		return ""
+	}
+	identity := strings.TrimSpace(message.AuthorLogin)
+	if identity == "" {
+		identity = strings.TrimSpace(message.DisplayName)
+	}
+	if identity == "" {
+		return ""
+	}
+	return theme.IdentityColor(identity, []string{m.theme.Background, m.theme.Surface}, m.theme.Foreground)
 }
 
 func (m mockShellModel) messageGroupSeparatorString(rowWidth int) string {
@@ -1794,6 +1993,17 @@ func (m *mockShellModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.focus = mockFocusComposer
 		return *m, nil
 	}
+	// Clicking the emotes strip focuses it and selects the emote under the
+	// cursor, so the strip is usable without first tabbing to it.
+	if index, ok := m.emoteAtMouse(event, layout); ok {
+		m.focus = mockFocusEmotes
+		m.emoteSelected = index
+		return *m, nil
+	}
+	if m.mouseInEmotesRegion(event, layout) {
+		m.focus = mockFocusEmotes
+		return *m, nil
+	}
 	if message, ok := m.messageAtMouse(event, layout); ok {
 		m.focus = mockFocusChat
 		m.activeChannelState().replyTo = replyContextFromMessage(message)
@@ -1825,6 +2035,56 @@ func (m mockShellModel) mouseInChatRegion(event tea.MouseEvent, layout mockShell
 		event.X < chatRight &&
 		event.Y >= chatTop &&
 		event.Y < chatTop+layout.chatHeight
+}
+
+// mouseInEmotesRegion reports whether an event lands in the emotes strip,
+// which sits directly below the composer.
+func (m mockShellModel) mouseInEmotesRegion(event tea.MouseEvent, layout mockShellLayout) bool {
+	if layout.emotesHeight <= 0 {
+		return false
+	}
+	top := layout.tabBarHeight + layout.statusHeight + layout.chatHeight + layout.composerHeight
+	return event.X >= 0 &&
+		event.X < layout.width &&
+		event.Y >= top &&
+		event.Y < top+layout.emotesHeight
+}
+
+// emoteAtMouse resolves which emote in the quick-select strip sits under the
+// cursor, by walking the same "name name name" run the strip renders. It
+// returns false when the click is outside the strip or falls on padding
+// between names.
+func (m mockShellModel) emoteAtMouse(event tea.MouseEvent, layout mockShellLayout) (int, bool) {
+	if !m.mouseInEmotesRegion(event, layout) {
+		return 0, false
+	}
+	entries := m.activeEmoteEntries()
+	if len(entries) == 0 {
+		return 0, false
+	}
+	// The framed strip insets content by the pane border plus one padding
+	// cell on each side; the unframed strip has no inset.
+	contentLeft := 0
+	if layout.emotesFramed {
+		contentLeft = 2
+		if event.Y != layout.tabBarHeight+layout.statusHeight+layout.chatHeight+layout.composerHeight+1 {
+			return 0, false
+		}
+	}
+	selected := m.clampedEmoteSelected(entries)
+	cursor := contentLeft
+	for i, entry := range entries {
+		name := entry.Name
+		if i == selected && m.focus == mockFocusEmotes {
+			name = "[" + name + "]"
+		}
+		width := uniseg.StringWidth(name)
+		if event.X >= cursor && event.X < cursor+width {
+			return i, true
+		}
+		cursor += width + 1
+	}
+	return 0, false
 }
 
 func (m mockShellModel) mouseInComposer(event tea.MouseEvent, layout mockShellLayout) bool {
@@ -1968,6 +2228,87 @@ func (m mockShellModel) nextConnectionStateCommand() tea.Cmd {
 	}
 }
 
+// nextClientMembershipCommand subscribes to JOIN/PART when the transport
+// supports it. Transports that do not implement MembershipSource (mock mode,
+// test fakes) simply never produce membership messages.
+func (m mockShellModel) nextClientMembershipCommand() tea.Cmd {
+	if m.client == nil {
+		return nil
+	}
+	source, ok := m.client.(MembershipSource)
+	if !ok {
+		return nil
+	}
+	memberships := source.Memberships()
+	if memberships == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		membership, ok := <-memberships
+		return chatClientMembershipMsg{membership: membership, ok: ok}
+	}
+}
+
+// nextClientUserStateCommand subscribes to USERSTATE when the transport
+// supports it. Transports that do not implement UserStateSource (mock mode,
+// test fakes) simply never produce these messages.
+func (m mockShellModel) nextClientUserStateCommand() tea.Cmd {
+	if m.client == nil {
+		return nil
+	}
+	source, ok := m.client.(UserStateSource)
+	if !ok {
+		return nil
+	}
+	states := source.UserStates()
+	if states == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		state, ok := <-states
+		return chatClientUserStateMsg{state: state, ok: ok}
+	}
+}
+
+// applyUserState records the authenticated user's own badges and identity for
+// the target channel. Twitch re-sends USERSTATE after every message that user
+// sends, so this stays current as roles change mid-session.
+func (m *mockShellModel) applyUserState(state twitch.UserState) {
+	channel := state.Channel
+	if strings.TrimSpace(channel) == "" {
+		channel = m.activeChannelName()
+	}
+	target := m.channels.ensure(channel)
+	if target == nil {
+		return
+	}
+	target.selfBadges = state.Badges
+	target.selfDisplayName = state.DisplayName
+	target.selfColor = state.AuthorColor
+
+	// Feed the roster too, so the user's own role shows up in @mention
+	// completion and author metadata like anyone else's.
+	login := strings.TrimSpace(state.AuthorLogin)
+	if login == "" {
+		login = strings.TrimSpace(m.mentionLogin)
+	}
+	if login == "" {
+		return
+	}
+	target.roster.observeMessage(twitch.ChatMessage{
+		AuthorLogin: login,
+		DisplayName: state.DisplayName,
+		AuthorColor: state.AuthorColor,
+		Badges:      state.Badges,
+		Timestamp:   m.metricsNow(),
+	})
+	// observeMessage counts a message that was never sent; undo that so the
+	// roster's message tally stays truthful.
+	if entry, ok := target.roster.lookup(login); ok && entry.Messages > 0 {
+		entry.Messages--
+	}
+}
+
 func (m *mockShellModel) enqueueMessage(message twitch.ChatMessage) tea.Cmd {
 	if state := m.channels.ensure(message.Channel); state != nil {
 		state.removeLocalEcho(message.ID)
@@ -1991,7 +2332,8 @@ func (m *mockShellModel) enqueueMessage(message twitch.ChatMessage) tea.Cmd {
 	rowWidth := m.chatMessageContentWidth(layout)
 
 	revealID := m.nextRevealID(message)
-	result := state.revealQueue.Enqueue(revealID, render.Rows(message, m.renderOptions(rowWidth)))
+	options := m.messageRenderOptions(rowWidth, message, m.continuesActiveGroup(message))
+	result := state.revealQueue.Enqueue(revealID, render.Rows(message, options))
 	m.completeReveals(result.Overflow)
 	if result.Complete != nil {
 		m.appendStaticMessage(message, false)
@@ -2200,7 +2542,7 @@ func (m *mockShellModel) refreshActiveRevealRows() {
 		if !ok {
 			continue
 		}
-		state.revealQueue.ReplaceRows(id, render.Rows(message, m.renderOptions(rowWidth)))
+		state.revealQueue.ReplaceRows(id, render.Rows(message, m.messageRenderOptions(rowWidth, message, m.continuesActiveGroup(message))))
 	}
 }
 
@@ -2342,13 +2684,30 @@ func (m mockShellModel) localEchoMessage(sent queuedComposerSend, result SendRes
 	if sent.Action {
 		messageType = twitch.MessageTypeAction
 	}
+	// Twitch never echoes the user's own PRIVMSG back, so this local echo is
+	// the only render of it - it has to carry the badges and identity that
+	// USERSTATE reported, or the user is the one person in chat whose own
+	// broadcaster/mod badge never appears.
+	display := author
+	color := "#9146ff"
+	var badges []twitch.Badge
+	if state := m.channels.ensure(channel); state != nil {
+		badges = state.selfBadges
+		if name := strings.TrimSpace(state.selfDisplayName); name != "" {
+			display = name
+		}
+		if value := strings.TrimSpace(state.selfColor); value != "" {
+			color = value
+		}
+	}
 	return twitch.ChatMessage{
 		ID:          id,
 		Channel:     channel,
 		Timestamp:   at,
 		AuthorLogin: author,
-		DisplayName: author,
-		AuthorColor: "#9146ff",
+		DisplayName: display,
+		AuthorColor: color,
+		Badges:      badges,
 		Text:        sent.Text,
 		Type:        messageType,
 		Reply:       replyFromComposerContext(sent.Reply),
@@ -2535,7 +2894,73 @@ func (m mockShellModel) renderOptions(width int) render.Options {
 	opts.Palette = m.theme
 	opts.Assets = render.FallbackAssetOptions()
 	opts.Assets.ShowAvatars = m.avatarMode != "off"
+	opts.Layout = m.messageLayout
+	opts.Badges = m.badgeMode
+	opts.HighlightEmotes = m.highlightEmotes
+	opts.FullUsername = m.fullUsername
 	return opts
+}
+
+// messageRenderOptions returns render options for one message, adding the
+// per-message context Rows cannot infer: whether it continues the previous
+// author's group, and what twi knows about the author.
+func (m mockShellModel) messageRenderOptions(width int, message twitch.ChatMessage, continuesGroup bool) render.Options {
+	opts := m.renderOptions(width)
+	opts.ContinuesGroup = continuesGroup
+	opts.Meta = m.authorMeta(message)
+	return opts
+}
+
+// continuesActiveGroup reports whether message follows another from the same
+// author at the tail of the active channel, matching what
+// assignChatAuthorGroups would decide once the message is on screen. Reveal
+// rows are rendered before that pass runs, so grouping has to be predicted
+// here or an animating message would draw a duplicate author header.
+func (m mockShellModel) continuesActiveGroup(message twitch.ChatMessage) bool {
+	state := m.activeChannelState()
+	if state == nil {
+		return false
+	}
+	var previous twitch.ChatMessage
+	switch {
+	case len(state.activeOrder) > 0:
+		previous = state.activeMessages[state.activeOrder[len(state.activeOrder)-1]]
+	case len(state.messages) > 0:
+		previous = state.messages[len(state.messages)-1]
+	default:
+		return false
+	}
+	if !m.messageVisibleForState(state, previous) {
+		return false
+	}
+	// The block indices only matter for anonymous messages, which never
+	// group; any distinct pair of indices gives the same answer here.
+	return chatAuthorGroupKey(previous, 0) == chatAuthorGroupKey(message, 1)
+}
+
+// authorMeta resolves roster context for a message's author. An author twi
+// has never recorded yields a zero AuthorMeta, which renders no claims at all.
+func (m mockShellModel) authorMeta(message twitch.ChatMessage) render.AuthorMeta {
+	state := m.activeChannelState()
+	if state == nil {
+		return render.AuthorMeta{}
+	}
+	login := message.AuthorLogin
+	if strings.TrimSpace(login) == "" {
+		login = message.DisplayName
+	}
+	entry, ok := state.roster.lookup(login)
+	if !ok {
+		return render.AuthorMeta{}
+	}
+	return render.AuthorMeta{
+		Role:             entry.roleLabel(),
+		SubscribedMonths: entry.SubscribedMonths,
+		FollowsSince:     entry.FollowsSince,
+		FollowKnown:      entry.FollowKnown,
+		FirstSeen:        entry.FirstSeen,
+		Now:              m.metricsNow(),
+	}
 }
 
 func (m *mockShellModel) deleteComposerRune() {
@@ -2688,6 +3113,9 @@ func (m mockShellModel) helpLines(width, height int) []string {
 		" alt+1/2/3: switch tab (chat/stream info/misc) | tab focus: chat/composer",
 		" ctrl+p: commands | [/]: switch channel | 1-4 filters, 0 reset | up/down: select message",
 		" r: reply | i: inspect | pgup/pgdn: scroll | ctrl+l: clear | ctrl+r: reconnect | ?: compact help | q: quit | " + source,
+		// Display toggles go last: when a short terminal truncates the help,
+		// the navigation keys are the ones that must survive.
+		" ctrl+t: theme | ctrl+g: layout | ctrl+b: badges | ctrl+y: emote highlight | ctrl+n: full names | @+tab: complete name",
 	}
 	if width < 38 {
 		lines = []string{

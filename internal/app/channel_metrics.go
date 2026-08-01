@@ -78,6 +78,9 @@ func (m mockShellModel) applyChannelMetrics(msg channelMetricsResolvedMsg) mockS
 		m.followerCount = msg.followers.Total
 		m.followerCountKnown = true
 		m.applyNewFollowerActivity(msg.followers.Followers)
+		// Followers are polled per broadcaster, so only the active channel's
+		// roster can be annotated from this page.
+		m.activeChannelState().roster.applyFollowers(msg.followers.Followers)
 	}
 	if m.subscriptionLookup != nil && msg.subscriptionsErr == nil {
 		m.subscriberCount = msg.subscriptions.Total

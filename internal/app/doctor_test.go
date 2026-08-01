@@ -429,3 +429,32 @@ func writeDoctorAssetFixture(t *testing.T, content string) string {
 	}
 	return path
 }
+
+func TestDoctorWarnsOnUnknownLayoutAndBadgeModes(t *testing.T) {
+	features := config.Default().Features
+	features.MessageLayout = "sideways"
+	features.BadgeMode = "sparkles"
+
+	check := featureModesCheck(features)
+	if check.Status != DoctorStatusWarn {
+		t.Fatalf("feature modes status = %v, want a warning for unknown modes", check.Status)
+	}
+	for _, want := range []string{"message_layout=sideways", "badge_mode=sparkles"} {
+		if !strings.Contains(check.Detail, want) {
+			t.Errorf("detail = %q, want it to name %q", check.Detail, want)
+		}
+	}
+}
+
+func TestDoctorAcceptsEveryValidLayoutAndBadgeMode(t *testing.T) {
+	for _, layout := range []string{"inline", "grouped", "compact"} {
+		for _, badges := range []string{"glyph", "text", "off"} {
+			features := config.Default().Features
+			features.MessageLayout = layout
+			features.BadgeMode = badges
+			if check := featureModesCheck(features); check.Status != DoctorStatusOK {
+				t.Errorf("layout=%s badges=%s reported %v: %s", layout, badges, check.Status, check.Detail)
+			}
+		}
+	}
+}

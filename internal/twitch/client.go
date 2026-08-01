@@ -20,6 +20,7 @@ type Event struct {
 	RoomState  RoomState
 	Moderation ModerationEvent
 	UserState  UserState
+	Membership MembershipEvent
 	Connection ConnectionEvent
 	Raw        RawEvent
 	Err        error
@@ -36,6 +37,7 @@ const (
 	EventRoomState    EventKind = "room_state"
 	EventModeration   EventKind = "moderation"
 	EventUserState    EventKind = "user_state"
+	EventMembership   EventKind = "membership"
 	EventConnection   EventKind = "connection"
 	EventRaw          EventKind = "raw"
 	EventClear        EventKind = "clear"
@@ -112,6 +114,28 @@ type UserState struct {
 	// RawTags is retained only for diagnostics/debug views.
 	RawTags map[string]string
 }
+
+// MembershipEvent reports a user joining or leaving a channel's chat.
+//
+// Twitch delivers these through the twitch.tv/membership IRC capability as
+// plain JOIN/PART lines with no tags, so a login is the only identity
+// available - there is no user ID, display name, or badge information. Twitch
+// also batches and delays membership for large channels and omits it entirely
+// past a viewer threshold, so treat the resulting roster as a best-effort
+// view of chat presence rather than an authoritative viewer list.
+type MembershipEvent struct {
+	Type    MembershipType
+	Channel string
+	Login   string
+	At      time.Time
+}
+
+type MembershipType string
+
+const (
+	MembershipJoin MembershipType = "join"
+	MembershipPart MembershipType = "part"
+)
 
 type ConnectionEvent struct {
 	Type   ConnectionEventType

@@ -13,6 +13,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/worxbend/twi/internal/animation"
 	"github.com/worxbend/twi/internal/assets"
 	"github.com/worxbend/twi/internal/config"
@@ -135,19 +136,31 @@ func TestMockShellFocusHelpAndComposerInput(t *testing.T) {
 		t.Fatalf("composer view missing typed text:\n%s", model.View())
 	}
 
+	// "?" is a literal character while the composer has focus, not the help
+	// hotkey - otherwise it could never be typed into a message.
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
 	model = updated.(mockShellModel)
-	if !model.helpExpanded {
-		t.Fatal("helpExpanded = false, want true")
+	if model.helpExpanded {
+		t.Fatal("? toggled help while typing a message, want it inserted as text")
 	}
-	if !strings.Contains(model.View(), "pgup/pgdn") {
-		t.Fatalf("expanded help missing page key hint:\n%s", model.View())
+	if got, want := model.activeChannelState().composerText, "hi q?"; got != want {
+		t.Fatalf("composer text = %q, want %q", got, want)
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
 	model = updated.(mockShellModel)
 	if got, want := model.focus, mockFocusEmotes; got != want {
 		t.Fatalf("focus after second tab = %v, want %v", got, want)
+	}
+
+	// Away from the composer it is the help hotkey again.
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	model = updated.(mockShellModel)
+	if !model.helpExpanded {
+		t.Fatal("helpExpanded = false after ? outside the composer, want true")
+	}
+	if !strings.Contains(model.View(), "pgup/pgdn") {
+		t.Fatalf("expanded help missing page key hint:\n%s", model.View())
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
@@ -1489,7 +1502,10 @@ func TestMockShellScrolledBurstRendersStaticallyWithoutRevealBacklog(t *testing.
 	if model.activeChannelState().scrollOffset == 0 {
 		t.Fatal("test setup failed: scrollOffset = 0 after page up")
 	}
-	beforeView := model.View()
+	// Compare visible chat rows, not the whole view: the chat pane title
+	// carries a live active-chatter count that correctly moves as the burst's
+	// distinct authors arrive, while the scrolled page must stay put.
+	beforeVisible := visibleChatPage(model)
 	beforeOffset := model.activeChannelState().scrollOffset
 
 	for i := 0; i < 12; i++ {
@@ -1514,12 +1530,12 @@ func TestMockShellScrolledBurstRendersStaticallyWithoutRevealBacklog(t *testing.
 	if model.activeChannelState().scrollOffset <= beforeOffset {
 		t.Fatalf("scrollOffset after off-screen burst = %d, want > %d to preserve visible page", model.activeChannelState().scrollOffset, beforeOffset)
 	}
-	afterView := model.View()
-	if afterView != beforeView {
-		t.Fatalf("off-screen static burst changed visible scrolled page:\nbefore:\n%s\nafter:\n%s", beforeView, afterView)
+	afterVisible := visibleChatPage(model)
+	if afterVisible != beforeVisible {
+		t.Fatalf("off-screen static burst changed visible scrolled page:\nbefore:\n%s\nafter:\n%s", beforeVisible, afterVisible)
 	}
-	if strings.Contains(afterView, "offscreen burst") {
-		t.Fatalf("off-screen burst appeared in current scrolled viewport:\n%s", afterView)
+	if strings.Contains(afterVisible, "offscreen burst") {
+		t.Fatalf("off-screen burst appeared in current scrolled viewport:\n%s", afterVisible)
 	}
 }
 
@@ -1842,6 +1858,66 @@ func TestThemeSettingsAndCommandPaletteAreMutuallyExclusive(t *testing.T) {
 	model = updated.(mockShellModel)
 	if !model.themeSettings.open || model.palette.open {
 		t.Fatalf("expected theme settings open and palette closed; theme=%v palette=%v", model.themeSettings.open, model.palette.open)
+	}
+}
+
+func TestThemeSettingsRendersAsFullScreenPage(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	model := newMockShellModel("alpha", cfg)
+	model.width, model.height = 88, 24
+
+	dashboard := ansi.Strip(model.View())
+	if !strings.Contains(dashboard, "Chat · #alpha") {
+		t.Fatalf("dashboard missing chat pane before opening themes:\n%s", dashboard)
+	}
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	model = updated.(mockShellModel)
+
+	page := ansi.Strip(model.View())
+	if strings.Contains(page, "Chat · #alpha") {
+		t.Fatalf("theme page still renders the chat pane, want a full-screen replacement:\n%s", page)
+	}
+	if !strings.Contains(page, "🎨 Themes") || !strings.Contains(page, "enter save") {
+		t.Fatalf("theme page missing title or key hints:\n%s", page)
+	}
+	if lines := strings.Split(page, "\n"); len(lines) != model.height {
+		t.Fatalf("theme page height = %d lines, want %d:\n%s", len(lines), model.height, page)
+	}
+	// A full-height page fits the whole preset list, which the old docked
+	// strip could only window five rows at a time.
+	for _, name := range themeSettingsNames() {
+		if !strings.Contains(page, name) {
+			t.Errorf("theme page missing entry %q:\n%s", name, page)
+		}
+	}
+}
+
+func TestThemeSettingsHomeEndJumpToListEnds(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	model := newMockShellModel("alpha", cfg)
+	model.width, model.height = 88, 24
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	model = updated.(mockShellModel)
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	model = updated.(mockShellModel)
+	names := themeSettingsNames()
+	if model.themeSettings.selected != len(names)-1 {
+		t.Fatalf("selected after end = %d, want %d", model.themeSettings.selected, len(names)-1)
+	}
+	last, _ := theme.ResolvePalette(names[len(names)-1], cfg.Features.ThemeCustom)
+	if model.theme != last {
+		t.Fatalf("theme after end = %+v, want %+v", model.theme, last)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyHome})
+	model = updated.(mockShellModel)
+	if model.themeSettings.selected != 0 {
+		t.Fatalf("selected after home = %d, want 0", model.themeSettings.selected)
 	}
 }
 

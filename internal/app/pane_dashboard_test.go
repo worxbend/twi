@@ -48,9 +48,6 @@ func TestModalAndTabPanesExposeIconTitles(t *testing.T) {
 		categoryPickerHeight:        8,
 		categoryPickerContentHeight: 6,
 		categoryPickerFramed:        true,
-		themeSettingsHeight:         8,
-		themeSettingsContentHeight:  6,
-		themeSettingsFramed:         true,
 		streamInfoHeight:            8,
 		streamInfoContentHeight:     6,
 		streamInfoFramed:            true,
@@ -68,7 +65,6 @@ func TestModalAndTabPanesExposeIconTitles(t *testing.T) {
 		{name: "inspect", want: "🔎 Inspect", view: model.inspectView(layout)},
 		{name: "emote picker", want: "😀 Emote Search", view: model.emotePickerView(layout)},
 		{name: "category picker", want: "🎮 Category Search", view: model.categoryPickerView(layout)},
-		{name: "theme settings", want: "🎨 Themes", view: model.themeSettingsView(layout)},
 		{name: "stream info", want: "📺 Stream Info", view: model.streamInfoView(layout)},
 		{name: "misc", want: "⏺ Stream Markers", view: model.miscView(layout)},
 	}
