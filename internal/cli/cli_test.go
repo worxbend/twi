@@ -2263,3 +2263,34 @@ func (s saveFailCredentialStore) SaveCredentials(ctx context.Context, _ storage.
 func (s saveFailCredentialStore) DeleteCredentials(ctx context.Context) error {
 	return ctx.Err()
 }
+
+// --channel and --channels accumulate into one list, so a comma-separated
+// batch and repeated single flags can be mixed freely.
+func TestChatChannelFlagsAccumulateAndSplitCommas(t *testing.T) {
+	var flags channelFlags
+	for _, value := range []string{"one", "#two,three", " four "} {
+		if err := flags.Set(value); err != nil {
+			t.Fatalf("Set(%q) error = %v", value, err)
+		}
+	}
+	if got, want := flags.String(), "one,two,three,four"; got != want {
+		t.Fatalf("channels = %q, want %q", got, want)
+	}
+	if err := flags.Set(" , "); err == nil {
+		t.Fatal("Set(\" , \") error = nil, want an empty-channel error")
+	}
+}
+
+// `twi chat` with no configured channel now launches into the empty state
+// instead of exiting; only missing credentials still stop it.
+func TestChatWithoutChannelsDoesNotExitEarly(t *testing.T) {
+	clearTwitchCredentialEnv(t)
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"chat", "--mock", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "no channel configured") {
+		t.Fatalf("stderr still reports the removed no-channel guard: %q", stderr.String())
+	}
+}

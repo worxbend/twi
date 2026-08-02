@@ -11,6 +11,48 @@ constant in the source tree.
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-08-02
+
+### Added
+
+- **Channels can be opened and closed while twi is running.** `/channels` (or
+  `space` `c`) opens a searchable picker that autocompletes from the channels
+  you follow, lists what is already open, and accepts any typed name;
+  `/channels somechannel` skips the picker. Opening joins on the existing IRC
+  connection and closing parts it, so neither needs a reconnect.
+- **`--channels a,b`**, a comma-separated companion to the repeatable
+  `--channel`, on both `twi chat` and `twi setup`. The two accumulate.
+- **Starting with no channel.** `twi chat` without a configured channel no
+  longer exits; it opens on an empty state that names the ways to open one.
+  Closing the last channel returns there rather than quitting.
+- **`user:read:follows`** is now requested at login, backing the picker's
+  autocomplete through Twitch Helix "Get Followed Channels". Tokens issued
+  before this change keep working — the picker says the follow list is
+  unavailable and falls back to open and configured channels until you run
+  `twi login` again.
+- **Mouse navigation across the shell**: clicking a tab switches screens,
+  clicking a sidebar channel switches to it, clicking its `✕` closes it, and
+  clicking a row in the command palette or a picker runs that entry.
+
+### Changed
+
+- **Vim/AstroNvim-style keys.** `i`, `o`, and `a` focus the composer; `esc`
+  leaves it for the chat view with the draft intact; `j`/`k` select messages
+  and move the sidebar highlight. The inspect panel moved from `i` to `K`
+  (also `space` `i`), since `i` now means insert. `space` is a leader chord
+  outside the composer: `e` toggles the channel sidebar, `c` opens the channel
+  picker, `x` closes the active channel.
+- The channel sidebar is now focusable (`tab` when visible) with `j`/`k` to
+  move, `enter`/`l` to switch, `x` to close, and `h`/`esc` to leave.
+
+### Removed
+
+- **The permanent emotes quick-select strip on the main screen.** The dashboard
+  no longer reserves a row below the composer for browsable emotes; that space
+  now goes to chat. `ctrl+e` still opens the searchable emote/emoji picker,
+  which remains the way to insert an emote. `tab` now cycles between chat and
+  the composer only, and `left`/`right` no longer move an emote selection.
+
 ## [0.12.1] — 2026-08-01
 
 Documentation and website only. No behavior changes; the `v0.12.0` binaries
@@ -147,7 +189,8 @@ Releases before `0.8.0` predate this changelog; see the
 [commit history](https://github.com/worxbend/twi/commits/main) and the
 [releases page](https://github.com/worxbend/twi/releases).
 
-[Unreleased]: https://github.com/worxbend/twi/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/worxbend/twi/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/worxbend/twi/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/worxbend/twi/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/worxbend/twi/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/worxbend/twi/compare/v0.10.0...v0.11.0

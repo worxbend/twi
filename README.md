@@ -4,6 +4,7 @@
 
 <p align="center">
   <a href="https://worxbend.github.io/twi/"><img alt="Website" src="https://img.shields.io/badge/website-worxbend.github.io%2Ftwi-9146FF?style=for-the-badge&logo=githubpages&logoColor=white"></a>
+  <a href="https://obs.worxbend.com/"><img alt="Streaming tools map" src="https://img.shields.io/badge/tools-obs.worxbend.com-0F1012?style=for-the-badge&logo=obsstudio&logoColor=white"></a>
   <a href="https://go.dev/"><img alt="Go 1.26" src="https://img.shields.io/badge/Go-1.26-00ADD8?style=for-the-badge&logo=go&logoColor=white"></a>
   <a href="https://www.twitch.tv/"><img alt="Twitch chat" src="https://img.shields.io/badge/Twitch-chat-9146FF?style=for-the-badge&logo=twitch&logoColor=white"></a>
   <a href="Dockerfile"><img alt="Dockerfile" src="https://img.shields.io/badge/Dockerfile-present-2496ED?style=for-the-badge&logo=docker&logoColor=white"></a>
@@ -22,8 +23,10 @@
   <a href="#quickstart">🚀 Quickstart</a> ·
   <a href="#screenshots">📸 Screenshots</a> ·
   <a href="#controls">⌨️ Controls</a> ·
+  <a href="#channels">📡 Channels</a> ·
   <a href="#configure-it">⚙️ Config</a> ·
   <a href="https://worxbend.github.io/twi/">🌐 Website</a> ·
+  <a href="https://obs.worxbend.com/">🧰 More Tools</a> ·
   <a href="docs/index.md">📚 Docs</a>
 </p>
 
@@ -110,6 +113,7 @@ The docs are split by audience:
 | Understand package boundaries | [Architecture](docs/architecture.md) |
 | Cut release artifacts | [Release Packaging](docs/release.md) |
 | See what changed | [Changelog](CHANGELOG.md) |
+| See the wider toolkit | [worxbend streaming tools map](https://obs.worxbend.com/) — sibling OBS/Twitch utilities |
 
 <a id="quickstart"></a>
 
@@ -186,7 +190,7 @@ candidate path yet.
 > [docs/register-twitch-app.md](docs/register-twitch-app.md) for the full
 > walkthrough and the minimal config to start.
 
-Live mode needs an IRC OAuth token and at least one channel. You do **not** need to configure a username: twi authenticates as whichever account the token belongs to, because Twitch requires the IRC login to be the token's own account. The channels you join are independent of that account — you can sign in as one user and read or send in any channel you aren't banned from. A `twitch_username` naming a different account is reported as stale and ignored. Repeat `--channel` to join multiple Twitch IRC channels. The token needs `chat:read`; sending from the composer also needs `chat:edit`. Before starting live IRC, `twi chat` validates token identity, expiry, and required scopes when Twitch OAuth validation is reachable. Definitive invalid-token states stop startup with redacted guidance; transient validation failures warn and continue to IRC authentication. Username/token credentials can come from environment variables, the flat config file, or the private credential store created by `twi login` on supported Unix platforms. Unix builds use a restrictive credential file. Non-Unix builds keep saved credentials disabled; use environment variables or a private flat config file there. Environment and flat config values take precedence over saved credentials. CLI flags currently override channels and config path, not username or token values.
+Live mode needs an IRC OAuth token and at least one channel. You do **not** need to configure a username: twi authenticates as whichever account the token belongs to, because Twitch requires the IRC login to be the token's own account. The channels you join are independent of that account — you can sign in as one user and read or send in any channel you aren't banned from. A `twitch_username` naming a different account is reported as stale and ignored. Repeat `--channel`, or pass a comma-separated `--channels a,b`, to join multiple Twitch IRC channels; the two accumulate, so they can be mixed. Starting with no channel at all is supported and lands on an empty state that `/channels` fills. The token needs `chat:read`; sending from the composer also needs `chat:edit`. Before starting live IRC, `twi chat` validates token identity, expiry, and required scopes when Twitch OAuth validation is reachable. Definitive invalid-token states stop startup with redacted guidance; transient validation failures warn and continue to IRC authentication. Username/token credentials can come from environment variables, the flat config file, or the private credential store created by `twi login` on supported Unix platforms. Unix builds use a restrictive credential file. Non-Unix builds keep saved credentials disabled; use environment variables or a private flat config file there. Environment and flat config values take precedence over saved credentials. CLI flags currently override channels and config path, not username or token values.
 
 The setup command writes non-secret config values and can hand off to login:
 
@@ -206,6 +210,8 @@ export TWI_TWITCH_OAUTH_TOKEN="<oauth token from Twitch>"
 
 go run ./cmd/twi chat --channel somechannel
 go run ./cmd/twi chat --channel onechannel --channel anotherchannel
+go run ./cmd/twi chat --channels onechannel,anotherchannel
+go run ./cmd/twi chat   # no channel: opens the empty state, then /channels
 ```
 
 The shorter dotenv-style aliases also work:
@@ -229,6 +235,7 @@ If Twitch IRC rejects the access token during login, `twi` will try one OAuth re
 - `channel:manage:broadcast` (view/edit title, category, language, and tags on the Stream Info tab; create/list stream markers on the Misc tab)
 - `moderator:read:followers` (follower count in the status line)
 - `channel:read:subscriptions` (subscriber count in the status line)
+- `user:read:follows` (autocomplete the `/channels` picker from the channels you follow)
 - `clips:edit` (create clips of your active stream with the `/clip` chat command)
 
 The command needs a Twitch app client ID and client secret from environment variables or the flat config file:
@@ -282,19 +289,19 @@ Do not paste real tokens into commits, screenshots, issue comments, terminal rec
 | Area | Status | Current behavior |
 | --- | --- | --- |
 | Mock chat | Ready | `twi chat --mock [--channel demo]` runs without Twitch credentials or network access. |
-| Multi-channel live IRC read/send | Partial | `twi chat --channel <channel> [--channel other]` validates startup credentials when Twitch OAuth validation is reachable, then can read, send, reply, and send `/me` actions for configured channels when env/config credentials or saved credentials on supported Unix platforms are present; broader live manual evidence remains future work. |
+| Multi-channel live IRC read/send | Partial | `twi chat --channel <channel> [--channel other]` or `--channels a,b` (and `twi chat` with no channel at all, which starts empty and waits for `/channels`) validates startup credentials when Twitch OAuth validation is reachable, then can read, send, reply, and send `/me` actions for configured channels when env/config credentials or saved credentials on supported Unix platforms are present; broader live manual evidence remains future work. |
 | Config commands | Ready | `twi config show` prints effective flat config with secrets redacted; `twi config path` shows the default config path. |
 | Diagnostics | Ready | `twi doctor` checks config path, credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, username mismatch, Twitch IRC reachability, terminal hints, cache writability/pruning, and feature modes. Live chat also preflights token validation before IRC startup when validation is reachable. |
 | Debug logging | Ready | Redacted JSON debug logs can be enabled with `debug_logging = true`, `TWI_DEBUG_LOG=true`, or `--debug-log` on chat, login, and doctor. Logs use curated fields for auth, transport, send, asset, and render diagnostics instead of raw struct or raw tag dumps. |
 | Avatar metadata | Partial | When live chat runs with `avatar_mode = "initials"` (the default) plus Twitch API credentials and a writable cache, visible author display names are batched through Helix Get Users to render a per-author `[XY]` initials chip; `avatar_mode = "off"` hides the chip. There is no image rendering path. |
 | Emote/badge metadata | Partial | Live startup can wire Twitch IRC fragment data for emotes and Helix-backed fallback emote/badge metadata behind config, cache, credential, and terminal gates, always rendering compact badge labels (for example `[mod]`, `[sub]`, `[vip]`) and matched emote text tokens (for example `Kappa`). |
 | Login/setup | Partial | `twi setup` creates or updates non-secret flat config values and can hand off to `twi login`; on supported Unix builds, `twi login` saves through the restrictive credential-file fallback. Non-Unix builds keep env/config credentials as the supported path. |
-| Multi-channel UX | Partial | Messages, unread counts, scroll, drafts, replies, sends, and local view filters are per-channel. Normal and wide terminals show a keyboard-first channel sidebar with connection indicators, unread counts, and filter markers; `ctrl+p` opens a keyboard command palette for common actions, panel toggles, channel switching, local filters, local clear, and live reconnect restart. Optional mouse support can scroll chat, click channels, focus the composer, and select messages. Twitch `USERNOTICE` events such as raids carry normalized event IDs; when the relevant chat is not active, the terminal is blurred, or another panel has focus, `twi` attempts a desktop system notification, falls back to a terminal bell, and shows a status-line notification summary. Selected messages can be inspected in a redacted diagnostics panel even when filters hide them from the chat view. Narrow terminals collapse channel state into the status line. Twitch IRC connect/reconnect/disconnect callbacks are connection-level and are shown on configured channel states rather than as independent per-channel transport events. Manual reconnect tears down the active live IRC transport before creating a fresh one while preserving per-channel UI state. |
+| Multi-channel UX | Partial | Channels open and close at runtime through the `/channels` picker (`space` `c`), which autocompletes from your Twitch follow list when `user:read:follows` is granted and accepts any typed name otherwise; opening joins on the live IRC connection without a reconnect. Messages, unread counts, scroll, drafts, replies, sends, and local view filters are per-channel. Normal and wide terminals show a keyboard-first channel sidebar with connection indicators, unread counts, and filter markers; `ctrl+p` opens a keyboard command palette for common actions, panel toggles, channel switching, local filters, local clear, and live reconnect restart. Optional mouse support can scroll chat, click channels, focus the composer, and select messages. Twitch `USERNOTICE` events such as raids carry normalized event IDs; when the relevant chat is not active, the terminal is blurred, or another panel has focus, `twi` attempts a desktop system notification, falls back to a terminal bell, and shows a status-line notification summary. Selected messages can be inspected in a redacted diagnostics panel even when filters hide them from the chat view. Narrow terminals collapse channel state into the status line. Twitch IRC connect/reconnect/disconnect callbacks are connection-level and are shown on configured channel states rather than as independent per-channel transport events. Manual reconnect tears down the active live IRC transport before creating a fresh one while preserving per-channel UI state. |
 | Text-only asset rendering | Ready | Avatars, badges, emotes, and emoji always render as text: `[XY]` initials chips (or nothing when `avatar_mode = "off"`), compact badge labels, matched emote text tokens, and native Unicode emoji glyphs. There is no image decode, cache, or terminal-graphics rendering path; missing metadata, missing credentials, or lookup failures simply keep the text fallback. |
 | Theming | Ready | 13 built-in presets (Claude, Codex, Btop, Nord, Dracula, Gruvbox, Solarized Dark, Monokai, One Dark, Tokyo Night, Catppuccin Mocha, Rose Pine, Mono) plus a custom hex palette apply across every widget. The application canvas is derived slightly darker than the selected background, while icon-titled panes use the raised surface color, quiet frames, independently colored left rails, and shared-clock focus gradients on auxiliary panes. The Chat pane frame and title remain static. Consecutive messages from the same author share one surface/rail group; a subtle horizontal rule and alternating group surface appear only when the visible author changes. Each username also keeps a stable hash-derived readable color. The borderless composer uses a raised surface, focus rail, block cursor, and `Chat · #channel · state` footer inspired by modern coding TUIs. `ctrl+t` opens a btop-style full-screen theme page that lists every preset with a swatch strip of its own colors, live-previews the highlighted theme as you move the selection, and persists it with `enter` (`esc` reverts); `twi profile list\|show\|set` manages the same setting from the CLI. |
 | Animation | Ready | A shared ~10fps clock (disabled when `animation_mode = "off"`) drives seamless mirrored gradients, pulsing LIVE/REC and incoming-message rails, typewriter chat and command-palette reveals, and a staged ~2s block-logo startup sequence (skippable by any keypress). Moving gradients travel through a `start → end → start` palette so either side wraps without a visible color seam. The Chat pane border/title are deliberately excluded. Reduced mode slows decorative gradient motion. |
 | Live status telemetry | Partial | The status bar shows real Twitch broadcast status via Helix "Get Streams" polling (LIVE + elapsed on-air time + viewer count) when `stream_status_mode` and Twitch API credentials allow it, otherwise OFFLINE; follower and subscriber counts poll Helix "Get Channel Followers"/"Get Broadcaster Subscriptions" every 2 minutes when credentials and the `moderator:read:followers`/`channel:read:subscriptions` scopes allow it; REC reflects `debug_logging`; CPU%/memory/FPS are twi's own process stats; "chat" bitrate is derived chat-message throughput, not stream encode bitrate. `--mock` simulates a fixed demo LIVE state. |
-| Emote autocomplete | Partial | `ctrl+e` opens a searchable emote/emoji picker and a persistent quick-select row (third `tab` stop). A built-in emoji set is always available; real Twitch global/channel emotes merge into it when `emote_autocomplete_mode` and credentials allow. Mock mode demonstrates the combined workflow and emoji-rich messages without network access. |
+| Emote autocomplete | Partial | `ctrl+e` opens a searchable emote/emoji picker. A built-in emoji set is always available; real Twitch global/channel emotes merge into it when `emote_autocomplete_mode` and credentials allow. Mock mode demonstrates the combined workflow and emoji-rich messages without network access. |
 | Activity log column | Partial | On wide terminals (140+ columns), the Chat tab shows a right-hand Activity column alongside chat (and the optional channel sidebar) covering every alert twi can currently detect over IRC and Helix polling: raids, subs/resubs/gift subs/gift upgrades, announcements, charity donations, and moderation actions from Twitch IRC events; cheers (detected from a chat message's "bits" tag, since Twitch sends cheers as ordinary PRIVMSGs, not a USERNOTICE); new followers (detected by polling Get Channel Followers and diffing against previously seen followers, since Twitch only pushes follow events through EventSub, not IRC or any webhook twi can receive); stream went-live/went-offline transitions (detected by polling Get Streams, the same status the LIVE/OFFLINE badge uses); and clips created with `/clip`. Alerts that only exist through EventSub (hype train, polls/predictions, channel-point redemption details) aren't available since twi has no EventSub/WebSocket connection. Hidden below 100 columns and on the Stream Info/Misc tabs. |
 | `/clip` command | Partial | Typing `/clip`, `/clip T-5m`, or `/clip T-4m T-2m` in the composer creates a clip of the current stream through Helix "Create Clip" when credentials, the `clips:edit` scope, and being live all allow it; the API has no start/end/duration parameter, so the `T-` offsets are only echoed back next to the clip's edit URL as a trim reminder, never sent to Twitch. |
 
@@ -317,23 +324,38 @@ is only claimed when that document records a complete credential set.
 | `ctrl+y` | Toggle the tinted background chip behind emotes and emoji. Saved to the config file. |
 | `ctrl+n` | Toggle full usernames (`DisplayName (login)`). Saved to the config file. |
 | `@` + `tab` | Complete a chat username. Type `@` and a prefix, `up`/`down` to pick, `tab` to insert, `esc` to dismiss. |
-| `tab` | Cycle focus between chat, composer, and the emotes quick-select row. |
-| `left` / `right` | Move the emotes quick-select row's highlighted emote (when it has focus). |
+| `i` / `o` / `a` | Focus the composer and start typing (vim insert keys). |
+| `esc` | Leave the composer for the chat view, keeping the draft; from chat, close inspect mode, cancel reply mode, or close an open overlay. |
+| `j` / `k` | Select the next/previous message (chat focus) or move the sidebar highlight. |
+| `space` `e` | Show or hide the channel sidebar. |
+| `space` `c` | Open the `/channels` picker. |
+| `space` `x` | Close the active channel. |
+| `space` `i` | Open or close the selected-message inspect panel (same as `K`). |
+| `tab` | Cycle focus between chat, the composer, and the channel sidebar when it is visible. |
 | `?` | Toggle expanded help. |
 | `pgup` / `pgdown` | Scroll chat. |
 | `up` / `down` | Select messages for reply or inspect mode (chat focus), or navigate an open overlay. |
 | `1` / `2` / `3` / `4` | Toggle local filters for mentions, broadcaster/mod/VIP messages, notices, and errors from chat focus. |
 | `0` | Reset active-channel message filters. |
 | `r` | Reply to the selected message. |
-| `i` | Open or close the selected-message inspect panel. |
+| `K` | Open or close the selected-message inspect panel. |
 | `ctrl+l` | Clear the active channel's local chat history. |
 | `ctrl+r` | Restart the active live chat source when supported, preserving channel history and drafts. |
-| `esc` | Close inspect mode, cancel reply mode, or close an open overlay. |
-| `enter` | Send from the composer in live mode, or insert the selected emote when the emotes row/picker has focus. |
+| `enter` | Send from the composer in live mode, or run the highlighted entry in an open picker. |
 | `/me does a thing` | Send a Twitch action message. |
+| `/channels`, `/channels somechannel` | Open the channel picker, or open a named channel directly (see [Channels](#channels)). |
 | `/clip`, `/clip T-5m`, `/clip T-4m T-2m` | Create a clip of the current stream (see [Clip Command](#clip-command)). |
 
-Mouse support is enabled by default. Set `enable_mouse = false` or `TWI_ENABLE_MOUSE=false` to keep terminal mouse reporting disabled; all workflows remain available from the keyboard.
+With the channel sidebar focused, `j`/`k` move the highlight, `enter` or `l`
+switches to the highlighted channel, `x` closes it, and `h` or `esc` returns to
+chat.
+
+Mouse support is enabled by default: click a tab to switch screens, click a
+channel in the sidebar to switch to it (or its `✕` to close it), click a row in
+the command palette or a picker to run it, click the composer or a message to
+focus and reply, and scroll chat with the wheel. Set `enable_mouse = false` or
+`TWI_ENABLE_MOUSE=false` to keep terminal mouse reporting disabled; all
+workflows remain available from the keyboard.
 
 Terminal focus reporting is enabled for interactive chat sessions. Terminals that
 do not report focus still behave as focused, so system-event notifications avoid
@@ -341,6 +363,35 @@ extra alerts unless another in-app panel or channel has the user's attention.
 Desktop notifications are best effort and dependency-free: Linux uses
 `notify-send`, macOS uses `osascript`, Windows uses PowerShell toast APIs, and
 unsupported or unavailable notification commands fall back to a terminal bell.
+
+<a id="channels"></a>
+
+## 📡 Channels
+
+Channels can be opened and closed while `twi` is running; the set you start
+with (`--channel`, `--channels`, or `default_channels`) is only a starting
+point, and starting with none is fine.
+
+- **Open one**: type `/channels` in the composer, or press `space` `c`. The
+  picker lists the channels already open, then the channels you follow, and
+  finally the name you typed verbatim — so an unfollowed channel is still one
+  `enter` away. `/channels somechannel` skips the picker entirely.
+- **Autocomplete**: the follow list comes from Twitch Helix "Get Followed
+  Channels" and needs the `user:read:follows` scope. Tokens issued before that
+  scope was requested keep working — the picker says so inline and falls back
+  to open and configured channels. Run `twi login` again to grant it. The list
+  is fetched once per session.
+- **Close one**: press `space` `x` for the active channel, or focus the
+  sidebar (`tab`, or `space` `e` then `tab`) and press `x` on the highlighted
+  row. With a mouse, click the `✕` on the highlighted sidebar row. Closing the
+  last channel returns to the empty state rather than exiting.
+- **Sidebar**: `space` `e` shows or hides the channel list. It appears
+  automatically once a second channel is open and the terminal is wide enough;
+  the toggle overrides that for the session.
+
+Opening a channel joins it on the existing IRC connection, so no reconnect is
+needed; closing one parts it. Both are also reflected in the reconnect list, so
+a manual `ctrl+r` rejoins exactly what is open.
 
 ## 📊 Stream Info Tab
 
@@ -575,6 +626,7 @@ go build -o /tmp/twi-validation ./cmd/twi
 go run ./cmd/twi --help
 go run ./cmd/twi chat --mock --channel example
 go run ./cmd/twi chat --mock --channel one --channel two
+go run ./cmd/twi chat --mock --channels one,two
 go run ./cmd/twi doctor
 go run ./cmd/twi config show
 git diff --check origin/main...HEAD

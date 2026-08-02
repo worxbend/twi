@@ -5,8 +5,10 @@
 # used by the README. Copying rather than duplicating keeps one source of truth
 # for the banner, logo, and generated screenshots.
 #
-# Regenerate the screenshots themselves with:
+# Regenerate the generated SVG screenshots with:
 #   TWI_WRITE_SCREENSHOTS=1 go test ./internal/app -run TestWriteDocsScreenshots
+# The live-*.png captures are hand-taken terminal screenshots of a real Twitch
+# session, so that test does not touch them.
 #
 # Usage: scripts/build-site.sh [output-dir]   (default: _site)
 set -euo pipefail

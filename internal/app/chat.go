@@ -27,6 +27,16 @@ type MembershipSource interface {
 	Memberships() <-chan twitch.MembershipEvent
 }
 
+// ChannelJoiner is an optional ChatClient capability: a transport that can
+// join and part channels after connecting exposes it here, so channels
+// opened from the /channels picker start receiving messages without a
+// reconnect. Transports without it (the mock source, fakes) still work - the
+// model simply tracks the channel locally.
+type ChannelJoiner interface {
+	JoinChannel(channel string) error
+	PartChannel(channel string) error
+}
+
 // UserStateSource is an optional ChatClient capability exposing Twitch
 // USERSTATE for the authenticated user.
 //

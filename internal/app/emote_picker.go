@@ -8,8 +8,8 @@ import (
 )
 
 // emotePickerState mirrors commandPaletteState's shape: a searchable,
-// keyboard-navigable overlay list, opened with Ctrl+E for finding an emote
-// not in the always-visible quick-select row (see emotesView in mock.go).
+// keyboard-navigable overlay list, opened with Ctrl+E for finding and
+// inserting an emote without leaving the composer.
 type emotePickerState struct {
 	open     bool
 	query    string

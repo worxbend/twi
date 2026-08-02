@@ -39,6 +39,34 @@ func (m mockShellModel) debugSendComplete(send queuedComposerSend, result SendRe
 	m.debugLogger.Log(context.Background(), "app.send.complete", attrs...)
 }
 
+func (m mockShellModel) debugChannelOpened(channel string) {
+	m.debugLogger.Log(context.Background(), "app.channel.opened",
+		slog.String("channel", channel),
+		slog.Int("open_channels", len(m.channels.channelNames())),
+	)
+}
+
+func (m mockShellModel) debugChannelClosed(channel string) {
+	m.debugLogger.Log(context.Background(), "app.channel.closed",
+		slog.String("channel", channel),
+		slog.Int("open_channels", len(m.channels.channelNames())),
+	)
+}
+
+func (m mockShellModel) debugChannelJoinFailed(channel string, err error) {
+	m.debugLogger.Log(context.Background(), "app.channel.join_failed",
+		slog.String("channel", channel),
+		slog.String("error", err.Error()),
+	)
+}
+
+func (m mockShellModel) debugChannelPartFailed(channel string, err error) {
+	m.debugLogger.Log(context.Background(), "app.channel.part_failed",
+		slog.String("channel", channel),
+		slog.String("error", err.Error()),
+	)
+}
+
 func (c *LiveChatClient) debugLiveEvent(event string, attrs ...slog.Attr) {
 	if c == nil {
 		return

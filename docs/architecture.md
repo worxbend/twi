@@ -32,7 +32,7 @@ Live chat starts in `internal/cli`, which loads config, resolves credentials, va
 
 `internal/twitch` converts IRC callbacks into normalized chat messages, notices, moderation events, room state, connection state, and send results. Raw tags are retained for redacted diagnostics, not for main chat rendering.
 
-`internal/app` stores per-channel history, unread counts, composer drafts, reply context, selected-message inspect state, send status, scroll offsets, local filters, and connection state. Channel switching changes the active view without losing per-channel state.
+`internal/app` stores per-channel history, unread counts, composer drafts, reply context, selected-message inspect state, send status, scroll offsets, local filters, and connection state. Channel switching changes the active view without losing per-channel state. The open channel set is dynamic: the `/channels` picker adds and the sidebar removes channels at runtime, joining and parting through the optional `ChannelJoiner` transport capability rather than reconnecting, and an empty set is a normal state rather than an error.
 
 `internal/render` converts normalized messages into width-bounded rows. It handles timestamps, badges, usernames, mentions, replies, action messages, notices, deleted messages, emoji fallbacks, emote-token fallbacks, avatar initials, and image placeholder cells. Username color is a deterministic, case-normalized hash of the Twitch login (falling back to display name or author ID), selected for readable contrast against both message surfaces; the same author therefore keeps the same distinct color without UI-owned mutable color state.
 

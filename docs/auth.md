@@ -163,6 +163,7 @@ The command requests these scopes by default:
 - `moderator:read:followers` (status line: follower count)
 - `channel:read:subscriptions` (status line: subscriber count)
 - `clips:edit` (`/clip` chat command: create a clip of the active stream)
+- `user:read:follows` (`/channels` picker: autocomplete from the channels you follow)
 
 On supported Unix builds, the command saves successful login results through
 the restrictive credential file fallback. On non-Unix builds, the command stops
@@ -363,6 +364,11 @@ readiness):
 unrelated to IRC readiness):
 
 - `clips:edit`
+
+`/channels` picker scope (autocomplete from your follow list; also unrelated
+to IRC readiness — without it the picker still accepts any typed name):
+
+- `user:read:follows`
 
 Future EventSub or API chat work may require scopes such as:
 

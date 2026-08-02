@@ -149,7 +149,7 @@ func TestMockShellFocusHelpAndComposerInput(t *testing.T) {
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
 	model = updated.(mockShellModel)
-	if got, want := model.focus, mockFocusEmotes; got != want {
+	if got, want := model.focus, mockFocusChat; got != want {
 		t.Fatalf("focus after second tab = %v, want %v", got, want)
 	}
 
@@ -162,12 +162,6 @@ func TestMockShellFocusHelpAndComposerInput(t *testing.T) {
 	if !strings.Contains(model.View(), "pgup/pgdn") {
 		t.Fatalf("expanded help missing page key hint:\n%s", model.View())
 	}
-
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
-	model = updated.(mockShellModel)
-	if got, want := model.focus, mockFocusChat; got != want {
-		t.Fatalf("focus after third tab = %v, want %v", got, want)
-	}
 	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 	if cmd == nil {
 		t.Fatal("q from chat focus returned nil command, want tea.Quit")
@@ -178,7 +172,7 @@ func TestMockShellPageKeysScrollViewport(t *testing.T) {
 	model := newMockShellModel("example", config.Default())
 	model.activeChannelState().messages = numberedMockMessages("example", 12)
 
-	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 16})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 13})
 	model = updated.(mockShellModel)
 	bottom := model.View()
 	if !strings.Contains(bottom, "message-11") {
@@ -274,8 +268,13 @@ func TestMockShellMouseEventsWhenEnabled(t *testing.T) {
 	if got, want := model.activeChannelName(), "beta"; got != want {
 		t.Fatalf("active channel after sidebar click = %q, want %q", got, want)
 	}
-	if got, want := model.focus, mockFocusChat; got != want {
+	// Clicking a channel also focuses the channel list, so the close
+	// affordance appears and j/k keep working on the list.
+	if got, want := model.focus, mockFocusSidebar; got != want {
 		t.Fatalf("focus after sidebar click = %v, want %v", got, want)
+	}
+	if got, want := model.sidebarSelected, 1; got != want {
+		t.Fatalf("sidebar selection after click = %d, want %d", got, want)
 	}
 
 	composerY := layout.tabBarHeight + layout.statusHeight + layout.chatHeight + 1
@@ -385,7 +384,7 @@ func TestInspectPanelShowsSelectedMessageMetadataAndRedactsDiagnostics(t *testin
 	model.activeChannelState().messages = []twitch.ChatMessage{message}
 	model.activeChannelState().replyTo = replyContextFromMessage(message)
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
 	model = updated.(mockShellModel)
 	if cmd != nil {
 		t.Fatalf("inspect toggle returned command %#v, want nil", cmd)
@@ -433,7 +432,7 @@ func TestInspectPanelOpenClosePreservesComposerSelectionReplyAndScroll(t *testin
 	model.focus = mockFocusChat
 
 	beforeReply := *state.replyTo
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
 	model = updated.(mockShellModel)
 	if cmd != nil {
 		t.Fatalf("open inspect returned command %#v, want nil", cmd)
@@ -1936,7 +1935,7 @@ func TestEmotePickerOpensFiltersExecutesAndCloses(t *testing.T) {
 		t.Fatal("emotePicker.open = false, want true")
 	}
 	view := model.View()
-	for _, want := range []string{"Emote search", "Kappa", "PogChamp"} {
+	for _, want := range []string{"Emote search", "Kappa"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("emote picker view missing %q:\n%s", want, view)
 		}
@@ -3035,7 +3034,7 @@ func TestSplashClearsAfterDeadlineWithoutKeypress(t *testing.T) {
 	}
 }
 
-func TestCycleFocusIncludesEmotesRow(t *testing.T) {
+func TestCycleFocusAlternatesChatAndComposer(t *testing.T) {
 	model := newMockShellModel("alpha", config.Default())
 	if model.focus != mockFocusChat {
 		t.Fatalf("initial focus = %v, want chat", model.focus)
@@ -3045,64 +3044,20 @@ func TestCycleFocusIncludesEmotesRow(t *testing.T) {
 		t.Fatalf("focus after 1 cycle = %v, want composer", model.focus)
 	}
 	model.cycleFocus()
-	if model.focus != mockFocusEmotes {
-		t.Fatalf("focus after 2 cycles = %v, want emotes", model.focus)
-	}
-	model.cycleFocus()
 	if model.focus != mockFocusChat {
-		t.Fatalf("focus after 3 cycles = %v, want chat", model.focus)
+		t.Fatalf("focus after 2 cycles = %v, want chat", model.focus)
 	}
 }
 
-func TestEmotesViewRendersQuickSelectStripAndHighlightsSelection(t *testing.T) {
+// The emotes quick-select strip was removed from the dashboard; Ctrl+E is the
+// only surface for browsing emotes, so the main screen must stay clear of them.
+func TestMainScreenHasNoPermanentEmotesSection(t *testing.T) {
 	model := newMockShellModel("alpha", config.Default())
 	model.width, model.height = 88, 22
-	model.focus = mockFocusEmotes
 
 	view := model.View()
-	if !strings.Contains(view, "Kappa") || !strings.Contains(view, "PogChamp") {
-		t.Fatalf("emotes row missing sample entries:\n%s", view)
-	}
-	if !strings.Contains(view, "[Kappa]") {
-		t.Fatalf("emotes row missing highlighted selection for first entry:\n%s", view)
-	}
-}
-
-func TestEmotesFocusLeftRightMovesSelectionAndWraps(t *testing.T) {
-	model := newMockShellModel("alpha", config.Default())
-	model.width, model.height = 88, 22
-	model.focus = mockFocusEmotes
-
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRight})
-	model = updated.(mockShellModel)
-	if model.emoteSelected != 1 {
-		t.Fatalf("emoteSelected after right = %d, want 1", model.emoteSelected)
-	}
-
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyLeft})
-	model = updated.(mockShellModel)
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyLeft})
-	model = updated.(mockShellModel)
-	entries := model.activeEmoteEntries()
-	if model.emoteSelected != len(entries)-1 {
-		t.Fatalf("emoteSelected after wrapping left = %d, want %d", model.emoteSelected, len(entries)-1)
-	}
-}
-
-func TestEmotesFocusEnterInsertsSelectedEmoteIntoComposer(t *testing.T) {
-	model := newMockShellModel("alpha", config.Default())
-	model.width, model.height = 88, 22
-	model.focus = mockFocusEmotes
-
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRight})
-	model = updated.(mockShellModel)
-	entries := model.activeEmoteEntries()
-	want := entries[1].Name
-
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
-	if got := model.activeChannelState().composerText; got != want+" " {
-		t.Fatalf("composer text after emote insert = %q, want %q", got, want+" ")
+	if strings.Contains(view, "Emotes") || strings.Contains(view, "PogChamp") {
+		t.Fatalf("dashboard still renders an emotes section:\n%s", view)
 	}
 }
 
@@ -3175,8 +3130,6 @@ func TestScheduleEmoteIndexLookupResolvesAndSkipsWhenCached(t *testing.T) {
 
 func TestApplyEmoteIndexResultPreservesVisibleSelectionsByName(t *testing.T) {
 	model := newLiveShellModelWithClockAndOptions("alpha", config.Default(), NewFakeChatClient(1), nil, ClientOptions{})
-	model.focus = mockFocusEmotes
-	model.emoteSelected = 2
 	model.emotePicker = emotePickerState{open: true, selected: 4}
 
 	model.applyEmoteIndexResult(emoteIndexResolvedMsg{
@@ -3187,10 +3140,6 @@ func TestApplyEmoteIndexResultPreservesVisibleSelectionsByName(t *testing.T) {
 		},
 	})
 
-	quickEntries := model.activeEmoteEntries()
-	if got := quickEntries[model.emoteSelected].Name; got != "🔥" {
-		t.Fatalf("quick selection after resolution = %q, want 🔥", got)
-	}
 	pickerEntries := model.visibleEmotePickerEntries()
 	if got := pickerEntries[model.emotePicker.selected].Name; got != "🎉" {
 		t.Fatalf("picker selection after resolution = %q, want 🎉", got)

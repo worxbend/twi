@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/rivo/uniseg"
 	"github.com/worxbend/twi/internal/config"
 )
 
@@ -29,64 +28,20 @@ func leftClick(model mockShellModel, x, y int) mockShellModel {
 	return updated.(mockShellModel)
 }
 
-// emotesStripRow returns a Y coordinate inside the emotes strip for the
-// current layout, so the test follows the real geometry instead of a
-// hard-coded row that silently drifts when the layout changes.
-func emotesStripRow(model mockShellModel) int {
+// composerRow returns a Y coordinate inside the composer for the current
+// layout, so the test follows the real geometry instead of a hard-coded row
+// that silently drifts when the layout changes.
+func composerRow(model mockShellModel) int {
 	layout := model.layout()
-	top := layout.tabBarHeight + layout.statusHeight + layout.chatHeight + layout.composerHeight
-	if layout.emotesFramed {
-		return top + 1
-	}
-	return top
-}
-
-func TestClickFocusesEmotesStrip(t *testing.T) {
-	model := mouseFocusModel(t)
-	if model.layout().emotesHeight <= 0 {
-		t.Skip("emotes strip not visible at this size")
-	}
-	model.focus = mockFocusChat
-
-	model = leftClick(model, 2, emotesStripRow(model))
-	if model.focus != mockFocusEmotes {
-		t.Fatalf("focus after clicking the emotes strip = %v, want emotes", model.focus)
-	}
-}
-
-func TestClickSelectsEmoteUnderCursor(t *testing.T) {
-	model := mouseFocusModel(t)
-	entries := model.activeEmoteEntries()
-	if model.layout().emotesHeight <= 0 || len(entries) < 3 {
-		t.Skip("emotes strip not visible or too short at this size")
-	}
-	model.focus = mockFocusChat
-
-	// Walk the rendered run to find where the third entry starts. The strip
-	// renders unbracketed names while unfocused, which is the state here.
-	// Offsets are in display cells, not runes - the emote list contains
-	// double-width emoji.
-	x := 2
-	for _, entry := range entries[:2] {
-		x += uniseg.StringWidth(entry.Name) + 1
-	}
-
-	model = leftClick(model, x, emotesStripRow(model))
-	if model.focus != mockFocusEmotes {
-		t.Fatalf("focus = %v after clicking an emote, want emotes", model.focus)
-	}
-	if got := model.clampedEmoteSelected(entries); got != 2 {
-		t.Fatalf("selected emote = %d (%q), want index 2 (%q)", got, entries[got].Name, entries[2].Name)
-	}
+	return layout.tabBarHeight + layout.statusHeight + layout.chatHeight
 }
 
 func TestClickFocusesComposerAndChat(t *testing.T) {
 	model := mouseFocusModel(t)
 	layout := model.layout()
 
-	composerRow := layout.tabBarHeight + layout.statusHeight + layout.chatHeight
 	model.focus = mockFocusChat
-	model = leftClick(model, 4, composerRow)
+	model = leftClick(model, 4, composerRow(model))
 	if model.focus != mockFocusComposer {
 		t.Fatalf("focus after clicking the composer = %v, want composer", model.focus)
 	}
@@ -107,7 +62,7 @@ func TestMouseFocusIgnoredWhenMouseDisabled(t *testing.T) {
 	model = updated.(mockShellModel)
 	model.focus = mockFocusChat
 
-	model = leftClick(model, 2, emotesStripRow(model))
+	model = leftClick(model, 4, composerRow(model))
 	if model.focus != mockFocusChat {
 		t.Fatalf("focus changed to %v with mouse support disabled", model.focus)
 	}

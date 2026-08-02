@@ -111,6 +111,7 @@ saves them **privately without printing them**. It requests these scopes:
 | `moderator:read:followers` | Follower count in the status line |
 | `channel:read:subscriptions` | Subscriber count in the status line |
 | `clips:edit` | `/clip` — create a clip of the active stream |
+| `user:read:follows` | `/channels` picker autocomplete from your follow list |
 
 On supported Unix platforms the tokens are saved to a restrictive private
 credential file (`0700` directory, `0600` file, symlink rejection, no-follow

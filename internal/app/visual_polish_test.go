@@ -125,7 +125,7 @@ func TestAnimatingMessageRailChangesWithSharedFrame(t *testing.T) {
 	}
 }
 
-func TestMockQuickSelectIncludesExpandedEmojiSet(t *testing.T) {
+func TestMockEmotePickerIncludesExpandedEmojiSet(t *testing.T) {
 	entries := sampleEmoteEntries()
 	names := make(map[string]bool, len(entries))
 	for _, entry := range entries {
@@ -133,7 +133,7 @@ func TestMockQuickSelectIncludesExpandedEmojiSet(t *testing.T) {
 	}
 	for _, want := range []string{"✨", "💜", "🔥", "😂", "🎉", "👀", "🚀", "💬", "🌈", "⚡"} {
 		if !names[want] {
-			t.Fatalf("quick-select entries missing emoji %q", want)
+			t.Fatalf("emote picker entries missing emoji %q", want)
 		}
 	}
 }

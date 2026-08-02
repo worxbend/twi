@@ -30,6 +30,7 @@ const (
 	activityCheer        activityKind = "cheer"
 	activityStreamStatus activityKind = "stream_status"
 	activityMembership   activityKind = "membership"
+	activityChannel      activityKind = "channel"
 )
 
 // membershipActivityBurst is the number of membership entries twi will log in

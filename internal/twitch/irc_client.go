@@ -65,6 +65,8 @@ func (r OAuthRefresh) Redactor() auth.Redactor {
 type ircSession interface {
 	Connect() error
 	Disconnect() error
+	Join(channels ...string)
+	Depart(channel string)
 	Say(channel, text string)
 	Reply(channel, parentMsgID, text string)
 	OnConnect(func())
@@ -98,7 +100,10 @@ type IRCClient struct {
 	closeOnce sync.Once
 }
 
-var _ ChatClient = (*IRCClient)(nil)
+var (
+	_ ChatClient    = (*IRCClient)(nil)
+	_ ChannelJoiner = (*IRCClient)(nil)
+)
 
 // NewIRCClient creates a Twitch IRC client without opening the network
 // connection. Call Connect to start the read loop.
@@ -112,10 +117,10 @@ func NewIRCClient(cfg IRCConfig) (*IRCClient, error) {
 		return nil, errors.New("missing Twitch OAuth token")
 	}
 
+	// Zero channels is a supported start: `twi chat` without
+	// --channel/--channels connects to Twitch and waits for the /channels
+	// picker to join the first one.
 	channels := normalizeIRCChannels(cfg.Channels)
-	if len(channels) == 0 {
-		return nil, errors.New("missing Twitch channel")
-	}
 
 	buffer := cfg.Buffer
 	if buffer <= 0 {
@@ -312,6 +317,56 @@ func (c *IRCClient) Reply(ctx context.Context, channel, parentMessageID, text st
 	}
 	c.currentClient().Reply(channel, parentMessageID, text)
 	return nil
+}
+
+// Join subscribes to additional channels on the live connection. The channel
+// list is also recorded so a reconnect rejoins everything currently open,
+// not just the channels configured at startup.
+func (c *IRCClient) Join(channels ...string) error {
+	normalized := normalizeIRCChannels(channels)
+	if len(normalized) == 0 {
+		return errors.New("missing Twitch channel")
+	}
+	c.mu.Lock()
+	for _, channel := range normalized {
+		if !containsChannel(c.channels, channel) {
+			c.channels = append(c.channels, channel)
+		}
+	}
+	c.mu.Unlock()
+	c.currentClient().Join(normalized...)
+	c.logger.Log(context.Background(), "twitch.irc.join", slog.Int("channel_count", len(normalized)))
+	return nil
+}
+
+// Depart leaves a channel and drops it from the reconnect list.
+func (c *IRCClient) Depart(channel string) error {
+	normalized := normalizeIRCChannels([]string{channel})
+	if len(normalized) == 0 {
+		return errors.New("missing Twitch channel")
+	}
+	target := normalized[0]
+	c.mu.Lock()
+	remaining := make([]string, 0, len(c.channels))
+	for _, existing := range c.channels {
+		if existing != target {
+			remaining = append(remaining, existing)
+		}
+	}
+	c.channels = remaining
+	c.mu.Unlock()
+	c.currentClient().Depart(target)
+	c.logger.Log(context.Background(), "twitch.irc.depart", slog.String("channel", target))
+	return nil
+}
+
+func containsChannel(channels []string, channel string) bool {
+	for _, existing := range channels {
+		if existing == channel {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *IRCClient) Close() error {

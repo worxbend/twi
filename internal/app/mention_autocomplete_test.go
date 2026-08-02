@@ -146,8 +146,8 @@ func TestMentionAutocompleteLeavesKeysAloneWhenClosed(t *testing.T) {
 	model = typeInComposer(model, "plain text")
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
 	model = updated.(mockShellModel)
-	if model.focus != mockFocusEmotes {
-		t.Fatalf("focus after second tab = %v, want emotes", model.focus)
+	if model.focus != mockFocusChat {
+		t.Fatalf("focus after second tab = %v, want chat", model.focus)
 	}
 }
 

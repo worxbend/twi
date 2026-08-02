@@ -42,7 +42,13 @@ docker compose run --rm mock
 | Key | Action |
 | --- | --- |
 | `ctrl+p` | Open or close the command palette. |
-| `tab` | Move focus between chat and composer. |
+| `i` / `o` / `a` | Focus the composer and start typing. |
+| `esc` | Leave the composer for the chat view (draft kept). |
+| `tab` | Move focus between chat, composer, and the channel sidebar. |
+| `j` / `k` | Select the next/previous message, or move the sidebar highlight. |
+| `space` `c` | Open the `/channels` picker. |
+| `space` `e` | Show or hide the channel sidebar. |
+| `space` `x` | Close the active channel. |
 | `[` / `]` | Switch the active channel from chat focus. |
 | `?` | Expand or collapse help. |
 | `pgup` / `pgdown` | Scroll chat history. |
@@ -50,7 +56,7 @@ docker compose run --rm mock
 | `1` / `2` / `3` / `4` | Toggle local filters for mentions, broadcaster/mod/VIP messages, notices, and errors from chat focus. |
 | `0` | Reset active-channel message filters. |
 | `r` | Reply to the selected message. |
-| `i` | Open or close the selected-message inspect panel. |
+| `K` | Open or close the selected-message inspect panel. |
 | `ctrl+g` | Cycle the message layout: `grouped`, `inline`, `compact`. Saved to config. |
 | `ctrl+b` | Cycle badge style: `glyph`, `text`, `off`. Saved to config. |
 | `ctrl+y` | Toggle the highlight chip behind emotes and emoji. Saved to config. |
@@ -58,12 +64,13 @@ docker compose run --rm mock
 | `@` + `tab` | Complete a chatter's name from the live roster. |
 | `ctrl+l` | Clear the active channel's local chat history. |
 | `ctrl+r` | Request a reconnect when the active chat source supports it. |
-| `esc` | Close inspect mode or cancel reply mode. |
-| `enter` | Send the composer text when connected live. |
+| `enter` | Send the composer text when connected live, or run the highlighted picker entry. |
+| `/channels` | Open the channel picker, or `/channels somechannel` to open one directly. |
 
-Mouse support is enabled by default and can be disabled with
-`enable_mouse = false` or `TWI_ENABLE_MOUSE=false`. Keyboard workflows remain
-the primary path.
+Mouse support is enabled by default: click tabs, sidebar channels (or their
+`✕` to close), palette and picker rows, the composer, and messages; scroll chat
+with the wheel. Disable it with `enable_mouse = false` or
+`TWI_ENABLE_MOUSE=false`. Keyboard workflows remain the primary path.
 
 ## 4. Configure Live Twitch Chat
 
@@ -147,6 +154,8 @@ Then run:
 ```sh
 go run ./cmd/twi chat --channel "$TWI_DEFAULT_CHANNELS"
 go run ./cmd/twi chat --channel onechannel --channel anotherchannel
+go run ./cmd/twi chat --channels onechannel,anotherchannel
+go run ./cmd/twi chat   # start with none, then /channels
 ```
 
 Docker:

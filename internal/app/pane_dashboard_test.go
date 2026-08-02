@@ -21,7 +21,6 @@ func TestDashboardPanesExposeIconTitlesAndComposerIdentity(t *testing.T) {
 		"💬 Chat · #alpha",
 		"📡 Channels",
 		"⚡ Activity",
-		"✨ Emotes",
 		"✉ Chat · #alpha · ready",
 		"⌨ ctrl+p",
 	} {

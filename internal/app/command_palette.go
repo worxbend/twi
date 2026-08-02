@@ -33,6 +33,9 @@ const (
 	commandPalettePrevious      commandPaletteAction = "previous_channel"
 	commandPaletteNext          commandPaletteAction = "next_channel"
 	commandPaletteSwitch        commandPaletteAction = "switch_channel"
+	commandPaletteOpenChannel   commandPaletteAction = "open_channel"
+	commandPaletteCloseChannel  commandPaletteAction = "close_channel"
+	commandPaletteToggleSidebar commandPaletteAction = "toggle_sidebar"
 	commandPaletteReconnect     commandPaletteAction = "reconnect"
 	commandPaletteToggleFilter  commandPaletteAction = "toggle_filter"
 	commandPaletteResetFilters  commandPaletteAction = "reset_filters"
@@ -232,6 +235,12 @@ func (m mockShellModel) executeCommandPaletteCommand(command commandPaletteComma
 		return m, m.switchChannelBy(1)
 	case commandPaletteSwitch:
 		return m, m.switchChannel(command.channel)
+	case commandPaletteOpenChannel:
+		return m, m.openChannelPicker()
+	case commandPaletteCloseChannel:
+		return m.closeChannel(m.activeChannelName())
+	case commandPaletteToggleSidebar:
+		m.toggleSidebar()
 	case commandPaletteReconnect:
 		return m, m.requestReconnect()
 	case commandPaletteToggleFilter:
@@ -285,7 +294,10 @@ func (m mockShellModel) commandPaletteCommands() []commandPaletteCommand {
 		{action: commandPaletteFocusChat, title: "Focus chat", shortcut: "tab", keywords: []string{"messages", "timeline"}},
 		{action: commandPaletteStartReply, title: "Reply to selected message", shortcut: "r", keywords: []string{"reply", "selected", "latest"}},
 		{action: commandPaletteCancelReply, title: "Cancel reply mode", shortcut: "esc", keywords: []string{"reply", "clear", "cancel"}},
-		{action: commandPaletteToggleInspect, title: "Toggle inspect panel", shortcut: "i", keywords: []string{"inspect", "panel", "diagnostics"}},
+		{action: commandPaletteToggleInspect, title: "Toggle inspect panel", shortcut: "K", keywords: []string{"inspect", "panel", "diagnostics"}},
+		{action: commandPaletteOpenChannel, title: "Open channel", shortcut: channelPickerKeyHint, keywords: []string{"channel", "channels", "join", "open", "follow", "follows"}},
+		{action: commandPaletteCloseChannel, title: "Close current channel", shortcut: "space x", keywords: []string{"channel", "close", "leave", "part"}},
+		{action: commandPaletteToggleSidebar, title: "Toggle channel sidebar", shortcut: "space e", keywords: []string{"channel", "sidebar", "list", "panel"}},
 		{action: commandPaletteToggleHelp, title: "Toggle help panel", shortcut: "?", keywords: []string{"help", "panel"}},
 		{action: commandPaletteNext, title: "Next channel", shortcut: "]", keywords: []string{"channel", "switch"}},
 		{action: commandPalettePrevious, title: "Previous channel", shortcut: "[", keywords: []string{"channel", "switch"}},

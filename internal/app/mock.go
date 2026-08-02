@@ -32,6 +32,9 @@ const (
 	activityLogNormalSize = 28
 	activityLogWideSize   = 34
 	splashDuration        = 2 * time.Second
+	// sidebarCloseAffordance marks the highlighted sidebar row as closable
+	// with x (keyboard) or a click on the glyph itself (mouse).
+	sidebarCloseAffordance = " ✕"
 )
 
 // StreamStatusResolver is the app-facing boundary for real Twitch broadcast
@@ -53,6 +56,7 @@ type ClientOptions struct {
 	FollowerLookup       twitch.FollowerLookup
 	SubscriptionLookup   twitch.SubscriptionLookup
 	ClipManager          twitch.ClipManager
+	FollowedChannels     twitch.FollowedChannelLookup
 }
 
 type fdWriter interface {
@@ -85,6 +89,7 @@ type mockShellModel struct {
 	palette                     commandPaletteState
 	themeSettings               themeSettingsState
 	emotePicker                 emotePickerState
+	channelPicker               channelPickerState
 	categoryPicker              categoryPickerState
 	reconnectInFlight           bool
 	nextSend                    int
@@ -125,7 +130,12 @@ type mockShellModel struct {
 	emoteIndex                  *assets.EmoteIndex
 	emoteEntries                map[string][]assets.EmoteEntry
 	emoteEntriesRequested       map[string]bool
-	emoteSelected               int
+	sidebarVisibility           sidebarVisibility
+	sidebarSelected             int
+	leaderPending               bool
+	followedChannels            twitch.FollowedChannelLookup
+	followedChannelList         []twitch.FollowedChannel
+	followedChannelsRequested   bool
 	activeTab                   shellTab
 	channelManager              twitch.ChannelManager
 	gameLookup                  twitch.GameLookup
@@ -182,7 +192,7 @@ type mockFocus int
 const (
 	mockFocusChat mockFocus = iota
 	mockFocusComposer
-	mockFocusEmotes
+	mockFocusSidebar
 )
 
 type composerSendState string
@@ -233,6 +243,9 @@ type mockShellLayout struct {
 	emotePickerHeight           int
 	emotePickerContentHeight    int
 	emotePickerFramed           bool
+	channelPickerHeight         int
+	channelPickerContentHeight  int
+	channelPickerFramed         bool
 	categoryPickerHeight        int
 	categoryPickerContentHeight int
 	categoryPickerFramed        bool
@@ -244,9 +257,6 @@ type mockShellLayout struct {
 	miscFramed                  bool
 	composerHeight              int
 	composerFramed              bool
-	emotesHeight                int
-	emotesContentHeight         int
-	emotesFramed                bool
 	helpHeight                  int
 }
 
@@ -354,7 +364,9 @@ func RunClientWithOptions(w io.Writer, cfg config.Config, client ChatClient, opt
 	}
 	defer client.Close()
 
-	channel := "chat"
+	// No configured channel is a supported start: the shell opens on the
+	// empty state and waits for the /channels picker.
+	channel := ""
 	if len(cfg.DefaultChannels) > 0 {
 		channel = cfg.DefaultChannels[0]
 	}
@@ -446,9 +458,9 @@ func newMockShellModelWithClock(channel string, cfg config.Config, clock animati
 	}
 }
 
-// sampleEmoteEntries seeds Ctrl+E search and the quick-select row in
-// --mock mode with well-known Twitch global emote names, so both are
-// demoable without credentials or network access.
+// sampleEmoteEntries seeds the Ctrl+E emote picker in --mock mode with
+// well-known Twitch global emote names, so it is demoable without
+// credentials or network access.
 func sampleEmoteEntries() []assets.EmoteEntry {
 	names := []string{
 		"Kappa", "✨", "💜", "🔥", "😂", "🎉", "👀", "🚀", "💬", "🌈", "⚡",
@@ -505,6 +517,7 @@ func newLiveShellModelWithClockAndOptions(channel string, cfg config.Config, cli
 		followerLookup:        opts.FollowerLookup,
 		subscriptionLookup:    opts.SubscriptionLookup,
 		clipManager:           opts.ClipManager,
+		followedChannels:      opts.FollowedChannels,
 		emoteEntries:          make(map[string][]assets.EmoteEntry),
 		emoteEntriesRequested: make(map[string]bool),
 		debugLogger:           opts.DebugLogger,
@@ -631,6 +644,9 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.themeSettings.open {
 			return m.handleThemeSettingsKey(msg)
 		}
+		if m.channelPicker.open {
+			return m.handleChannelPickerKey(msg)
+		}
 		if m.categoryPicker.open {
 			return m.handleCategoryPickerKey(msg)
 		}
@@ -662,6 +678,22 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// The space leader chord is consumed before every other binding so a
+		// pending leader can never be mistaken for a normal-mode key. It is
+		// only ever armed outside the composer, where space is literal text.
+		if m.leaderPending {
+			return m.handleLeaderKey(msg)
+		}
+		if msg.Type == tea.KeySpace && m.focus != mockFocusComposer {
+			m.leaderPending = true
+			return m, nil
+		}
+		if m.focus == mockFocusSidebar {
+			if model, cmd, handled := m.handleSidebarKey(msg); handled {
+				return model, cmd
+			}
+		}
+
 		switch msg.Type {
 		case tea.KeyTab:
 			m.cycleFocus()
@@ -679,6 +711,12 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.resetMentionSelection()
 			}
 		case tea.KeyEsc:
+			// esc is "leave insert mode" first: from the composer it always
+			// returns to the chat view, keeping the draft intact.
+			if m.focus == mockFocusComposer {
+				m.focus = mockFocusChat
+				return m, nil
+			}
 			if m.inspectOpen {
 				m.inspectOpen = false
 				m.clampScroll()
@@ -693,14 +731,6 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focus == mockFocusChat {
 				m.selectReplyMessage(1)
 			}
-		case tea.KeyLeft:
-			if m.focus == mockFocusEmotes {
-				m.moveEmoteSelection(-1)
-			}
-		case tea.KeyRight:
-			if m.focus == mockFocusEmotes {
-				m.moveEmoteSelection(1)
-			}
 		case tea.KeyCtrlU:
 			if m.focus == mockFocusComposer {
 				m.activeChannelState().composerText = ""
@@ -708,9 +738,6 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyEnter:
 			if m.focus == mockFocusComposer {
 				return m.queueComposerSend()
-			}
-			if m.focus == mockFocusEmotes {
-				m.insertSelectedEmote()
 			}
 		case tea.KeySpace:
 			if m.focus == mockFocusComposer {
@@ -754,12 +781,25 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.startReplyMode()
 				return m, nil
 			}
-			if m.focus == mockFocusChat && len(msg.Runes) == 1 && msg.Runes[0] == 'i' {
-				m.inspectOpen = !m.inspectOpen
-				if m.inspectOpen {
-					m.closeOtherOverlays("inspect")
-				}
-				m.clampScroll()
+			// i/o/a all enter the composer, matching vim's insert keys; the
+			// composer has no cursor to position, so they differ only in
+			// muscle memory.
+			if m.focus == mockFocusChat && len(msg.Runes) == 1 && isInsertRune(msg.Runes[0]) {
+				m.focus = mockFocusComposer
+				return m, nil
+			}
+			if m.focus == mockFocusChat && len(msg.Runes) == 1 && msg.Runes[0] == 'j' {
+				m.selectReplyMessage(1)
+				return m, nil
+			}
+			if m.focus == mockFocusChat && len(msg.Runes) == 1 && msg.Runes[0] == 'k' {
+				m.selectReplyMessage(-1)
+				return m, nil
+			}
+			// K is vim's "show me more about this", which is exactly what the
+			// inspect panel does. It replaces the old bare i, now an insert key.
+			if m.focus == mockFocusChat && len(msg.Runes) == 1 && msg.Runes[0] == 'K' {
+				m.toggleInspect()
 				return m, nil
 			}
 			if m.focus == mockFocusComposer {
@@ -768,7 +808,9 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case tea.MouseMsg:
-		if m.palette.open || m.emotePicker.open || m.themeSettings.open || m.categoryPicker.open {
+		// The theme page and category picker own the whole screen, so a
+		// click has nothing to hit outside them.
+		if m.themeSettings.open || m.categoryPicker.open {
 			return m, nil
 		}
 		return m.handleMouse(msg)
@@ -878,6 +920,9 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case emoteIndexResolvedMsg:
 		m.applyEmoteIndexResult(msg)
 		return m, nil
+	case followedChannelsResolvedMsg:
+		m.applyFollowedChannels(msg)
+		return m, nil
 	case streamInfoLoadedMsg:
 		return m.applyStreamInfoLoaded(msg), nil
 	case streamInfoSavedMsg:
@@ -952,14 +997,14 @@ func (m mockShellModel) View() string {
 	if layout.emotePickerHeight > 0 {
 		regions = append(regions, m.emotePickerView(layout))
 	}
+	if layout.channelPickerHeight > 0 {
+		regions = append(regions, m.channelPickerView(layout))
+	}
 	if layout.categoryPickerHeight > 0 {
 		regions = append(regions, m.categoryPickerView(layout))
 	}
 	if layout.composerHeight > 0 {
 		regions = append(regions, m.composerView(layout))
-	}
-	if layout.emotesHeight > 0 {
-		regions = append(regions, m.emotesView(layout))
 	}
 	if layout.helpHeight > 0 {
 		regions = append(regions, m.helpView(layout.width, layout.helpHeight))
@@ -979,6 +1024,9 @@ func (m mockShellModel) statusLine(width int) string {
 	active := m.activeChannelState()
 	channelCount := len(m.channels.channelNames())
 	left := fmt.Sprintf("#%s %s", active.name, active.status.Status)
+	if m.channels.empty() {
+		left = "no channel open"
+	}
 	if width >= 96 {
 		left = m.formatStatusMetrics(m.metricsNow(), m.debugRecording) + " | " + left
 	} else if width >= 60 {
@@ -1034,15 +1082,40 @@ func (m mockShellModel) chatView(layout mockShellLayout) string {
 		return fitBlock(content, layout.chatWidth, layout.chatHeight)
 	}
 
+	title := "Chat · #" + m.activeChannelName() + " · " + m.activeChatterLabel()
+	if m.channels.empty() {
+		title = "Chat"
+	}
 	return m.renderPane(paneSpec{
 		icon:          "💬",
-		title:         "Chat · #" + m.activeChannelName() + " · " + m.activeChatterLabel(),
+		title:         title,
 		content:       content,
 		width:         layout.chatWidth,
 		contentHeight: layout.chatContentHeight,
 		padding:       1,
 		accent:        m.theme.Accent,
 	})
+}
+
+// noChannelRows renders the empty state shown when nothing is open, which is
+// where `twi chat` lands without --channel/--channels. It names the two ways
+// out rather than leaving a blank pane.
+func (m mockShellModel) noChannelRows(width int) []string {
+	lines := []string{
+		"",
+		"No channels open.",
+		"",
+		"/channels or " + channelPickerKeyHint + " to open one",
+		"ctrl+p for the command palette",
+	}
+	rows := make([]string, 0, len(lines))
+	muted := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(m.theme.Muted)).
+		Background(lipgloss.Color(m.theme.Surface))
+	for _, line := range lines {
+		rows = append(rows, muted.Render(fitLine("  "+line, clampMin(width, 1))))
+	}
+	return rows
 }
 
 // activeChatterLabel renders the live count of chatters twi considers active
@@ -1070,8 +1143,10 @@ func (m mockShellModel) sidebarView(layout mockShellLayout) string {
 		return ""
 	}
 	contentWidth := clampMin(layout.sidebarWidth-2, 1)
+	focused := m.focus == mockFocusSidebar && !m.anyOverlayOpen()
+	selected := m.sidebarSelected
 	lines := make([]string, 0, layout.sidebarContentHeight)
-	for _, key := range m.channels.order {
+	for index, key := range m.channels.order {
 		state := m.channels.states[key]
 		if state == nil {
 			continue
@@ -1089,7 +1164,17 @@ func (m mockShellModel) sidebarView(layout mockShellLayout) string {
 		if state.messageFilters.active() {
 			line += " f"
 		}
+		// The close affordance is only drawn on the highlighted row while
+		// the sidebar has focus, so it reads as "x closes this" rather than
+		// as decoration on every channel.
+		if focused && index == selected {
+			line = fitLine(line, clampMin(contentWidth-2, 1))
+			line += sidebarCloseAffordance
+		}
 		lines = append(lines, fitLine(line, contentWidth))
+	}
+	if len(m.channels.order) == 0 {
+		lines = append(lines, fitLine(" (none open)", contentWidth))
 	}
 	for len(lines) < layout.sidebarContentHeight {
 		lines = append(lines, fitLine("", contentWidth))
@@ -1105,6 +1190,7 @@ func (m mockShellModel) sidebarView(layout mockShellLayout) string {
 		width:         layout.sidebarWidth,
 		contentHeight: layout.sidebarContentHeight,
 		accent:        m.theme.Success,
+		focused:       focused,
 	})
 }
 
@@ -1220,6 +1306,9 @@ func channelStatusIndicator(status ConnectionStatus) string {
 func (m mockShellModel) chatRows(layout mockShellLayout) []string {
 	active := m.activeChannelState()
 	rowWidth := m.chatRowWidth(layout)
+	if m.channels.empty() {
+		return m.noChannelRows(rowWidth)
+	}
 	blocks := m.visibleChatRowBlocks(layout)
 
 	rows := make([]string, 0, chatRowBlockCount(blocks))
@@ -1347,107 +1436,6 @@ func (m mockShellModel) emptyFilterRow(width int) string {
 		detail = fmt.Sprintf("no matching messages (%d hidden)", hidden)
 	}
 	return fitLine(" filter: "+summary+" - "+detail, width)
-}
-
-// emotesView renders the third dashboard row: a horizontal quick-select
-// strip of available emotes. Left/right move the selection when focused;
-// enter/tab appends the selected emote name to the composer (see
-// insertSelectedEmote). Ctrl+E opens the larger searchable modal for emotes
-// not in this glanceable strip.
-func (m mockShellModel) emotesView(layout mockShellLayout) string {
-	entries := m.activeEmoteEntries()
-	contentWidth := layout.width
-	if layout.emotesFramed {
-		contentWidth = clampMin(layout.width-4, 1)
-	}
-
-	label := " Emotes"
-	if layout.emotesFramed {
-		label = ""
-	}
-	var line string
-	switch {
-	case len(entries) == 0:
-		line = "(resolving...)"
-		if label != "" {
-			line = label + ": " + line
-		}
-	default:
-		selected := m.clampedEmoteSelected(entries)
-		parts := make([]string, 0, len(entries))
-		for i, entry := range entries {
-			name := entry.Name
-			if i == selected && m.focus == mockFocusEmotes {
-				name = "[" + name + "]"
-			}
-			parts = append(parts, name)
-		}
-		separator := ": "
-		if label == "" {
-			separator = ""
-		}
-		line = label + separator + strings.Join(parts, " ")
-	}
-	content := fitLine(line, contentWidth)
-
-	if !layout.emotesFramed {
-		return fitBlock(content, layout.width, layout.emotesHeight)
-	}
-
-	return m.renderPane(paneSpec{
-		icon:          "✨",
-		title:         fmt.Sprintf("Emotes · %02d", len(entries)),
-		content:       content,
-		width:         layout.width,
-		contentHeight: layout.emotesContentHeight,
-		padding:       1,
-		accent:        m.theme.Error,
-		focused:       m.focus == mockFocusEmotes && !m.anyOverlayOpen(),
-	})
-}
-
-// clampedEmoteSelected keeps emoteSelected in range as the entry list
-// changes size (e.g. resolves from empty to populated).
-func (m mockShellModel) clampedEmoteSelected(entries []assets.EmoteEntry) int {
-	if len(entries) == 0 {
-		return 0
-	}
-	selected := m.emoteSelected
-	if selected < 0 {
-		selected = 0
-	}
-	if selected >= len(entries) {
-		selected = len(entries) - 1
-	}
-	return selected
-}
-
-func (m *mockShellModel) moveEmoteSelection(delta int) {
-	entries := m.activeEmoteEntries()
-	if len(entries) == 0 {
-		m.emoteSelected = 0
-		return
-	}
-	selected := m.clampedEmoteSelected(entries) + delta
-	if selected < 0 {
-		selected = len(entries) - 1
-	}
-	if selected >= len(entries) {
-		selected = 0
-	}
-	m.emoteSelected = selected
-}
-
-// insertSelectedEmote appends the selected quick-select emote's name plus a
-// trailing space to the composer, matching the composer's existing
-// append-only text model (no cursor-position tracking).
-func (m *mockShellModel) insertSelectedEmote() {
-	entries := m.activeEmoteEntries()
-	if len(entries) == 0 {
-		return
-	}
-	name := entries[m.clampedEmoteSelected(entries)].Name
-	m.activeChannelState().composerText += name + " "
 }
 
 func (m mockShellModel) helpView(width, height int) string {
@@ -1590,33 +1578,21 @@ func (m mockShellModel) layout() mockShellLayout {
 		if height < 10 {
 			layout.composerHeight = 3
 		}
-
-		if height >= 12 {
-			layout.emotesHeight = 3
-			layout.emotesContentHeight = 1
-			layout.emotesFramed = width >= 5
-		}
 	}
 
-	remaining := height - layout.tabBarHeight - layout.statusHeight - layout.helpHeight - layout.composerHeight - layout.emotesHeight
-	if remaining < 3 && layout.emotesHeight > 0 {
-		layout.emotesHeight = 0
-		layout.emotesContentHeight = 0
-		layout.emotesFramed = false
-		remaining = height - layout.tabBarHeight - layout.statusHeight - layout.helpHeight - layout.composerHeight
-	}
+	remaining := height - layout.tabBarHeight - layout.statusHeight - layout.helpHeight - layout.composerHeight
 	if remaining < 3 && layout.composerHeight > 3 {
 		layout.composerHeight = 3
-		remaining = height - layout.tabBarHeight - layout.statusHeight - layout.helpHeight - layout.composerHeight - layout.emotesHeight
+		remaining = height - layout.tabBarHeight - layout.statusHeight - layout.helpHeight - layout.composerHeight
 	}
 	if remaining < 1 && layout.helpHeight > 0 {
 		layout.helpHeight = 0
-		remaining = height - layout.tabBarHeight - layout.statusHeight - layout.composerHeight - layout.emotesHeight
+		remaining = height - layout.tabBarHeight - layout.statusHeight - layout.composerHeight
 	}
 	if remaining < 1 && layout.composerHeight > 0 {
-		layout.composerHeight = clampMin(height-layout.tabBarHeight-layout.statusHeight-layout.emotesHeight, 0)
+		layout.composerHeight = clampMin(height-layout.tabBarHeight-layout.statusHeight, 0)
 		layout.composerFramed = layout.composerHeight >= 3 && width >= 8
-		remaining = height - layout.tabBarHeight - layout.statusHeight - layout.composerHeight - layout.emotesHeight
+		remaining = height - layout.tabBarHeight - layout.statusHeight - layout.composerHeight
 	}
 
 	if m.palette.open && remaining >= 4 {
@@ -1676,7 +1652,26 @@ func (m mockShellModel) layout() mockShellLayout {
 		remaining -= layout.emotePickerHeight
 	}
 
-	if !m.palette.open && !m.inspectOpen && !m.emotePicker.open && m.categoryPicker.open && remaining >= 4 {
+	if !m.palette.open && !m.inspectOpen && !m.emotePicker.open && m.channelPicker.open && remaining >= 4 {
+		layout.channelPickerHeight = 5
+		if height >= 18 {
+			layout.channelPickerHeight = 9
+		}
+		if layout.channelPickerHeight > remaining-1 {
+			layout.channelPickerHeight = remaining - 1
+		}
+		if layout.channelPickerHeight < 3 {
+			layout.channelPickerHeight = 0
+		}
+		layout.channelPickerFramed = layout.channelPickerHeight >= 3 && width >= 5
+		layout.channelPickerContentHeight = layout.channelPickerHeight
+		if layout.channelPickerFramed {
+			layout.channelPickerContentHeight = layout.channelPickerHeight - 2
+		}
+		remaining -= layout.channelPickerHeight
+	}
+
+	if !m.palette.open && !m.inspectOpen && !m.emotePicker.open && !m.channelPicker.open && m.categoryPicker.open && remaining >= 4 {
 		layout.categoryPickerHeight = 5
 		if height >= 18 {
 			layout.categoryPickerHeight = 7
@@ -1713,7 +1708,7 @@ func (m mockShellModel) layout() mockShellLayout {
 		layout.chatContentHeight = 0
 	}
 
-	used := layout.tabBarHeight + layout.statusHeight + layout.chatHeight + layout.paletteHeight + layout.inspectHeight + layout.emotePickerHeight + layout.categoryPickerHeight + layout.composerHeight + layout.emotesHeight + layout.helpHeight
+	used := layout.tabBarHeight + layout.statusHeight + layout.chatHeight + layout.paletteHeight + layout.inspectHeight + layout.emotePickerHeight + layout.channelPickerHeight + layout.categoryPickerHeight + layout.composerHeight + layout.helpHeight
 	if used < height {
 		layout.chatHeight += height - used
 		if layout.chatFramed {
@@ -1759,7 +1754,7 @@ func (m mockShellModel) layout() mockShellLayout {
 }
 
 func (m mockShellModel) sidebarWidth(width, chatHeight int) int {
-	if width < sidebarMinWidth || chatHeight < 3 || len(m.channels.channelNames()) < 2 {
+	if !m.sidebarVisibleFor(width, chatHeight) {
 		return 0
 	}
 	if width >= 112 {
@@ -1920,7 +1915,14 @@ func (m *mockShellModel) cycleFocus() {
 	case mockFocusChat:
 		m.focus = mockFocusComposer
 	case mockFocusComposer:
-		m.focus = mockFocusEmotes
+		// The sidebar only joins the cycle while it is on screen, so tab
+		// never stops on something invisible.
+		if m.layout().sidebarWidth > 0 {
+			m.syncSidebarSelectionToActive()
+			m.focus = mockFocusSidebar
+			return
+		}
+		m.focus = mockFocusChat
 	default:
 		m.focus = mockFocusChat
 	}
@@ -1966,7 +1968,7 @@ func (m *mockShellModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	layout := m.layout()
 	event := tea.MouseEvent(msg)
-	if m.mouseInChatRegion(event, layout) {
+	if m.mouseInChatRegion(event, layout) && !m.anyOverlayOpen() {
 		switch {
 		case isMouseWheelUp(event):
 			m.scrollBy(3)
@@ -1981,9 +1983,26 @@ func (m *mockShellModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return *m, nil
 	}
 
-	if channel, ok := m.channelAtMouse(event, layout); ok {
-		m.focus = mockFocusChat
-		if m.channels.setActive(channel) {
+	// An open overlay covers the composer and part of chat, so it gets first
+	// refusal on every click; anything landing outside it dismisses nothing
+	// and falls through to the regions still visible above.
+	if model, cmd, handled := m.handleOverlayMouse(event, layout); handled {
+		return model, cmd
+	}
+	if tab, ok := m.tabAtMouse(event, layout); ok {
+		return m.switchToTab(tab)
+	}
+	if index, closeHit, ok := m.sidebarRowAtMouse(event, layout); ok {
+		state := m.channels.states[m.channels.order[index]]
+		if state == nil {
+			return *m, nil
+		}
+		if closeHit {
+			return m.closeChannel(state.name)
+		}
+		m.focus = mockFocusSidebar
+		m.sidebarSelected = index
+		if m.channels.setActive(state.name) {
 			m.clampScroll()
 			return m.withAsyncAssetCommands(nil)
 		}
@@ -1991,17 +2010,6 @@ func (m *mockShellModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.mouseInComposer(event, layout) {
 		m.focus = mockFocusComposer
-		return *m, nil
-	}
-	// Clicking the emotes strip focuses it and selects the emote under the
-	// cursor, so the strip is usable without first tabbing to it.
-	if index, ok := m.emoteAtMouse(event, layout); ok {
-		m.focus = mockFocusEmotes
-		m.emoteSelected = index
-		return *m, nil
-	}
-	if m.mouseInEmotesRegion(event, layout) {
-		m.focus = mockFocusEmotes
 		return *m, nil
 	}
 	if message, ok := m.messageAtMouse(event, layout); ok {
@@ -2035,56 +2043,6 @@ func (m mockShellModel) mouseInChatRegion(event tea.MouseEvent, layout mockShell
 		event.X < chatRight &&
 		event.Y >= chatTop &&
 		event.Y < chatTop+layout.chatHeight
-}
-
-// mouseInEmotesRegion reports whether an event lands in the emotes strip,
-// which sits directly below the composer.
-func (m mockShellModel) mouseInEmotesRegion(event tea.MouseEvent, layout mockShellLayout) bool {
-	if layout.emotesHeight <= 0 {
-		return false
-	}
-	top := layout.tabBarHeight + layout.statusHeight + layout.chatHeight + layout.composerHeight
-	return event.X >= 0 &&
-		event.X < layout.width &&
-		event.Y >= top &&
-		event.Y < top+layout.emotesHeight
-}
-
-// emoteAtMouse resolves which emote in the quick-select strip sits under the
-// cursor, by walking the same "name name name" run the strip renders. It
-// returns false when the click is outside the strip or falls on padding
-// between names.
-func (m mockShellModel) emoteAtMouse(event tea.MouseEvent, layout mockShellLayout) (int, bool) {
-	if !m.mouseInEmotesRegion(event, layout) {
-		return 0, false
-	}
-	entries := m.activeEmoteEntries()
-	if len(entries) == 0 {
-		return 0, false
-	}
-	// The framed strip insets content by the pane border plus one padding
-	// cell on each side; the unframed strip has no inset.
-	contentLeft := 0
-	if layout.emotesFramed {
-		contentLeft = 2
-		if event.Y != layout.tabBarHeight+layout.statusHeight+layout.chatHeight+layout.composerHeight+1 {
-			return 0, false
-		}
-	}
-	selected := m.clampedEmoteSelected(entries)
-	cursor := contentLeft
-	for i, entry := range entries {
-		name := entry.Name
-		if i == selected && m.focus == mockFocusEmotes {
-			name = "[" + name + "]"
-		}
-		width := uniseg.StringWidth(name)
-		if event.X >= cursor && event.X < cursor+width {
-			return i, true
-		}
-		cursor += width + 1
-	}
-	return 0, false
 }
 
 func (m mockShellModel) mouseInComposer(event tea.MouseEvent, layout mockShellLayout) bool {
@@ -2549,6 +2507,20 @@ func (m *mockShellModel) refreshActiveRevealRows() {
 func (m *mockShellModel) queueComposerSend() (tea.Model, tea.Cmd) {
 	state := m.activeChannelState()
 	draft := strings.TrimSpace(state.composerText)
+	// /channels never reaches Twitch: bare, it opens the picker; with a name,
+	// it opens that channel directly.
+	if channel, isChannelCommand := composerChannelCommand(draft); isChannelCommand {
+		state.composerText = ""
+		if channel == "" {
+			return *m, m.openChannelPicker()
+		}
+		return m.openChannel(channel)
+	}
+	if m.channels.empty() {
+		state.sendState = composerSendFailed
+		state.sendFeedback = "no channel open: /channels or " + channelPickerKeyHint
+		return *m, nil
+	}
 	if offsets, isClip, parseErr := parseClipCommand(draft); isClip {
 		if parseErr != nil {
 			state.sendState = composerSendFailed
@@ -3084,8 +3056,8 @@ func (m mockShellModel) focusName() string {
 	if m.focus == mockFocusComposer {
 		return "composer"
 	}
-	if m.focus == mockFocusEmotes {
-		return "emotes"
+	if m.focus == mockFocusSidebar {
+		return "channels"
 	}
 	return "chat"
 }
@@ -3102,7 +3074,7 @@ func (m mockShellModel) helpLines(width, height int) []string {
 		if width < 38 {
 			return []string{" ctrl+p palette | tab focus"}
 		}
-		line := " ctrl+p | tab | [] | filt 1-4/0 | ? | pg | r/i | ^l | ^r | q quit/ctrl+c quit"
+		line := " ctrl+p | i/esc | jk | space e/c | [] | 1-4/0 | ? | r/K | q quit/ctrl+c quit"
 		if width >= 112 {
 			line += " | " + source
 		}
@@ -3110,9 +3082,9 @@ func (m mockShellModel) helpLines(width, height int) []string {
 	}
 
 	lines := []string{
-		" alt+1/2/3: switch tab (chat/stream info/misc) | tab focus: chat/composer",
-		" ctrl+p: commands | [/]: switch channel | 1-4 filters, 0 reset | up/down: select message",
-		" r: reply | i: inspect | pgup/pgdn: scroll | ctrl+l: clear | ctrl+r: reconnect | ?: compact help | q: quit | " + source,
+		" i/o: compose | esc: back to chat | j/k: select message | pgup/pgdn: scroll | r: reply | K: inspect",
+		" space e: channel sidebar | space c: open channel | space x: close channel | [/]: switch | 1-4 filters, 0 reset",
+		" alt+1/2/3: tabs | tab: focus chat/composer/channels | ctrl+p: commands | ctrl+l: clear | ctrl+r: reconnect | q: quit | " + source,
 		// Display toggles go last: when a short terminal truncates the help,
 		// the navigation keys are the ones that must survive.
 		" ctrl+t: theme | ctrl+g: layout | ctrl+b: badges | ctrl+y: emote highlight | ctrl+n: full names | @+tab: complete name",
@@ -3120,7 +3092,7 @@ func (m mockShellModel) helpLines(width, height int) []string {
 	if width < 38 {
 		lines = []string{
 			" ctrl+p: commands",
-			" tab | pgup/pgdn",
+			" i/esc | tab | jk",
 			" ?: help | ctrl+c: quit",
 		}
 	}

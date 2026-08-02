@@ -40,14 +40,6 @@ func TestNewIRCClientValidatesRequiredConfigWithoutLeakingToken(t *testing.T) {
 			},
 			want: "OAuth token",
 		},
-		{
-			name: "channel",
-			cfg: IRCConfig{
-				Username:   "viewer",
-				OAuthToken: "oauth:secret-token",
-			},
-			want: "channel",
-		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := NewIRCClient(tt.cfg)
@@ -61,6 +53,65 @@ func TestNewIRCClientValidatesRequiredConfigWithoutLeakingToken(t *testing.T) {
 				t.Fatalf("error leaked token: %q", err.Error())
 			}
 		})
+	}
+}
+
+// Starting with no channel is supported: `twi chat` without
+// --channel/--channels connects and waits for the /channels picker to join
+// the first one.
+func TestNewIRCClientAllowsNoChannels(t *testing.T) {
+	client, err := NewIRCClient(IRCConfig{
+		Username:   "viewer",
+		OAuthToken: "oauth:secret-token",
+	})
+	if err != nil {
+		t.Fatalf("NewIRCClient error = %v, want nil for a channel-less start", err)
+	}
+	if len(client.channels) != 0 {
+		t.Fatalf("channels = %#v, want none", client.channels)
+	}
+}
+
+// Join and Depart also maintain the reconnect channel list, so a reconnect
+// rejoins what is open now rather than what was configured at startup.
+func TestIRCClientJoinAndDepartTrackChannels(t *testing.T) {
+	session := &fakeIRCSession{}
+	restore := newIRCClient
+	newIRCClient = func(username, token string, channels []string) ircSession {
+		session.username, session.token, session.channels = username, token, channels
+		return session
+	}
+	defer func() { newIRCClient = restore }()
+
+	client, err := NewIRCClient(IRCConfig{
+		Username:   "viewer",
+		OAuthToken: "oauth:secret-token",
+		Channels:   []string{"alpha"},
+	})
+	if err != nil {
+		t.Fatalf("NewIRCClient error = %v", err)
+	}
+	if err := client.Join("#Beta"); err != nil {
+		t.Fatalf("Join error = %v", err)
+	}
+	if got := client.channels; len(got) != 2 || got[1] != "beta" {
+		t.Fatalf("channels after join = %#v, want [alpha beta]", got)
+	}
+	// Joining an open channel again must not duplicate it in the list.
+	if err := client.Join("beta"); err != nil {
+		t.Fatalf("second Join error = %v", err)
+	}
+	if got := client.channels; len(got) != 2 {
+		t.Fatalf("channels after duplicate join = %#v, want 2 entries", got)
+	}
+	if err := client.Depart("alpha"); err != nil {
+		t.Fatalf("Depart error = %v", err)
+	}
+	if got := client.channels; len(got) != 1 || got[0] != "beta" {
+		t.Fatalf("channels after depart = %#v, want [beta]", got)
+	}
+	if got := session.departed; len(got) != 1 || got[0] != "alpha" {
+		t.Fatalf("session departed = %#v, want [alpha]", got)
 	}
 }
 
@@ -374,9 +425,23 @@ type fakeIRCSession struct {
 	onConnect   func()
 	says        []string
 	replies     []string
+	joined      []string
+	departed    []string
 }
 
 var _ ircSession = (*fakeIRCSession)(nil)
+
+func (s *fakeIRCSession) Join(channels ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.joined = append(s.joined, channels...)
+}
+
+func (s *fakeIRCSession) Depart(channel string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.departed = append(s.departed, channel)
+}
 
 func (s *fakeIRCSession) Connect() error {
 	s.mu.Lock()

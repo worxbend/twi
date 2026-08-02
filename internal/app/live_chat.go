@@ -198,6 +198,38 @@ func (c *LiveChatClient) Send(ctx context.Context, req SendRequest) (SendResult,
 	return result, nil
 }
 
+// JoinChannel and PartChannel forward to the transport when it supports
+// joining on a live connection, so a channel opened from the /channels
+// picker starts receiving messages immediately. A transport without the
+// capability reports an error the model treats as "tracked locally only".
+func (c *LiveChatClient) JoinChannel(channel string) error {
+	joiner, err := c.channelJoiner()
+	if err != nil {
+		return err
+	}
+	return joiner.Join(channel)
+}
+
+func (c *LiveChatClient) PartChannel(channel string) error {
+	joiner, err := c.channelJoiner()
+	if err != nil {
+		return err
+	}
+	return joiner.Depart(channel)
+}
+
+func (c *LiveChatClient) channelJoiner() (twitch.ChannelJoiner, error) {
+	transport, err := c.currentTransport()
+	if err != nil {
+		return nil, err
+	}
+	joiner, ok := transport.(twitch.ChannelJoiner)
+	if !ok {
+		return nil, errors.New("chat transport cannot join channels after connecting")
+	}
+	return joiner, nil
+}
+
 func actionWireText(text string) string {
 	return "\x01ACTION " + strings.TrimSpace(text) + "\x01"
 }

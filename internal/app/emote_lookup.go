@@ -95,10 +95,8 @@ func (m *mockShellModel) applyEmoteIndexResult(msg emoteIndexResolvedMsg) {
 		return
 	}
 	activeChannel := msg.channel == channelKey(m.activeChannelName())
-	quickSelection := ""
 	pickerSelection := ""
 	if activeChannel {
-		quickSelection = selectedEmoteName(m.activeEmoteEntries(), m.emoteSelected)
 		pickerSelection = selectedEmoteName(m.visibleEmotePickerEntries(), m.emotePicker.selected)
 	}
 	if m.emoteEntries == nil {
@@ -106,7 +104,6 @@ func (m *mockShellModel) applyEmoteIndexResult(msg emoteIndexResolvedMsg) {
 	}
 	m.emoteEntries[msg.channel] = msg.entries
 	if activeChannel {
-		m.emoteSelected = emoteIndexByName(m.activeEmoteEntries(), quickSelection, m.emoteSelected)
 		m.emotePicker.selected = emoteIndexByName(m.visibleEmotePickerEntries(), pickerSelection, m.emotePicker.selected)
 	}
 }
@@ -138,7 +135,7 @@ func emoteIndexByName(entries []assets.EmoteEntry, name string, fallback int) in
 	return fallback
 }
 
-// activeEmoteEntries returns the searchable/quick-select list for the active
+// activeEmoteEntries returns the searchable emote list for the active
 // channel. Terminal-native emoji remain available before Twitch emotes resolve
 // or when that lookup is disabled; resolved entries are merged without
 // duplicates and retain their provider ordering.

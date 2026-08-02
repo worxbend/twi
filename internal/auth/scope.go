@@ -27,6 +27,10 @@ const (
 	// broadcaster's active stream through Twitch Helix "Create Clip", used
 	// by the /clip chat command.
 	ScopeClipsEdit Scope = "clips:edit"
+	// ScopeUserReadFollows allows reading the channels the authenticated
+	// user follows through Twitch Helix "Get Followed Channels", used to
+	// autocomplete the /channels picker.
+	ScopeUserReadFollows Scope = "user:read:follows"
 )
 
 var requiredChatScopes = []Scope{ScopeChatRead, ScopeChatEdit}
@@ -36,6 +40,8 @@ var streamManageScopes = []Scope{ScopeChannelManageBroadcast}
 var channelMetricsScopes = []Scope{ScopeModeratorReadFollowers, ScopeChannelReadSubscriptions}
 
 var clipScopes = []Scope{ScopeClipsEdit}
+
+var followedChannelScopes = []Scope{ScopeUserReadFollows}
 
 // ChatReadScopes returns the OAuth scopes required for read-only Twitch chat.
 func ChatReadScopes() []Scope {
@@ -71,15 +77,23 @@ func ClipScopes() []Scope {
 	return append([]Scope(nil), clipScopes...)
 }
 
+// FollowedChannelScopes returns the OAuth scopes required to autocomplete
+// the /channels picker from the channels the user follows.
+func FollowedChannelScopes() []Scope {
+	return append([]Scope(nil), followedChannelScopes...)
+}
+
 // LoginScopes returns every OAuth scope `twi login` requests: the required
 // chat read/send scopes, stream info management for the Stream Info and
 // Misc tabs, the channel metrics scopes for the status line's
-// follower/subscriber counts, and clip creation for the /clip command.
+// follower/subscriber counts, clip creation for the /clip command, and the
+// follow list backing the /channels picker.
 func LoginScopes() []Scope {
 	scopes := RequiredChatScopes()
 	scopes = append(scopes, StreamManageScopes()...)
 	scopes = append(scopes, ChannelMetricsScopes()...)
 	scopes = append(scopes, ClipScopes()...)
+	scopes = append(scopes, FollowedChannelScopes()...)
 	return scopes
 }
 

@@ -64,7 +64,7 @@ func (m mockShellModel) plainComposerView(layout mockShellLayout) string {
 	active := m.activeChannelState()
 	input := active.composerText
 	if input == "" && !m.composerFocused() {
-		input = "Message #" + m.activeChannelName()
+		input = m.composerPlaceholder("")
 	} else if m.composerFocused() {
 		cursorWidth := 0
 		if layout.width >= 2 {
@@ -123,7 +123,7 @@ func (m mockShellModel) composerInputSegments(width int) []composerSegment {
 	input := m.activeChannelState().composerText
 	placeholder := false
 	if input == "" && !focused {
-		input = "Message #" + m.activeChannelName() + "…"
+		input = m.composerPlaceholder("…")
 		placeholder = true
 	}
 	if focused {
@@ -196,10 +196,27 @@ func (m mockShellModel) composerMetadataSegments() []composerSegment {
 	return []composerSegment{
 		{text: "✉ Chat", foreground: m.theme.Accent, bold: true},
 		{text: " · ", foreground: m.theme.Muted},
-		{text: "#" + m.activeChannelName(), foreground: m.theme.Foreground, bold: true},
+		{text: m.composerChannelLabel(), foreground: m.theme.Foreground, bold: true},
 		{text: " · ", foreground: m.theme.Muted},
 		{text: state, foreground: color, bold: state != "ready"},
 	}
+}
+
+// composerPlaceholder names what typing will do. With nothing open the
+// composer is still usable - /channels is typed into it - so the prompt
+// points there instead of naming a channel that does not exist.
+func (m mockShellModel) composerPlaceholder(suffix string) string {
+	if m.channels.empty() {
+		return "/channels to open a channel" + suffix
+	}
+	return "Message #" + m.activeChannelName() + suffix
+}
+
+func (m mockShellModel) composerChannelLabel() string {
+	if m.channels.empty() {
+		return "no channel"
+	}
+	return "#" + m.activeChannelName()
 }
 
 func (m mockShellModel) composerStateLabel() (string, string) {

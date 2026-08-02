@@ -7,7 +7,7 @@ This document describes the configuration model for `twi`. The implemented parse
 - Config loading exists for flat `key = value` files, environment variables, and selected CLI overrides.
 - `twi config show` and `twi config path` exist in the CLI.
 - Mock chat is ready and does not require credentials or network access.
-- Multi-channel live IRC read/send is partially shipped: `twi chat --channel <channel> [--channel other]` validates startup credentials when Twitch OAuth validation is reachable, then can read, send, reply, and send `/me` actions when username/token credentials are configured.
+- Multi-channel live IRC read/send is partially shipped: `twi chat --channel <channel> [--channel other]`, `--channels a,b`, or no channel at all (which starts on the empty state and waits for `/channels`) validates startup credentials when Twitch OAuth validation is reachable, then can read, send, reply, and send `/me` actions when username/token credentials are configured.
 - Twitch credentials are currently read from environment variables, the flat config file, or saved credentials on supported Unix platforms. Unix builds use the private credential file. Non-Unix builds keep saved credentials disabled. CLI flags currently override `--config` and `--channel`, not username or OAuth token values.
 - Config output redacts OAuth tokens and client secrets.
 - `twi doctor` diagnostics report the effective config file path, credential
@@ -33,7 +33,7 @@ This document describes the configuration model for `twi`. The implemented parse
 
 Effective config should be resolved in this order, highest priority first:
 
-1. CLI flags for `--config`, `--channel`, `--debug-log`, and
+1. CLI flags for `--config`, `--channel`/`--channels`, `--debug-log`, and
    `--debug-log-path`.
 2. Environment variables.
 3. Config file.
@@ -151,7 +151,7 @@ Supported variables:
 | `TWI_FULL_USERNAME` | No | Append the login when it differs from the display name (`アリス (alice_l)`). Defaults to `false`. |
 | `TWI_THEME_BACKGROUND` / `TWI_THEME_FOREGROUND` / `TWI_THEME_ACCENT` / `TWI_THEME_MUTED` / `TWI_THEME_BORDER` / `TWI_THEME_SURFACE` / `TWI_THEME_WARNING` / `TWI_THEME_ERROR` / `TWI_THEME_SUCCESS` | No | Custom palette hex values, only applied when `TWI_THEME_NAME=custom`. |
 | `TWI_STREAM_STATUS_MODE` | No | Enables (`auto`, default) or disables (`off`) polling Twitch Helix "Get Streams" for the status bar's real LIVE indicator. Requires `TWI_TWITCH_CLIENT_ID`/`TWI_TWITCH_OAUTH_TOKEN` either way. |
-| `TWI_EMOTE_AUTOCOMPLETE_MODE` | No | Enables (`auto`, default) or disables (`off`) fetching real Twitch global/channel emotes for the Ctrl+E picker and quick-select row. Requires Twitch API credentials either way; `--mock` always uses a built-in sample list regardless of this setting. |
+| `TWI_EMOTE_AUTOCOMPLETE_MODE` | No | Enables (`auto`, default) or disables (`off`) fetching real Twitch global/channel emotes for the Ctrl+E picker. Requires Twitch API credentials either way; `--mock` always uses a built-in sample list regardless of this setting. |
 | `TWI_DEBUG_LOG` | No | Enables redacted structured debug logging when set to a true boolean value. Defaults to disabled. |
 | `TWI_DEBUG_LOG_PATH` | No | Debug log file path. If omitted while logging is enabled, `twi` writes `debug.log` under the platform cache directory. Credential-shaped path values are redacted from config and diagnostic output. |
 
@@ -348,7 +348,7 @@ Current behavior:
 
 - Load username and OAuth token from env/config and saved credentials on
   supported Unix platforms.
-- Load channel names from `--channel`, `TWI_DEFAULT_CHANNELS`, or config.
+- Load channel names from `--channel`/`--channels`, `TWI_DEFAULT_CHANNELS`, or config. Channels opened later from `/channels` are session-only and are not written back to config.
 - Load animation mode.
 - Load avatar mode (`off` or `initials`).
 - Load debug logging controls from config/env/CLI and write redacted JSON debug

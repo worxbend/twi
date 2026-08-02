@@ -132,7 +132,9 @@ func credentialCheck(name, value, missingDetail string) DoctorCheck {
 func channelsCheck(channels []string) DoctorCheck {
 	switch len(channels) {
 	case 0:
-		return warnCheck("channels", "none configured; pass --channel or set TWI_DEFAULT_CHANNELS")
+		// Not an error: twi starts on the empty state and /channels opens the
+		// first one. Still worth naming the persistent options.
+		return okCheck("channels", "none configured; open one with /channels, or set --channel/--channels/TWI_DEFAULT_CHANNELS")
 	case 1:
 		return okCheck("channels", "one configured")
 	default:

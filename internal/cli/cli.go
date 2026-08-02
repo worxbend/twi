@@ -25,7 +25,7 @@ import (
 const usage = `twi is a terminal Twitch chat client.
 
 Usage:
-  twi chat [--channel name] [--mock] [--debug-log]
+  twi chat [--channel name] [--channels a,b] [--mock] [--debug-log]
   twi config show
   twi config path
   twi doctor
@@ -100,7 +100,24 @@ var newLiveClientOptions = func(cfg config.Config) app.ClientOptions {
 		FollowerLookup:       newFollowerLookup(cfg),
 		SubscriptionLookup:   newSubscriptionLookup(cfg),
 		ClipManager:          newClipManager(cfg),
+		FollowedChannels:     newFollowedChannelLookup(cfg),
 	}
+}
+
+// newFollowedChannelLookup wires the /channels picker's autocomplete to the
+// user's real follow list, gated on Twitch API credentials
+// (user:read:follows is requested at login but Twitch still enforces it
+// per-request; tokens issued before that scope existed simply fall back to
+// already-open and configured channels).
+func newFollowedChannelLookup(cfg config.Config) twitch.FollowedChannelLookup {
+	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
+		return nil
+	}
+	return twitch.NewHelixFollowedChannelsClient(twitch.HelixFollowedChannelsClientConfig{
+		HTTPClient: &http.Client{Timeout: 5 * time.Second},
+		ClientID:   cfg.Twitch.ClientID,
+		OAuthToken: cfg.Twitch.OAuthToken,
+	})
 }
 
 // newChannelManager wires the Stream Info tab's Get/Modify Channel
@@ -202,8 +219,7 @@ func newSubscriptionLookup(cfg config.Config) twitch.SubscriptionLookup {
 	})
 }
 
-// newEmoteIndex wires Ctrl+E emote search / the quick-select row to real
-// Twitch Helix emote data. EmoteIndex is in-memory only and needs no cache,
+// newEmoteIndex wires Ctrl+E emote search to real Twitch Helix emote data. EmoteIndex is in-memory only and needs no cache,
 // just Client ID/OAuth token.
 func newEmoteIndex(cfg config.Config) *assets.EmoteIndex {
 	if strings.EqualFold(strings.TrimSpace(cfg.Features.EmoteAutocompleteMode), "off") {
@@ -315,6 +331,7 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 	var mock bool
 	var debugFlags debugFlagOptions
 	fs.Var(&channels, "channel", "Twitch channel to join; repeat for multiple channels")
+	fs.Var(&channels, "channels", "comma-separated Twitch channels to join (adds to --channel)")
 	fs.StringVar(&cfgPath, "config", "", "config file path")
 	fs.BoolVar(&mock, "mock", false, "run against the built-in mock chat source")
 	addDebugFlags(fs, &debugFlags)
@@ -372,10 +389,6 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 		slog.Bool("mock", false),
 		slog.Int("channel_count", len(cfg.DefaultChannels)),
 	)
-	if len(cfg.DefaultChannels) == 0 {
-		fmt.Fprintln(stderr, "no channel configured; pass --channel or set TWI_DEFAULT_CHANNELS")
-		return 2
-	}
 	if err := validateLiveChatConfig(cfg); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
@@ -949,11 +962,21 @@ func (f *channelFlags) String() string {
 	return strings.Join(*f, ",")
 }
 
+// Set accepts either a single channel or a comma-separated list, so
+// --channel and --channels can share one accumulating flag value. Both may
+// be repeated, and both append rather than replace.
 func (f *channelFlags) Set(value string) error {
-	value = strings.TrimSpace(value)
-	if value == "" {
+	added := false
+	for _, part := range strings.Split(value, ",") {
+		part = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(part), "#"))
+		if part == "" {
+			continue
+		}
+		*f = append(*f, part)
+		added = true
+	}
+	if !added {
 		return errors.New("channel cannot be empty")
 	}
-	*f = append(*f, strings.TrimPrefix(value, "#"))
 	return nil
 }

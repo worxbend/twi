@@ -68,6 +68,7 @@ func runSetup(args []string, stdout, stderr io.Writer) int {
 	fs.Var(&opts.username, "username", "Twitch login name to write to config")
 	fs.Var(&opts.clientID, "client-id", "Twitch app client ID to write to config")
 	fs.Var(&opts.channels, "channel", "default Twitch channel; repeat for multiple channels")
+	fs.Var(&opts.channels, "channels", "comma-separated default Twitch channels (adds to --channel)")
 	fs.Var(&opts.enableMouse, "enable-mouse", "enable terminal mouse support")
 	fs.Var(&opts.avatarMode, "avatar-mode", "avatar mode: off or initials")
 	fs.Var(&opts.animationMode, "animation-mode", "animation mode: off, reduced, or fast")

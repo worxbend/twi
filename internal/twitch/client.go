@@ -12,6 +12,14 @@ type ChatClient interface {
 	Close() error
 }
 
+// ChannelJoiner is an optional ChatClient capability: transports that can
+// join and leave channels on an already-open connection implement it, so
+// channels opened at runtime do not require a reconnect.
+type ChannelJoiner interface {
+	Join(channels ...string) error
+	Depart(channel string) error
+}
+
 type Event struct {
 	Kind       EventKind
 	Message    ChatMessage

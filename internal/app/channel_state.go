@@ -14,6 +14,11 @@ type channelStateSet struct {
 	states          map[string]*channelState
 	animationConfig animation.Config
 	clock           animation.Clock
+	// placeholder backs the no-channels-open empty state. It is never in
+	// order or states, so it cannot be joined, switched to, or shown in the
+	// sidebar; it exists only so every view and key handler still has a
+	// *channelState to read from while nothing is open.
+	placeholder *channelState
 }
 
 type channelState struct {
@@ -57,25 +62,104 @@ func newChannelStateSet(channels []string, animationConfig animation.Config, clo
 	for _, channel := range channels {
 		set.ensure(channel)
 	}
-	if len(set.order) == 0 {
-		set.ensure("chat")
+	if len(set.order) > 0 {
+		set.active = set.order[0]
 	}
-	set.active = set.order[0]
 	return set
+}
+
+// empty reports whether no channel is open, which is a normal startup state:
+// `twi chat` without --channel/--channels launches here and waits for the
+// /channels picker.
+func (s *channelStateSet) empty() bool {
+	return s == nil || len(s.order) == 0
 }
 
 func (s *channelStateSet) activeState() *channelState {
 	if s == nil {
 		return nil
 	}
+	if s.empty() {
+		return s.emptyState()
+	}
 	return s.ensure(s.active)
 }
 
+// emptyState lazily builds the placeholder used while nothing is open. It is
+// rebuilt on demand rather than at construction so the common case (channels
+// configured up front) allocates nothing extra.
+func (s *channelStateSet) emptyState() *channelState {
+	if s.placeholder == nil {
+		s.placeholder = s.newState("")
+	}
+	return s.placeholder
+}
+
 func (s *channelStateSet) activeName() string {
+	if s.empty() {
+		return ""
+	}
 	if state := s.activeState(); state != nil {
 		return state.name
 	}
-	return "chat"
+	return ""
+}
+
+// open joins a channel and makes it active, returning false when it was
+// already open and active. Reopening an already-open channel just switches
+// to it, so the picker never creates duplicates.
+func (s *channelStateSet) open(channel string) bool {
+	if s == nil || normalizeChannelName(channel) == "" {
+		return false
+	}
+	state := s.ensure(channel)
+	if state == nil {
+		return false
+	}
+	// ensure() already made it active if this was the first channel, in
+	// which case setActive reports no change but the set did change.
+	if s.active == channelKey(state.name) {
+		state.unread = 0
+		return true
+	}
+	return s.setActive(state.name)
+}
+
+// close removes a channel from the set. When the closed channel was active,
+// focus moves to its neighbor so the sidebar selection stays where the eye
+// already is; closing the last channel leaves the set empty.
+func (s *channelStateSet) close(channel string) bool {
+	if s == nil {
+		return false
+	}
+	key := channelKey(channel)
+	index := -1
+	for i, existing := range s.order {
+		if existing == key {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return false
+	}
+	s.order = append(s.order[:index], s.order[index+1:]...)
+	delete(s.states, key)
+	if s.active != key {
+		return true
+	}
+	if len(s.order) == 0 {
+		s.active = ""
+		return true
+	}
+	if index >= len(s.order) {
+		index = len(s.order) - 1
+	}
+	s.active = s.order[index]
+	if state := s.states[s.active]; state != nil {
+		state.unread = 0
+	}
+	return true
 }
 
 func (s *channelStateSet) ensure(channel string) *channelState {
@@ -86,14 +170,26 @@ func (s *channelStateSet) ensure(channel string) *channelState {
 	if name == "" {
 		name = normalizeChannelName(s.active)
 	}
+	// An unnamed channel with nothing active is the empty state, not a
+	// channel to invent a name for.
 	if name == "" {
-		name = "chat"
+		return s.emptyState()
 	}
 	key := channelKey(name)
 	if state, ok := s.states[key]; ok {
 		return state
 	}
-	state := &channelState{
+	state := s.newState(name)
+	s.states[key] = state
+	s.order = append(s.order, key)
+	if s.active == "" {
+		s.active = key
+	}
+	return state
+}
+
+func (s *channelStateSet) newState(name string) *channelState {
+	return &channelState{
 		name:           name,
 		status:         ConnectionState{Status: ConnectionDisconnected, Channel: name},
 		revealQueue:    animation.NewQueue(s.animationConfig, s.clock),
@@ -101,12 +197,6 @@ func (s *channelStateSet) ensure(channel string) *channelState {
 		activeMessages: make(map[string]twitch.ChatMessage),
 		localEchoes:    make(map[string]struct{}),
 	}
-	s.states[key] = state
-	s.order = append(s.order, key)
-	if s.active == "" {
-		s.active = key
-	}
-	return state
 }
 
 func (s *channelStateSet) setActive(channel string) bool {
@@ -244,9 +334,6 @@ func configuredChannels(primary string, configured []string) []string {
 	add(primary)
 	for _, channel := range configured {
 		add(channel)
-	}
-	if len(channels) == 0 {
-		channels = append(channels, "chat")
 	}
 	return channels
 }
