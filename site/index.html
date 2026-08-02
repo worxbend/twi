@@ -138,6 +138,113 @@ section { padding: 4rem 0; }
 .card h3 { margin: 0 0 .4rem; font-size: 1.08rem; }
 .card p { margin: 0; color: var(--muted); font-size: .95rem; }
 
+/* ---------- animated walkthrough ---------- */
+/* A scripted mock of the real TUI. It is deliberately dark in both colour
+   schemes: it stands in for a terminal, like the screenshots do. */
+.demo { display: grid; gap: 1.4rem; grid-template-columns: minmax(0, 1fr) 300px; align-items: start; }
+@media (max-width: 900px) { .demo { grid-template-columns: minmax(0, 1fr); } }
+
+.tw {
+  --tw-bg: #1a1a28; --tw-surface: #2b2d3c; --tw-surface-2: #323548; --tw-line: #3b3e52;
+  --tw-text: #d3d8e6; --tw-dim: #7b829c; --tw-blue: #61afef; --tw-green: #98c379;
+  --tw-pink: #d787d7; --tw-yellow: #e5c07b; --tw-orange: #e0955f;
+  position: relative; font-family: var(--mono); font-size: clamp(9px, 1.06vw, 13px);
+  line-height: 1.55; background: var(--tw-bg); color: var(--tw-text);
+  border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
+  box-shadow: 0 40px 90px -45px rgba(0,0,0,.9);
+}
+.tw-tabs { display: flex; gap: 1.4em; padding: .25em .9em; background: linear-gradient(90deg, #7b3fbf, #3f7bbf 45%, #4aa96c); color: #f2eefb; font-weight: 600; }
+.tw-tabs .sp { margin-left: auto; opacity: .9; }
+.tw-status { padding: .25em .9em; background: var(--tw-blue); color: #12121c; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tw-body { display: flex; gap: .55em; padding: .55em; min-height: 20em; }
+
+.tw-pane { border: 1px solid var(--tw-line); border-radius: 8px; padding: .45em .6em; position: relative; }
+.tw-pane > .lbl { position: absolute; top: -.72em; left: .8em; padding: 0 .45em; background: var(--tw-bg); font-size: .92em; }
+.tw-side { flex: 0 0 12em; transition: flex-basis .45s ease, opacity .35s ease, margin .45s ease; }
+.tw-side[hidden] { display: block; flex-basis: 0; opacity: 0; padding: 0; border-width: 0; margin: 0; overflow: hidden; }
+.tw-side .lbl { color: var(--tw-green); }
+.tw-chat { flex: 1 1 auto; min-width: 0; }
+.tw-chat .lbl { color: var(--tw-blue); }
+.tw-act { flex: 0 0 13em; }
+.tw-act .lbl { color: var(--tw-yellow); }
+@media (max-width: 700px) { .tw-act { display: none; } }
+
+.tw-ch { padding: .05em 0; color: var(--tw-dim); white-space: nowrap; }
+.tw-ch.on { color: var(--tw-text); }
+.tw-ch .x { float: right; color: var(--tw-dim); }
+
+.tw-rows { display: flex; flex-direction: column; gap: .3em; padding-top: .2em; }
+.tw-row { border-left: .35em solid var(--tw-line); background: var(--tw-surface); border-radius: 3px; padding: .1em .55em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: twIn .35s ease both; }
+.tw-row .who { font-weight: 600; }
+.tw-row .t { color: var(--tw-dim); }
+.tw-row.me { border-left-color: var(--tw-pink); background: #3a2f4a; }
+.tw-row.me .who { color: var(--tw-pink); }
+.tw-row.a { border-left-color: var(--tw-green); background: #2c3a36; }
+.tw-row.a .who { color: var(--tw-green); }
+.tw-row.b { border-left-color: var(--tw-orange); background: #3d3229; }
+.tw-row.b .who { color: var(--tw-orange); }
+@keyframes twIn { from { opacity: 0; transform: translateY(.5em); } to { opacity: 1; transform: none; } }
+
+.tw-empty { color: var(--tw-dim); padding: 1.6em .4em; }
+.tw-empty b { display: block; color: var(--tw-text); font-weight: 600; margin-bottom: .5em; }
+.tw-act-row { color: var(--tw-dim); white-space: nowrap; overflow: hidden; animation: twIn .3s ease both; }
+
+.tw-overlay { margin: 0 .55em .1em; border: 1px solid var(--tw-line); border-radius: 8px; padding: .45em .6em; position: relative; animation: twIn .25s ease both; }
+.tw-overlay .lbl { position: absolute; top: -.72em; left: .8em; padding: 0 .45em; background: var(--tw-bg); color: var(--tw-green); font-size: .92em; }
+.tw-opt { color: var(--tw-dim); padding: .02em 0; }
+.tw-opt.on { color: var(--tw-text); }
+.tw-opt.on::before { content: "> "; color: var(--tw-green); }
+.tw-opt:not(.on)::before { content: "  "; }
+
+.tw-composer { margin: .3em .55em .1em; border-left: .35em solid var(--tw-line); padding: .35em .7em; min-height: 3.4em; background: var(--tw-surface); border-radius: 3px; transition: border-color .2s; }
+.tw-composer.focus { border-left-color: var(--tw-pink); }
+.tw-reply { color: var(--tw-dim); font-style: italic; }
+.tw-draft .ph { color: var(--tw-dim); }
+.tw-caret { display: inline-block; width: .58em; height: 1.05em; vertical-align: text-bottom; background: var(--tw-text); animation: twBlink 1.05s steps(1) infinite; }
+@keyframes twBlink { 50% { opacity: 0; } }
+.tw-foot { color: var(--tw-dim); padding: 0 .95em .1em; }
+.tw-foot b { color: var(--tw-blue); font-weight: 600; }
+.tw-help { padding: .2em .9em .45em; color: var(--tw-dim); background: var(--tw-surface); white-space: nowrap; overflow: hidden; }
+
+/* floating keycap badge showing what is being pressed */
+.tw-keys { position: absolute; right: 1em; bottom: 3.4em; display: flex; gap: .35em; opacity: 0; transition: opacity .18s; pointer-events: none; }
+.tw-keys.on { opacity: 1; }
+.tw-keys span {
+  font-family: var(--mono); font-size: 1em; padding: .2em .6em; border-radius: 6px;
+  background: #f0ecfa; color: #1a1523; border-bottom: 2px solid #b9aed4; font-weight: 600;
+}
+
+/* step list beside the frame */
+.demo-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: .4rem; }
+.demo-steps li {
+  display: flex; gap: .7rem; align-items: flex-start; padding: .6rem .8rem; border-radius: 10px;
+  border: 1px solid transparent; color: var(--muted); font-size: .92rem; transition: all .25s;
+}
+.demo-steps li .n { font-family: var(--mono); font-size: .78rem; opacity: .7; padding-top: .15rem; }
+.demo-steps li.on { border-color: color-mix(in srgb, var(--brand) 45%, transparent); background: color-mix(in srgb, var(--brand) 12%, transparent); color: var(--text); }
+.demo-bar { display: flex; align-items: center; gap: .8rem; margin-top: .9rem; }
+.demo-btn {
+  font: inherit; font-size: .88rem; font-weight: 600; cursor: pointer; padding: .45rem .9rem; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--text);
+}
+.demo-btn:hover { border-color: color-mix(in srgb, var(--brand) 55%, transparent); }
+.demo-note { color: var(--muted); font-size: .85rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tw-row, .tw-act-row, .tw-overlay { animation: none; }
+  .tw-caret { animation: none; }
+  .tw-side { transition: none; }
+}
+
+/* ---------- gallery ---------- */
+.gallery { display: grid; gap: 1.1rem; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); }
+.gallery figure { margin: 0; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--panel); transition: transform .18s, border-color .18s; }
+.gallery figure:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--brand) 45%, transparent); }
+.gallery a { display: block; }
+.gallery img { display: block; width: 100%; }
+.gallery figcaption { padding: .8rem 1rem; color: var(--muted); font-size: .88rem; border-top: 1px solid var(--line); }
+.gallery figcaption strong { color: var(--text); }
+
 /* ---------- screenshot tabs (CSS only) ---------- */
 .shots input { position: absolute; opacity: 0; pointer-events: none; }
 .tabs { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1.2rem; }
@@ -153,11 +260,7 @@ section { padding: 4rem 0; }
 #s1:checked ~ .tabs label[for=s1],
 #s2:checked ~ .tabs label[for=s2],
 #s3:checked ~ .tabs label[for=s3],
-#s4:checked ~ .tabs label[for=s4],
-#s5:checked ~ .tabs label[for=s5],
-#s6:checked ~ .tabs label[for=s6],
-#s7:checked ~ .tabs label[for=s7],
-#s8:checked ~ .tabs label[for=s8] {
+#s4:checked ~ .tabs label[for=s4] {
   background: color-mix(in srgb, var(--brand) 18%, transparent);
   border-color: color-mix(in srgb, var(--brand) 55%, transparent);
   color: var(--brand-soft);
@@ -165,11 +268,7 @@ section { padding: 4rem 0; }
 #s1:checked ~ .panelbox > figure:nth-of-type(1),
 #s2:checked ~ .panelbox > figure:nth-of-type(2),
 #s3:checked ~ .panelbox > figure:nth-of-type(3),
-#s4:checked ~ .panelbox > figure:nth-of-type(4),
-#s5:checked ~ .panelbox > figure:nth-of-type(5),
-#s6:checked ~ .panelbox > figure:nth-of-type(6),
-#s7:checked ~ .panelbox > figure:nth-of-type(7),
-#s8:checked ~ .panelbox > figure:nth-of-type(8) { display: block; }
+#s4:checked ~ .panelbox > figure:nth-of-type(4) { display: block; }
 
 /* ---------- themes ---------- */
 .themes { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
@@ -220,8 +319,10 @@ footer { border-top: 1px solid var(--line); padding: 2.5rem 0; color: var(--mute
   <div class="wrap nav-inner">
     <a class="brand" href="#top"><span class="dot"></span>twi</a>
     <nav class="nav-links">
+      <a href="#demo">Walkthrough</a>
       <a href="#features">Features</a>
       <a href="#shots">Screenshots</a>
+      <a href="#gallery">Gallery</a>
       <a href="#themes">Themes</a>
       <a href="#install">Install</a>
       <a href="#keys">Keys</a>
@@ -248,7 +349,68 @@ footer { border-top: 1px solid var(--line); padding: 2.5rem 0; color: var(--mute
     </div>
 
     <div class="hero-shot">
-      <img src="assets/screenshots/live-multichannel.png" alt="twi running in a terminal during a real Twitch stream: a channel sidebar with two open channels, grouped chat messages tinted per author, and an activity column of joins, moderation actions and stream events">
+      <img src="assets/screenshots/chat-grouped.svg" alt="twi running in a terminal, showing grouped chat messages with badges, per-user colors, an activity feed, and a channel sidebar">
+    </div>
+  </div>
+</section>
+
+<section id="demo">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="kicker">Walkthrough</span>
+      <h2>A minute in twi</h2>
+      <p>Start with nothing open, find a channel, open a second one, and reply — the same keys you would actually press, in order.</p>
+    </div>
+
+    <div class="demo">
+      <div class="tw" id="tw" role="img" aria-label="Animated walkthrough of the twi terminal interface: opening a channel from the picker, showing the channel sidebar, opening a second channel, and sending a reply">
+        <div class="tw-tabs">
+          <span>*1:Chat</span><span>2:Stream Info</span><span>3:Misc</span>
+          <span class="sp" id="twWho">@you</span>
+        </div>
+        <div class="tw-status" id="twStatus">no channel open</div>
+        <div class="tw-body">
+          <div class="tw-pane tw-side" id="twSide" hidden>
+            <span class="lbl">📡 Channels · <span id="twSideCount">01</span></span>
+            <div id="twChans"></div>
+          </div>
+          <div class="tw-pane tw-chat">
+            <span class="lbl">💬 Chat<span id="twChatName"></span></span>
+            <div class="tw-rows" id="twRows"></div>
+          </div>
+          <div class="tw-pane tw-act">
+            <span class="lbl">⚡ Activity</span>
+            <div id="twAct"></div>
+          </div>
+        </div>
+        <div class="tw-overlay" id="twPicker" hidden>
+          <span class="lbl">📡 Open Channel</span>
+          <div id="twPickerHead">Open channel (enter=open, esc=cancel)</div>
+          <div id="twOpts"></div>
+        </div>
+        <div class="tw-composer" id="twComposer">
+          <div class="tw-reply" id="twReply" hidden></div>
+          <div class="tw-draft"><span id="twDraft"></span><span class="tw-caret" id="twCaret"></span></div>
+        </div>
+        <div class="tw-foot"><b>✉ Chat</b> · <span id="twFoot">ready</span></div>
+        <div class="tw-help">ctrl+p | i/esc | jk | space e/c | [] | 1-4/0 | ? | r/K | q quit</div>
+        <div class="tw-keys" id="twKeys"></div>
+      </div>
+
+      <div>
+        <ol class="demo-steps" id="twSteps">
+          <li><span class="n">01</span><span>Launch with no channel — the shell waits instead of erroring out.</span></li>
+          <li><span class="n">02</span><span>Type <code>/channels</code>, or press <kbd>space</kbd> <kbd>c</kbd>.</span></li>
+          <li><span class="n">03</span><span>Pick from the channels you follow, or type any name.</span></li>
+          <li><span class="n">04</span><span><kbd>space</kbd> <kbd>e</kbd> shows the channel sidebar.</span></li>
+          <li><span class="n">05</span><span>Open a second channel — it joins on the same connection.</span></li>
+          <li><span class="n">06</span><span><kbd>i</kbd> to write, <kbd>enter</kbd> to send, <kbd>esc</kbd> back to chat.</span></li>
+        </ol>
+        <div class="demo-bar">
+          <button class="demo-btn" id="twToggle" type="button">Pause</button>
+          <span class="demo-note" id="twNote">Loops automatically.</span>
+        </div>
+      </div>
     </div>
   </div>
 </section>
@@ -315,7 +477,7 @@ footer { border-top: 1px solid var(--line); padding: 2.5rem 0; color: var(--mute
     <div class="section-head">
       <span class="kicker">Screenshots</span>
       <h2>Real frames, not mockups</h2>
-      <p>The first five are straight terminal captures of a real Twitch session. The rest are generated by rendering twi's actual view and converting the terminal output to SVG, so they cannot drift from what the app prints.</p>
+      <p>Every image below is generated by rendering twi's actual view and converting the terminal output to SVG, so it cannot drift from what the app prints.</p>
     </div>
 
     <div class="shots">
@@ -323,41 +485,13 @@ footer { border-top: 1px solid var(--line); padding: 2.5rem 0; color: var(--mute
       <input type="radio" name="shot" id="s2">
       <input type="radio" name="shot" id="s3">
       <input type="radio" name="shot" id="s4">
-      <input type="radio" name="shot" id="s5">
-      <input type="radio" name="shot" id="s6">
-      <input type="radio" name="shot" id="s7">
-      <input type="radio" name="shot" id="s8">
       <div class="tabs">
-        <label for="s1">📡 Live session</label>
-        <label for="s2">🧵 Replies &amp; emotes</label>
-        <label for="s3">↩️ Reply mode</label>
-        <label for="s4">😀 Emote search</label>
-        <label for="s5">🎨 Theme picker</label>
-        <label for="s6">🧩 Grouped layout</label>
-        <label for="s7">📜 Inline layout</label>
-        <label for="s8">💬 Autocomplete</label>
+        <label for="s1">🧩 Grouped layout</label>
+        <label for="s2">📜 Inline layout</label>
+        <label for="s3">💬 Autocomplete</label>
+        <label for="s4">🎨 Theme picker</label>
       </div>
       <div class="panelbox">
-        <figure>
-          <img src="assets/screenshots/live-multichannel.png" alt="twi in a real Twitch session: a channel sidebar with two open channels, grouped chat messages tinted per author, and a right-hand activity column of joins, moderation actions and stream events">
-          <figcaption><strong>Live session</strong> — two channels open at once, the channel sidebar on the left, and the activity column tracking joins, moderation, follows and stream transitions on the right.</figcaption>
-        </figure>
-        <figure>
-          <img src="assets/screenshots/live-replies.png" alt="A live session in the solarized-dark theme showing a threaded reply quoting an earlier message, a highlighted @mention, and emote names drawn on tinted chips">
-          <figcaption><strong>Replies &amp; emotes</strong> — a reply quotes what it answers, your own <code>@mention</code> is highlighted, and emotes get a tinted chip. Theme: <code>solarized-dark</code>.</figcaption>
-        </figure>
-        <figure>
-          <img src="assets/screenshots/live-reply-mode.png" alt="A single-channel live session with the composer in reply mode, showing a Replying to worxbend banner above the draft, several authors colour-coded in chat, and a full activity column of joins and leaves">
-          <figcaption><strong>Reply mode</strong> (<kbd>r</kbd>) — the composer banners what you are answering while you type. One channel open, so the activity column has room for full join/leave lines.</figcaption>
-        </figure>
-        <figure>
-          <img src="assets/screenshots/live-emote-picker.png" alt="The same live session with the emote search overlay open below chat, listing matching emote names">
-          <figcaption><strong>Emote search</strong> (<kbd>ctrl+e</kbd>) — a searchable overlay over the live session; type to filter, <kbd>enter</kbd> inserts into the composer.</figcaption>
-        </figure>
-        <figure>
-          <img src="assets/screenshots/live-theme-picker.png" alt="The full-screen theme page listing every preset beside a swatch strip of its own colors, with one entry marked active and another highlighted for preview">
-          <figcaption><strong>Theme picker</strong> (<kbd>ctrl+t</kbd>) — every preset with a swatch strip of its own palette, applied live as you move the selection. <kbd>enter</kbd> saves, <kbd>esc</kbd> reverts.</figcaption>
-        </figure>
         <figure>
           <img src="assets/screenshots/chat-grouped.svg" alt="Grouped layout: each author gets a header row with badges and metadata, with their consecutive messages indented beneath">
           <figcaption><strong>Grouped layout</strong> — one header per author, consecutive messages collapsed underneath, tinted by that user's color. Theme: <code>claude</code>.</figcaption>
@@ -370,7 +504,44 @@ footer { border-top: 1px solid var(--line); padding: 2.5rem 0; color: var(--mute
           <img src="assets/screenshots/mention-autocomplete.svg" alt="The composer showing an @mention autocomplete strip with candidate usernames and role glyphs">
           <figcaption><strong>@mention autocomplete</strong> — candidates come from the live chatter roster, ranked by recency. Theme: <code>catppuccin-mocha</code>.</figcaption>
         </figure>
+        <figure>
+          <img src="assets/screenshots/theme-picker.svg" alt="Full-screen theme picker listing every preset with a swatch strip of its own colors">
+          <figcaption><strong>Theme picker</strong> (<kbd>ctrl+t</kbd>) — every preset with a swatch strip of its own palette, previewed live as you move.</figcaption>
+        </figure>
       </div>
+    </div>
+  </div>
+</section>
+
+<section id="gallery">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="kicker">Gallery</span>
+      <h2>Caught in the wild</h2>
+      <p>Unretouched terminal captures from a live Twitch session — two channels open, real chat, real activity feed. Click any frame for the full-size image.</p>
+    </div>
+
+    <div class="gallery">
+      <figure>
+        <a href="assets/screenshots/live-multichannel.png"><img loading="lazy" src="assets/screenshots/live-multichannel.png" alt="twi in a real Twitch session: a channel sidebar with two open channels, grouped chat messages tinted per author, and a right-hand activity column of joins, moderation actions and stream events"></a>
+        <figcaption><strong>Two channels at once</strong> — sidebar on the left, activity column on the right, chat in the middle.</figcaption>
+      </figure>
+      <figure>
+        <a href="assets/screenshots/live-replies.png"><img loading="lazy" src="assets/screenshots/live-replies.png" alt="A live session in the solarized-dark theme showing a threaded reply quoting an earlier message, a highlighted mention, and emote names drawn on tinted chips"></a>
+        <figcaption><strong>Replies and emotes</strong> — a reply quotes what it answers and emotes get a tinted chip. Theme: <code>solarized-dark</code>.</figcaption>
+      </figure>
+      <figure>
+        <a href="assets/screenshots/live-reply-mode.png"><img loading="lazy" src="assets/screenshots/live-reply-mode.png" alt="A single-channel live session with the composer in reply mode, showing a Replying to banner above the draft and a full activity column of joins and leaves"></a>
+        <figcaption><strong>Reply mode</strong> — the composer banners what you are answering. One channel open, so activity rows fit in full.</figcaption>
+      </figure>
+      <figure>
+        <a href="assets/screenshots/live-emote-picker.png"><img loading="lazy" src="assets/screenshots/live-emote-picker.png" alt="The same live session with the emote search overlay open below chat, listing matching emote names"></a>
+        <figcaption><strong>Emote search</strong> (<kbd>ctrl+e</kbd>) — filter as you type, <kbd>enter</kbd> inserts into the composer.</figcaption>
+      </figure>
+      <figure>
+        <a href="assets/screenshots/live-theme-picker.png"><img loading="lazy" src="assets/screenshots/live-theme-picker.png" alt="The full-screen theme page listing every preset beside a swatch strip of its own colors, with one entry marked active and another highlighted for preview"></a>
+        <figcaption><strong>Theme page</strong> (<kbd>ctrl+t</kbd>) — every preset with its own swatch strip, applied live as you move.</figcaption>
+      </figure>
     </div>
   </div>
 </section>
@@ -563,5 +734,272 @@ footer { border-top: 1px solid var(--line); padding: 2.5rem 0; color: var(--mute
   </div>
 </footer>
 
+<script>
+/* Animated walkthrough of the TUI. Pure DOM, no dependencies. The sequence
+   mirrors the real key bindings, so it stays honest about how the app works:
+   nothing here happens that twi does not do. */
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var tw = $('tw');
+  if (!tw) return;
+
+  var rows = $('twRows'), act = $('twAct'), chans = $('twChans'), side = $('twSide'),
+      picker = $('twPicker'), opts = $('twOpts'), pickerHead = $('twPickerHead'),
+      draft = $('twDraft'), reply = $('twReply'), composer = $('twComposer'),
+      status = $('twStatus'), chatName = $('twChatName'), foot = $('twFoot'),
+      keycaps = $('twKeys'), sideCount = $('twSideCount'),
+      stepEls = $('twSteps').children, toggle = $('twToggle'), note = $('twNote');
+
+  var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var FOLLOWS = ['pixelforge', 'kbdgremlin', 'nightbuild', 'lofi_dev'];
+  var STOP = {};
+  var run = 0, playing = false, visible = true;
+
+  function guard(id) { if (id !== run || !playing) throw STOP; }
+  function wait(ms, id) {
+    return new Promise(function (res, rej) {
+      setTimeout(function () { try { guard(id); res(); } catch (e) { rej(e); } }, reduced ? Math.min(ms, 80) : ms);
+    });
+  }
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); }
+
+  function step(i) {
+    for (var k = 0; k < stepEls.length; k++) stepEls[k].classList.toggle('on', k === i);
+  }
+  function keys(list) {
+    clear(keycaps);
+    for (var i = 0; i < list.length; i++) keycaps.appendChild(el('span', null, list[i]));
+    keycaps.classList.add('on');
+  }
+  function keysOff() { keycaps.classList.remove('on'); }
+
+  async function type(text, id, speed) {
+    var out = '';
+    clear(draft);
+    var span = el('span');
+    draft.appendChild(span);
+    for (var i = 0; i < text.length; i++) {
+      out += text[i];
+      span.textContent = out;
+      await wait(speed || 42, id);
+    }
+  }
+  function placeholder(text) {
+    clear(draft);
+    draft.appendChild(el('span', 'ph', text));
+  }
+
+  function chatRow(cls, who, text) {
+    var r = el('div', 'tw-row ' + cls);
+    r.appendChild(el('span', 't', '13:0' + (rows.children.length % 9) + ' '));
+    r.appendChild(el('span', 'who', who + ': '));
+    r.appendChild(document.createTextNode(text));
+    rows.appendChild(r);
+  }
+  function actRow(text) {
+    var r = el('div', 'tw-act-row', text);
+    act.appendChild(r);
+    while (act.children.length > 9) act.removeChild(act.firstChild);
+  }
+  function channelRow(name, active) {
+    var r = el('div', 'tw-ch' + (active ? ' on' : ''));
+    r.appendChild(document.createTextNode((active ? '> ' : '  ') + '#' + name));
+    if (active) r.appendChild(el('span', 'x', '✕'));
+    chans.appendChild(r);
+  }
+  function showOpts(sel) {
+    clear(opts);
+    for (var i = 0; i < FOLLOWS.length; i++) {
+      opts.appendChild(el('div', 'tw-opt' + (i === sel ? ' on' : ''), '#' + FOLLOWS[i] + ' · followed'));
+    }
+  }
+
+  function reset() {
+    clear(rows); clear(act); clear(chans); clear(opts); keysOff();
+    var empty = el('div', 'tw-empty');
+    empty.appendChild(el('b', null, 'No channels open.'));
+    empty.appendChild(el('div', null, '/channels or space c to open one'));
+    empty.appendChild(el('div', null, 'ctrl+p for the command palette'));
+    rows.appendChild(empty);
+    side.hidden = true;
+    picker.hidden = true;
+    composer.classList.remove('focus');
+    reply.hidden = true;
+    chatName.textContent = '';
+    status.textContent = 'no channel open';
+    foot.textContent = 'ready';
+    sideCount.textContent = '01';
+    placeholder('/channels to open a channel…');
+  }
+
+  async function sequence(id) {
+    reset();
+    step(0);
+    await wait(2200, id);
+
+    // 2 — reach for the picker
+    step(1);
+    composer.classList.add('focus');
+    await type('/channels', id);
+    await wait(500, id);
+    keys(['space', 'c']);
+    await wait(700, id);
+    keysOff();
+    placeholder('');
+    showOpts(0);
+    pickerHead.textContent = 'Open channel: loading follows…';
+    picker.hidden = false;
+    await wait(700, id);
+    pickerHead.textContent = 'Open channel (enter=open, esc=cancel)';
+
+    // 3 — choose one
+    step(2);
+    for (var i = 1; i <= 1; i++) {
+      keys(['j']);
+      showOpts(i);
+      await wait(560, id);
+    }
+    keysOff();
+    keys(['enter']);
+    await wait(420, id);
+    keysOff();
+    picker.hidden = true;
+    composer.classList.remove('focus');
+    clear(rows);
+    chatName.textContent = ' · #kbdgremlin · 👥 6';
+    status.textContent = 'LIVE 0:42 viewers=118 followers=2.4k | #kbdgremlin connected | channels=1';
+    placeholder('Message #kbdgremlin…');
+    actRow('13:02 · opened #kbdgremlin');
+    var script = [
+      ['a', 'rowan', 'ok that build actually compiles now'],
+      ['b', 'juno', 'first try? in this economy'],
+      ['a', 'rowan', 'third try, but who is counting'],
+      ['b', 'juno', 'the CI is counting']
+    ];
+    for (var s = 0; s < script.length; s++) {
+      chatRow(script[s][0], script[s][1], script[s][2]);
+      actRow('13:0' + (s + 3) + ' ⇄ ' + script[s][1] + ' joined');
+      await wait(620, id);
+    }
+
+    // 4 — sidebar
+    step(3);
+    keys(['space', 'e']);
+    await wait(560, id);
+    keysOff();
+    clear(chans);
+    channelRow('kbdgremlin', true);
+    side.hidden = false;
+    await wait(1500, id);
+
+    // 5 — a second channel, joined on the same connection
+    step(4);
+    keys(['space', 'c']);
+    await wait(560, id);
+    keysOff();
+    showOpts(3);
+    picker.hidden = false;
+    await wait(800, id);
+    keys(['enter']);
+    await wait(420, id);
+    keysOff();
+    picker.hidden = true;
+    clear(chans);
+    channelRow('kbdgremlin', false);
+    channelRow('lofi_dev', true);
+    sideCount.textContent = '02';
+    chatName.textContent = ' · #lofi_dev · 👥 3';
+    status.textContent = 'LIVE 0:44 viewers=118 | #lofi_dev connected | channels=2';
+    placeholder('Message #lofi_dev…');
+    actRow('13:07 · opened #lofi_dev');
+    clear(rows);
+    chatRow('a', 'mira', 'anyone else running this in a tiling wm');
+    await wait(700, id);
+    chatRow('b', 'juno', 'it reflows fine, i keep it in a 40-col split');
+    await wait(1300, id);
+
+    // 6 — write something
+    step(5);
+    keys(['i']);
+    await wait(480, id);
+    keysOff();
+    composer.classList.add('focus');
+    placeholder('');
+    await type('same, the sidebar folds away with space e', id, 38);
+    await wait(420, id);
+    keys(['enter']);
+    await wait(380, id);
+    keysOff();
+    chatRow('me', 'you', 'same, the sidebar folds away with space e');
+    foot.textContent = 'sent';
+    placeholder('Message #lofi_dev…');
+    await wait(700, id);
+    keys(['esc']);
+    await wait(420, id);
+    keysOff();
+    composer.classList.remove('focus');
+    await wait(2400, id);
+  }
+
+  async function loop() {
+    var id = run;
+    try {
+      while (true) {
+        await sequence(id);
+        guard(id);
+      }
+    } catch (e) {
+      if (e !== STOP) throw e;
+    }
+  }
+
+  function play() {
+    if (playing) return;
+    playing = true;
+    run++;
+    toggle.textContent = 'Pause';
+    loop();
+  }
+  function pause() {
+    playing = false;
+    run++;
+    keysOff();
+    toggle.textContent = 'Play';
+  }
+
+  toggle.addEventListener('click', function () {
+    if (playing) { pause(); note.textContent = 'Paused.'; }
+    else { note.textContent = 'Loops automatically.'; play(); }
+  });
+
+  reset();
+  step(0);
+
+  if (reduced) {
+    // Respect the OS setting: show the finished state and let the user opt in.
+    playing = false;
+    toggle.textContent = 'Play';
+    note.textContent = 'Animation off — reduced motion.';
+    return;
+  }
+
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(function (entries) {
+      var wasVisible = visible;
+      visible = entries[0].isIntersecting;
+      if (visible && !wasVisible && toggle.textContent === 'Pause') play();
+      else if (!visible && playing) { playing = false; run++; keysOff(); }
+    }, { threshold: 0.25 }).observe(tw);
+  }
+  play();
+})();
+</script>
 </body>
 </html>
