@@ -1,13 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
-  <title id="title">twi logo</title>
-  <desc id="desc">A compact terminal window logo for twi.</desc>
-  <rect width="256" height="256" rx="36" fill="#111827"/>
-  <rect x="24" y="36" width="208" height="164" rx="18" fill="#0b1020" stroke="#22d3ee" stroke-width="6"/>
-  <circle cx="50" cy="60" r="7" fill="#fb7185"/>
-  <circle cx="72" cy="60" r="7" fill="#facc15"/>
-  <circle cx="94" cy="60" r="7" fill="#34d399"/>
-  <path d="M52 111h53l-20-20 13-13 43 43-43 43-13-13 20-20H52z" fill="#f8fafc"/>
-  <path d="M148 151h56v18h-56z" fill="#a78bfa"/>
-  <path d="M46 218h164" stroke="#22d3ee" stroke-width="10" stroke-linecap="round"/>
-  <text x="128" y="238" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="800" fill="#f8fafc">twi</text>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" aria-labelledby="title desc" role="img" viewBox="0 0 256 256"><title id="title">twi logo</title><desc id="desc">A compact terminal window logo for twi.</desc><rect width="256" height="256" fill="#111827" rx="36"/><rect width="208" height="164" x="24" y="36" fill="#0b1020" stroke="#22d3ee" stroke-width="6" rx="18"/><circle cx="50" cy="60" r="7" fill="#fb7185"/><circle cx="72" cy="60" r="7" fill="#facc15"/><circle cx="94" cy="60" r="7" fill="#34d399"/><path fill="#f8fafc" d="M52 111h53l-20-20 13-13 43 43-43 43-13-13 20-20H52z"/><path fill="#a78bfa" d="M148 151h56v18h-56z"/><path stroke="#22d3ee" stroke-linecap="round" stroke-width="10" d="M46 218h164"/><text x="128" y="238" fill="#f8fafc" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="800" text-anchor="middle">twi</text></svg>
