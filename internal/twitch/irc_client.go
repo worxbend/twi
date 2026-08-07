@@ -292,7 +292,7 @@ func (c *IRCClient) Send(ctx context.Context, channel, text string) error {
 	if strings.TrimSpace(text) == "" {
 		return errors.New("message text cannot be empty")
 	}
-	c.currentClient().Say(channel, text)
+	c.currentClient().Say(channel, sanitizeIRCText(text))
 	return nil
 }
 
@@ -315,7 +315,7 @@ func (c *IRCClient) Reply(ctx context.Context, channel, parentMessageID, text st
 	if strings.TrimSpace(text) == "" {
 		return errors.New("message text cannot be empty")
 	}
-	c.currentClient().Reply(channel, parentMessageID, text)
+	c.currentClient().Reply(channel, parentMessageID, sanitizeIRCText(text))
 	return nil
 }
 

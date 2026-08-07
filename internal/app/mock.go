@@ -819,7 +819,7 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.focus == mockFocusComposer {
-				m.activeChannelState().composerText += string(msg.Runes)
+				m.insertComposerText(string(msg.Runes))
 				m.resetMentionSelection()
 			}
 		}
@@ -3201,6 +3201,41 @@ func (m mockShellModel) authorMeta(message twitch.ChatMessage) render.AuthorMeta
 		// every message whose author twi knows anything about.
 		Now: m.metricsNow().Truncate(time.Minute),
 	}
+}
+
+// insertComposerText appends typed or pasted text to the composer.
+//
+// A bracketed paste arrives as one burst of runes and can carry line breaks
+// and more text than Twitch will accept. The transport already refuses to put
+// a line break on the wire, but silently sending only part of what the
+// composer shows is its own surprise, so both are resolved here where the
+// user can still see and edit the result: breaks collapse to spaces, and the
+// text stops at Twitch's limit rather than being trimmed later.
+func (m *mockShellModel) insertComposerText(text string) {
+	if text == "" {
+		return
+	}
+	var b strings.Builder
+	b.Grow(len(text))
+	for _, r := range text {
+		switch {
+		case r == '\r' || r == '\n':
+			b.WriteRune(' ')
+		case r < 0x20 || r == 0x7f:
+			// Control characters have no meaning in a chat message and are
+			// interpreted by terminals that render it later.
+		default:
+			b.WriteRune(r)
+		}
+	}
+
+	state := m.activeChannelState()
+	combined := []rune(state.composerText + b.String())
+	if len(combined) > twitch.MaxChatMessageRunes {
+		combined = combined[:twitch.MaxChatMessageRunes]
+		state.sendFeedback = fmt.Sprintf("message capped at %d characters", twitch.MaxChatMessageRunes)
+	}
+	state.composerText = string(combined)
 }
 
 func (m *mockShellModel) deleteComposerRune() {
