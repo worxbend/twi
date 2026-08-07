@@ -25,6 +25,16 @@ constant in the source tree.
 
 ### Changed
 
+- **`ctrl+l` now asks before clearing chat.** It discards the whole retained
+  backlog for the channel and cannot be undone, from one keystroke, next to
+  keys used constantly, on a tool that is often running during a broadcast.
+  Press it twice; any other key cancels, and the status bar says so while the
+  confirmation is armed. Clearing from the command palette is unchanged —
+  picking it from a list is already deliberate.
+- **`twi doctor` no longer says a missing `twitch_username` breaks live
+  chat.** The login has been derived from the OAuth token since v0.12.0; the
+  config value is only a fallback for when token validation is unreachable.
+
 - **`twi chat` and `twi doctor` now warn when OAuth refresh cannot run.**
   `twi login` saves a refresh token and client ID but no client secret, and
   the refresh flow needs all three — so the documented setup held a refresh

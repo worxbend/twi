@@ -1913,7 +1913,7 @@ func TestDoctorLoadsStoredCredentialsWithoutPrintingTokens(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
 	}
-	for _, want := range []string{"[ok] credential file:", "[ok] twitch username: present", "[ok] oauth token: present", "[ok] token validation:"} {
+	for _, want := range []string{"[ok] credential file:", "[ok] twitch username: set", "[ok] oauth token: present", "[ok] token validation:"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("doctor output missing %q:\n%s", want, stdout.String())
 		}

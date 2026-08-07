@@ -27,7 +27,9 @@ func TestDoctorRunsWithoutCredentialsAndUsesWarnings(t *testing.T) {
 		},
 	})
 
-	for _, name := range []string{"config file", "twitch username", "oauth token", "token validation", "twitch reachability", "terminal"} {
+	// twitch username is deliberately absent: the login is derived from the
+	// OAuth token, so not configuring one is not a problem to warn about.
+	for _, name := range []string{"config file", "oauth token", "token validation", "twitch reachability", "terminal"} {
 		check := doctorCheck(t, report, name)
 		if check.Status != DoctorStatusWarn {
 			t.Fatalf("%s status = %q, want warn; detail=%q", name, check.Status, check.Detail)
@@ -75,11 +77,16 @@ func TestDoctorReportsCredentialPresenceAndValidationWithoutSecrets(t *testing.T
 		TokenValidator: validator,
 	})
 
-	for _, name := range []string{"twitch username", "oauth token", "refresh token", "client id"} {
+	for _, name := range []string{"oauth token", "refresh token", "client id"} {
 		check := doctorCheck(t, report, name)
 		if check.Status != DoctorStatusOK || check.Detail != "present" {
 			t.Fatalf("%s = (%q, %q), want ok present", name, check.Status, check.Detail)
 		}
+	}
+	// twitch username reports how the login is resolved rather than bare
+	// presence, since it is derived from the token and only a fallback.
+	if user := doctorCheck(t, report, "twitch username"); user.Status != DoctorStatusOK {
+		t.Fatalf("twitch username = (%q, %q), want ok", user.Status, user.Detail)
 	}
 	// The client secret check reports refresh capability rather than bare
 	// presence, because a saved refresh token without a secret cannot be

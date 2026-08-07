@@ -26,8 +26,9 @@ The [project website](https://worxbend.github.io/twi/) is a visual tour: screens
 
 The ADRs capture decisions that should not be re-litigated casually:
 
+- [adr/README.md](adr/README.md) — how to read these, and where they no longer match the code
 - [adr/0001-use-twitch-irc-for-mvp-chat-transport.md](adr/0001-use-twitch-irc-for-mvp-chat-transport.md)
-- [adr/0002-wrap-helix-identity-and-asset-apis.md](adr/0002-wrap-helix-identity-and-asset-apis.md)
+- [adr/0002-wrap-helix-identity-and-asset-apis.md](adr/0002-wrap-helix-identity-and-asset-apis.md) (intent holds; the single-client mechanism was never built — see [adr/README.md](adr/README.md))
 - [adr/0003-use-kitty-graphics-as-first-image-protocol.md](adr/0003-use-kitty-graphics-as-first-image-protocol.md) (superseded — Kitty graphics image rendering was removed)
 - [adr/0004-normalize-chat-events-before-rendering.md](adr/0004-normalize-chat-events-before-rendering.md)
 - [adr/0005-use-bounded-animation-scheduler.md](adr/0005-use-bounded-animation-scheduler.md)

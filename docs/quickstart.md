@@ -62,7 +62,7 @@ docker compose run --rm mock
 | `ctrl+y` | Toggle the highlight chip behind emotes and emoji. Saved to config. |
 | `ctrl+n` | Toggle full usernames (`DisplayName (login)`). Saved to config. |
 | `@` + `tab` | Complete a chatter's name from the live roster. |
-| `ctrl+l` | Clear the active channel's local chat history. |
+| `ctrl+l` | Clear the active channel's local chat history. Press twice — the first press asks, any other key cancels. |
 | `ctrl+r` | Request a reconnect when the active chat source supports it. |
 | `enter` | Send the composer text when connected live, or run the highlighted picker entry. |
 | `/channels` | Open the channel picker, or `/channels somechannel` to open one directly. |
@@ -85,8 +85,9 @@ Live mode is partially shipped: it supports one or more Twitch channels over IRC
 
 You need:
 
-- Your Twitch login name.
-- An IRC OAuth token.
+- An IRC OAuth token. Your login name is derived from it, so
+  `twitch_username` is optional and only used as a fallback when Twitch's
+  token validation endpoint is unreachable.
 - `chat:read` scope to read chat.
 - `chat:edit` scope to send chat.
 

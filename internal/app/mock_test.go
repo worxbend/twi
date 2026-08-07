@@ -2160,14 +2160,22 @@ func TestCommandPaletteAndKeyboardShortcutsClearAndReconnect(t *testing.T) {
 		t.Fatalf("replyTo after palette clear = %#v, want %#v", model.activeChannelState().replyTo, beforeReply)
 	}
 
+	// ctrl+l asks before discarding the backlog; see
+	// TestClearChatAsksBeforeDiscardingHistory. The palette entry above does
+	// not, because choosing it from a list is already deliberate.
 	model.activeChannelState().messages = numberedMockMessages("example", 2)
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
 	model = updated.(mockShellModel)
 	if cmd != nil {
 		t.Fatalf("ctrl+l returned command %#v, want nil", cmd)
 	}
+	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("confirming ctrl+l returned command %#v, want nil", cmd)
+	}
 	if got := len(model.activeChannelState().messages); got != 0 {
-		t.Fatalf("messages after ctrl+l = %d, want 0", got)
+		t.Fatalf("messages after confirmed ctrl+l = %d, want 0", got)
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})

@@ -122,37 +122,39 @@ type mockShellModel struct {
 	membershipBurstAt           time.Time
 	membershipBurstCount        int
 	membershipBurstIndex        int
-	mentionAutocomplete         mentionAutocompleteState
-	messageLayout               render.LayoutMode
-	badgeMode                   render.BadgeMode
-	highlightEmotes             bool
-	fullUsername                bool
-	debugRecording              bool
-	cpuSampleAt                 time.Time
-	cpuSampleTime               time.Duration
-	cpuPercent                  float64
-	cpuAvailable                bool
-	memoryMB                    float64
-	chatByteSamples             []chatByteSample
-	revealTickScheduled         bool
-	emoteIndex                  *assets.EmoteIndex
-	emoteEntries                map[string][]assets.EmoteEntry
-	emoteEntriesRequested       map[string]bool
-	sidebarVisibility           sidebarVisibility
-	sidebarSelected             int
-	leaderPending               bool
-	followedChannels            twitch.FollowedChannelLookup
-	followedChannelList         []twitch.FollowedChannel
-	followedChannelsRequested   bool
-	activeTab                   shellTab
-	channelManager              twitch.ChannelManager
-	gameLookup                  twitch.GameLookup
-	userLookup                  twitch.UserLookup
-	selfBroadcasterID           string
-	streamInfo                  streamInfoState
-	misc                        miscState
-	markerManager               twitch.MarkerManager
-	clipManager                 twitch.ClipManager
+	// pendingClearChat marks a ctrl+L awaiting confirmation.
+	pendingClearChat          bool
+	mentionAutocomplete       mentionAutocompleteState
+	messageLayout             render.LayoutMode
+	badgeMode                 render.BadgeMode
+	highlightEmotes           bool
+	fullUsername              bool
+	debugRecording            bool
+	cpuSampleAt               time.Time
+	cpuSampleTime             time.Duration
+	cpuPercent                float64
+	cpuAvailable              bool
+	memoryMB                  float64
+	chatByteSamples           []chatByteSample
+	revealTickScheduled       bool
+	emoteIndex                *assets.EmoteIndex
+	emoteEntries              map[string][]assets.EmoteEntry
+	emoteEntriesRequested     map[string]bool
+	sidebarVisibility         sidebarVisibility
+	sidebarSelected           int
+	leaderPending             bool
+	followedChannels          twitch.FollowedChannelLookup
+	followedChannelList       []twitch.FollowedChannel
+	followedChannelsRequested bool
+	activeTab                 shellTab
+	channelManager            twitch.ChannelManager
+	gameLookup                twitch.GameLookup
+	userLookup                twitch.UserLookup
+	selfBroadcasterID         string
+	streamInfo                streamInfoState
+	misc                      miscState
+	markerManager             twitch.MarkerManager
+	clipManager               twitch.ClipManager
 }
 
 var _ tea.Model = mockShellModel{}
@@ -632,6 +634,12 @@ func (m mockShellModel) Init() tea.Cmd {
 func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Any key other than a second ctrl+L abandons a pending clear, so a
+		// stray press cannot arm the confirmation and sit waiting for an
+		// unrelated keystroke to trigger it later.
+		if m.pendingClearChat && msg.Type != tea.KeyCtrlL {
+			m.pendingClearChat = false
+		}
 		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
 		}
@@ -726,7 +734,18 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyPgDown:
 			m.scrollBy(-m.layout().chatContentHeight)
 		case tea.KeyCtrlL:
-			m.clearLocalChat()
+			// Clearing discards the whole retained backlog for the channel
+			// and cannot be undone. It is one keystroke, next to keys used
+			// constantly, on a tool that is often running during a live
+			// broadcast -- so it asks once. The leader chord for closing a
+			// channel and the sidebar's explicit x are already deliberate
+			// enough not to need this.
+			if m.pendingClearChat {
+				m.pendingClearChat = false
+				m.clearLocalChat()
+				break
+			}
+			m.pendingClearChat = true
 		case tea.KeyCtrlR:
 			return m, m.requestReconnect()
 		case tea.KeyBackspace:
@@ -1084,6 +1103,11 @@ func (m mockShellModel) statusLine(width int) string {
 	// it in the same line.
 	if dropped := m.droppedMessageCount(); dropped > 0 {
 		left += fmt.Sprintf(" | dropped=%d", dropped)
+	}
+	// The prompt is the whole point of the guard: an armed confirmation the
+	// user cannot see is worse than no guard at all.
+	if m.pendingClearChat {
+		left += " | clear chat? ctrl+L again to confirm"
 	}
 	if m.lastSystemNotification != nil && width >= 58 {
 		left += " | notify: " + systemNotificationSummary(*m.lastSystemNotification)

@@ -66,7 +66,7 @@ func DoctorWithOptions(ctx context.Context, cfg config.Config, opts DoctorOption
 
 	checks := []DoctorCheck{
 		configPathCheck(cfg.Path, opts.ConfigLoadError),
-		credentialCheck("twitch username", cfg.Twitch.Username, "live chat unavailable until TWI_TWITCH_USERNAME or TWITCH_USERNAME is set"),
+		usernameCheck(cfg.Twitch.Username),
 		credentialCheck("oauth token", cfg.Twitch.OAuthToken, "live chat unavailable until TWI_TWITCH_OAUTH_TOKEN or TWITCH_ACCESS_TOKEN is set"),
 		credentialCheck("refresh token", cfg.Twitch.RefreshToken, "auth refresh unavailable until TWI_TWITCH_REFRESH_TOKEN or TWITCH_REFRESH_TOKEN is set"),
 		credentialCheck("client id", cfg.Twitch.ClientID, "optional Helix/API features unavailable"),
@@ -120,6 +120,22 @@ func configPathCheck(path string, loadErr error) DoctorCheck {
 	default:
 		return warnCheck("config file", fmt.Sprintf("%s (%s)", displayPath, config.RedactDisplayValue(err.Error())))
 	}
+}
+
+// usernameCheck reports the configured login as optional context rather than
+// a requirement.
+//
+// twi derives the IRC login from the OAuth token itself, so a missing
+// twitch_username costs nothing; the config value is only a fallback for when
+// Twitch's validation endpoint is unreachable. Doctor used to say live chat
+// was "unavailable until TWI_TWITCH_USERNAME is set", which sent people to
+// configure something that has not been required since the login became
+// token-derived.
+func usernameCheck(username string) DoctorCheck {
+	if strings.TrimSpace(username) == "" {
+		return okCheck("twitch username", "not set; the login is derived from the OAuth token")
+	}
+	return okCheck("twitch username", "set; used only as a fallback if token validation is unreachable")
 }
 
 func credentialCheck(name, value, missingDetail string) DoctorCheck {

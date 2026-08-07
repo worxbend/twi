@@ -21,8 +21,12 @@ The runtime shape is a set of narrow boundaries around the Bubble Tea shell:
  internal/render            internal/assets
       |                           |
       v                           v
- terminal rows              internal/storage
+ terminal rows              Twitch asset APIs
 ```
+
+`internal/storage` is reached from `internal/cli` (credentials) and
+`internal/app` (diagnostics), not from `internal/assets`. Verify any edge in
+this diagram with `go list -deps ./internal/<pkg>` before relying on it.
 
 The app consumes normalized messages and app-facing interfaces. It does not import concrete Twitch IRC callback types, and it does not perform network or disk I/O from `View`.
 

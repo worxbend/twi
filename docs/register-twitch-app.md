@@ -167,12 +167,14 @@ twi login                       # registers the redirect URL above on the app fi
 twi chat --channel somechannel
 ```
 
-`twi chat` hard-requires only a **username** and an **access token** (plus at
-least one channel). The **Client ID** additionally unlocks every
+`twi chat` hard-requires only an **access token** (the login is derived from
+it). The **Client ID** additionally unlocks every
 Helix-API-backed feature (Stream Info, markers, `/clip`, follower/subscriber
 counts, category picker, emote autocomplete), and the **Client ID + Secret +
-refresh token** let `twi` silently refresh an expired token once on an IRC auth
-failure instead of dropping you.
+refresh token** let `twi` silently refresh an expired token on an IRC auth
+failure instead of dropping you. Without the **secret**, the saved refresh
+token cannot be redeemed and chat will disconnect when the access token
+expires (about 4 hours); `twi chat` warns about this at startup.
 
 ## Redirect URL Rules
 

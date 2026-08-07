@@ -16,7 +16,7 @@
 
 <p align="center">
   <b>Twitch chat that lives in your terminal.</b><br>
-  Keyboard-first · 13 themes · no browser tab · allergic to leaking your OAuth token
+  Keyboard-first · 33 themes · no browser tab · allergic to leaking your OAuth token
 </p>
 
 <p align="center">
@@ -339,7 +339,7 @@ is only claimed when that document records a complete credential set.
 | `0` | Reset active-channel message filters. |
 | `r` | Reply to the selected message. |
 | `K` | Open or close the selected-message inspect panel. |
-| `ctrl+l` | Clear the active channel's local chat history. |
+| `ctrl+l` | Clear the active channel's local chat history. Press twice — the first press asks, any other key cancels. |
 | `ctrl+r` | Restart the active live chat source when supported, preserving channel history and drafts. |
 | `enter` | Send from the composer in live mode, or run the highlighted entry in an open picker. |
 | `/me does a thing` | Send a Twitch action message. |
