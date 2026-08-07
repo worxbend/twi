@@ -1120,3 +1120,81 @@ func (f *fakeRestartTransportFactory) calls() int {
 	defer f.mu.Unlock()
 	return f.callsValue
 }
+
+// TestAutoReconnectRestartsAfterTransportEnds covers chat coming back on its
+// own. Twitch closes connections routinely -- a server restart, a momentary
+// blip -- and previously chat stayed dead until someone noticed the silence
+// and pressed ctrl+r, which on a stream can be a long time.
+func TestAutoReconnectRestartsAfterTransportEnds(t *testing.T) {
+	var mu sync.Mutex
+	var built []*fakeTwitchTransport
+	factory := func(context.Context) (twitch.ChatClient, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		transport := newFakeTwitchTransport(4)
+		built = append(built, transport)
+		return transport, nil
+	}
+
+	client, err := NewRestartableLiveChatClient(context.Background(), factory, 4)
+	if err != nil {
+		t.Fatalf("NewRestartableLiveChatClient returned error: %v", err)
+	}
+	defer client.Close()
+
+	mu.Lock()
+	first := built[0]
+	mu.Unlock()
+
+	// The transport ends on its own, as it would on a dropped connection.
+	first.Close()
+
+	deadline := time.After(30 * time.Second)
+	for {
+		mu.Lock()
+		count := len(built)
+		mu.Unlock()
+		if count > 1 {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("no automatic reconnect after the transport ended; chat would stay dead until ctrl+r")
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
+// TestAutoReconnectStopsWhenClientCloses keeps a deliberate shutdown from
+// being fought by the retry loop.
+func TestAutoReconnectStopsWhenClientCloses(t *testing.T) {
+	var mu sync.Mutex
+	built := 0
+	factory := func(context.Context) (twitch.ChatClient, error) {
+		mu.Lock()
+		built++
+		mu.Unlock()
+		return newFakeTwitchTransport(2), nil
+	}
+
+	client, err := NewRestartableLiveChatClient(context.Background(), factory, 2)
+	if err != nil {
+		t.Fatalf("NewRestartableLiveChatClient returned error: %v", err)
+	}
+	if err := client.Close(); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+
+	mu.Lock()
+	afterClose := built
+	mu.Unlock()
+
+	time.Sleep(300 * time.Millisecond)
+
+	mu.Lock()
+	final := built
+	mu.Unlock()
+	if final != afterClose {
+		t.Fatalf("transports built after Close = %d, want none; the retry loop ignored shutdown", final-afterClose)
+	}
+}

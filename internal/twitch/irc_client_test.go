@@ -158,6 +158,10 @@ func TestIRCClientDebugLogsSendFieldsWithoutMessageTextOrCredentials(t *testing.
 		t.Fatalf("NewIRCClient returned error: %v", err)
 	}
 
+	// Send refuses on an unregistered session, so mark this one connected:
+	// the subject here is what the debug log records, not the gate.
+	client.connected.Store(true)
+
 	client.logger.Log(context.Background(), "twitch.irc.test_error", slog.String("error", "oauth:configured-token refresh-secret client-secret"))
 	client.refresh.Logger.Log(context.Background(), "twitch.oauth_refresh.test_error", slog.String("error", "oauth:configured-token refresh-secret client-secret"))
 	if err := client.Send(context.Background(), "example", "hello oauth:message-secret"); err != nil {
@@ -655,5 +659,80 @@ func TestIRCClientStopsRefreshingAfterRepeatedRejection(t *testing.T) {
 	mu.Unlock()
 	if got > maxIRCAuthRefreshes+1 {
 		t.Fatalf("built %d sessions, want no more than %d; the refresh loop is unbounded", got, maxIRCAuthRefreshes+1)
+	}
+}
+
+// TestIRCClientSendRefusesWhenNotConnected is the regression for a send that
+// lied. go-twitch-irc's Say and Reply return nothing and queue the line
+// regardless of connection state, so Send always returned nil: the composer
+// showed a message as accepted while it sat in a buffer on a dead socket and
+// never reached Twitch.
+func TestIRCClientSendRefusesWhenNotConnected(t *testing.T) {
+	client, err := NewIRCClient(IRCConfig{
+		Username:   "viewer",
+		OAuthToken: "oauth:token",
+		Channels:   []string{"example"},
+	})
+	if err != nil {
+		t.Fatalf("NewIRCClient returned error: %v", err)
+	}
+
+	if err := client.Send(context.Background(), "example", "hello"); !errors.Is(err, ErrNotConnected) {
+		t.Fatalf("Send error = %v, want ErrNotConnected", err)
+	}
+	if err := client.Reply(context.Background(), "example", "parent-1", "hi"); !errors.Is(err, ErrNotConnected) {
+		t.Fatalf("Reply error = %v, want ErrNotConnected", err)
+	}
+	if IsAuthError(client.Send(context.Background(), "example", "hello")) {
+		t.Fatal("a disconnected send was classified as an auth failure")
+	}
+}
+
+func TestIRCClientSendSucceedsOnceConnected(t *testing.T) {
+	oldNewIRCClient := newIRCClient
+	t.Cleanup(func() { newIRCClient = oldNewIRCClient })
+
+	session := &fakeIRCSession{}
+	newIRCClient = func(username, token string, channels []string) ircSession {
+		session.username = username
+		session.token = token
+		session.channels = append([]string(nil), channels...)
+		return session
+	}
+
+	client, err := NewIRCClient(IRCConfig{
+		Username:   "viewer",
+		OAuthToken: "oauth:token",
+		Channels:   []string{"example"},
+	})
+	if err != nil {
+		t.Fatalf("NewIRCClient returned error: %v", err)
+	}
+	client.connected.Store(true)
+
+	if err := client.Send(context.Background(), "example", "hello"); err != nil {
+		t.Fatalf("Send on a connected session returned %v, want nil", err)
+	}
+}
+
+// TestIRCClientSendRefusesAfterDisconnect covers the state transition, which
+// is the case that actually bites: the session was live and then dropped.
+func TestIRCClientSendRefusesAfterDisconnect(t *testing.T) {
+	client, err := NewIRCClient(IRCConfig{
+		Username:   "viewer",
+		OAuthToken: "oauth:token",
+		Channels:   []string{"example"},
+	})
+	if err != nil {
+		t.Fatalf("NewIRCClient returned error: %v", err)
+	}
+	client.connected.Store(true)
+	if err := client.Send(context.Background(), "example", "hello"); err != nil {
+		t.Fatalf("Send while connected returned %v, want nil", err)
+	}
+
+	client.connected.Store(false)
+	if err := client.Send(context.Background(), "example", "hello"); !errors.Is(err, ErrNotConnected) {
+		t.Fatalf("Send after disconnect = %v, want ErrNotConnected", err)
 	}
 }

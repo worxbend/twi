@@ -42,6 +42,15 @@ constant in the source tree.
   keepalives — and Twitch dropped the connection. It now discards the oldest
   queued message instead, and the status bar reports `dropped=N` so the loss
   is visible rather than silent.
+- **Chat reconnects on its own.** When Twitch closed the connection — a
+  server restart, a momentary blip — chat stayed dead until someone noticed
+  the silence and pressed `ctrl+r`, which mid-stream can be a long time. It
+  now retries automatically with exponential backoff (2s doubling to 60s,
+  giving up after roughly ten minutes) and says so if it gives up.
+- **Sending on a dead connection no longer reports success.** The IRC library
+  queues a message and returns nothing, so `Send` always reported the message
+  as accepted even with the socket down; it was written into a buffer and
+  never reached Twitch. Sends are now refused while disconnected.
 - **Chat recovers from token expiry instead of dying at it.** A refresh
   rotates both tokens, but the reconnect path had captured the old ones, so
   `ctrl+r` — the recovery key the UI names — retried with credentials Twitch

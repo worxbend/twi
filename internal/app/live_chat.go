@@ -17,6 +17,17 @@ import (
 
 const defaultLiveChatBuffer = 128
 
+const (
+	// initialAutoReconnectDelay is short enough that a momentary blip is
+	// invisible, long enough not to hammer a server that just closed us.
+	initialAutoReconnectDelay = 2 * time.Second
+	maxAutoReconnectDelay     = 60 * time.Second
+	autoReconnectTimeout      = 30 * time.Second
+	// maxAutoReconnectAttempts spans roughly ten minutes with the backoff
+	// above, after which the failure is reported and ctrl+r takes over.
+	maxAutoReconnectAttempts = 10
+)
+
 var credentialRedactor = auth.NewRedactor()
 
 // LiveChatClient adapts the transport-level Twitch chat client into the
@@ -269,6 +280,13 @@ func (c *LiveChatClient) Close() error {
 }
 
 func (c *LiveChatClient) Reconnect(ctx context.Context) error {
+	return c.reconnect(ctx, "manual")
+}
+
+// reconnect restarts the transport. kind distinguishes a user pressing ctrl+r
+// from the automatic retry loop, and only changes the wording of the states
+// it emits.
+func (c *LiveChatClient) reconnect(ctx context.Context, kind string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -291,7 +309,7 @@ func (c *LiveChatClient) Reconnect(ctx context.Context) error {
 
 	c.emitState(ctx, ConnectionState{
 		Status: ConnectionReconnecting,
-		Detail: "manual reconnect restarting Twitch IRC",
+		Detail: kind + " reconnect restarting Twitch IRC",
 		At:     time.Now(),
 	})
 	c.debugLiveEvent("live_chat.reconnect.start")
@@ -305,7 +323,7 @@ func (c *LiveChatClient) Reconnect(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		c.emitState(context.Background(), ConnectionState{
 			Status: ConnectionFailed,
-			Detail: "manual reconnect canceled; retry with ctrl+r",
+			Detail: kind + " reconnect canceled; retry with ctrl+r",
 			Err:    err,
 			At:     time.Now(),
 		})
@@ -318,7 +336,7 @@ func (c *LiveChatClient) Reconnect(ctx context.Context) error {
 		if errors.Is(err, context.Canceled) {
 			c.emitState(context.Background(), ConnectionState{
 				Status: ConnectionFailed,
-				Detail: "manual reconnect canceled; retry with ctrl+r",
+				Detail: kind + " reconnect canceled; retry with ctrl+r",
 				Err:    err,
 				At:     time.Now(),
 			})
@@ -328,7 +346,7 @@ func (c *LiveChatClient) Reconnect(ctx context.Context) error {
 		if errors.Is(err, context.DeadlineExceeded) {
 			c.emitState(context.Background(), ConnectionState{
 				Status: ConnectionFailed,
-				Detail: "manual reconnect timed out; retry with ctrl+r",
+				Detail: kind + " reconnect timed out; retry with ctrl+r",
 				Err:    err,
 				At:     time.Now(),
 			})
@@ -367,14 +385,14 @@ func (c *LiveChatClient) bridge(session *liveChatSession) {
 				return
 			}
 			if !ok {
-				if terminalStateSeen {
-					return
+				if !terminalStateSeen {
+					c.emitState(session.ctx, ConnectionState{
+						Status: ConnectionDisconnected,
+						Detail: "Twitch IRC connection closed",
+						At:     time.Now(),
+					})
 				}
-				c.emitState(session.ctx, ConnectionState{
-					Status: ConnectionDisconnected,
-					Detail: "Twitch IRC connection closed",
-					At:     time.Now(),
-				})
+				go c.autoReconnect()
 				return
 			}
 			c.handleEvent(session.ctx, event)
@@ -395,6 +413,64 @@ func (c *LiveChatClient) bridge(session *liveChatSession) {
 			return
 		}
 	}
+}
+
+// autoReconnect retries the connection with exponential backoff after the
+// transport ends on its own.
+//
+// Chat previously stayed down until someone noticed and pressed ctrl+r. On a
+// stream that means dead chat for however long it takes to look at the
+// terminal -- and Twitch drops connections routinely, for a server restart or
+// a momentary network blip, not only for anything wrong with twi. Backoff
+// keeps a persistent outage from turning into a reconnect flood.
+func (c *LiveChatClient) autoReconnect() {
+	if c.factory == nil {
+		return
+	}
+	delay := initialAutoReconnectDelay
+	for attempt := 1; attempt <= maxAutoReconnectAttempts; attempt++ {
+		select {
+		case <-c.done:
+			return
+		case <-time.After(delay):
+		}
+		if c.isClosed() || c.reconnectingNow() {
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(c.baseCtx, autoReconnectTimeout)
+		err := c.reconnect(ctx, "automatic")
+		cancel()
+		if err == nil {
+			c.debugLiveEvent("live_chat.auto_reconnect.succeeded", slog.Int("attempt", attempt))
+			return
+		}
+		if errors.Is(err, ErrLiveChatClientClosed) || errors.Is(err, ErrReconnectUnavailable) {
+			return
+		}
+		c.debugLiveEvent("live_chat.auto_reconnect.failed",
+			slog.Int("attempt", attempt),
+			slog.String("error", credentialSafeDetail(err)),
+		)
+		delay = min(delay*2, maxAutoReconnectDelay)
+	}
+	c.emitState(c.baseCtx, ConnectionState{
+		Status: ConnectionFailed,
+		Detail: "automatic reconnect gave up after repeated failures; retry with ctrl+r",
+		At:     time.Now(),
+	})
+}
+
+func (c *LiveChatClient) isClosed() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.closedFlag
+}
+
+func (c *LiveChatClient) reconnectingNow() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.reconnecting
 }
 
 func (c *LiveChatClient) newSession(ctx context.Context, factory LiveChatTransportFactory) (*liveChatSession, error) {

@@ -80,3 +80,7 @@ func resolveTokenSource(source func() string, static string) func() string {
 	trimmed := strings.TrimSpace(static)
 	return func() string { return trimmed }
 }
+
+// ErrNotConnected reports a send attempted while the IRC session is not
+// registered. It is not an auth failure and must not be reported as one.
+var ErrNotConnected = errors.New("not connected to Twitch IRC; the message was not sent")

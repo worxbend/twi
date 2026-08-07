@@ -108,6 +108,11 @@ type IRCClient struct {
 	closeOnce sync.Once
 
 	droppedEvents atomic.Uint64
+	// connected tracks whether the IRC session has completed registration.
+	// go-twitch-irc's Say/Reply queue a line and return nothing, so this is
+	// the only way to tell a send that reached Twitch from one written into a
+	// buffer on a dead socket.
+	connected atomic.Bool
 }
 
 var (
@@ -192,6 +197,16 @@ func (c *IRCClient) Connect(ctx context.Context) (<-chan Event, error) {
 	// stops keepalives and Twitch closes the connection. Losing the oldest
 	// unread event is a far smaller failure than losing the session.
 	emit := func(event Event) {
+		// Track registration state on the way past: Send has no other way to
+		// know whether the socket is live.
+		if event.Kind == EventConnection {
+			switch event.Connection.Type {
+			case ConnectionEventConnect:
+				c.connected.Store(true)
+			case ConnectionEventDisconnect:
+				c.connected.Store(false)
+			}
+		}
 		select {
 		case events <- event:
 			return
@@ -360,8 +375,26 @@ func (c *IRCClient) Send(ctx context.Context, channel, text string) error {
 	if strings.TrimSpace(text) == "" {
 		return errors.New("message text cannot be empty")
 	}
+	if err := c.requireConnected(); err != nil {
+		return err
+	}
 	c.currentClient().Say(channel, sanitizeIRCText(text))
 	return nil
+}
+
+// requireConnected refuses a send on a session that is not registered.
+//
+// go-twitch-irc's Say and Reply return nothing: they queue a line onto an
+// internal channel whether or not a connection exists. Without this check,
+// Send always returned nil, so the composer reported a message as accepted
+// while it was written into a buffer on a dead socket and never reached
+// Twitch. Reporting success for something that did not happen is worse than
+// reporting the failure.
+func (c *IRCClient) requireConnected() error {
+	if c.connected.Load() {
+		return nil
+	}
+	return ErrNotConnected
 }
 
 func (c *IRCClient) Reply(ctx context.Context, channel, parentMessageID, text string) error {
@@ -382,6 +415,9 @@ func (c *IRCClient) Reply(ctx context.Context, channel, parentMessageID, text st
 	}
 	if strings.TrimSpace(text) == "" {
 		return errors.New("message text cannot be empty")
+	}
+	if err := c.requireConnected(); err != nil {
+		return err
 	}
 	c.currentClient().Reply(channel, parentMessageID, sanitizeIRCText(text))
 	return nil
