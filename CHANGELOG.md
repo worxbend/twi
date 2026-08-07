@@ -42,6 +42,21 @@ constant in the source tree.
   keepalives — and Twitch dropped the connection. It now discards the oldest
   queued message instead, and the status bar reports `dropped=N` so the loss
   is visible rather than silent.
+- **Chat recovers from token expiry instead of dying at it.** A refresh
+  rotates both tokens, but the reconnect path had captured the old ones, so
+  `ctrl+r` — the recovery key the UI names — retried with credentials Twitch
+  had already invalidated. Only one refresh was possible per process, so a
+  session outliving two expiries ended with no way back. All ten Helix-backed
+  features (LIVE indicator, follower/subscriber counts, `/clip`, markers,
+  Stream Info, emote index) also froze the startup token and began returning
+  401 after a refresh while chat kept working. One shared credential holder
+  now serves all of them, and the refresh POST has a 15-second timeout where
+  it previously had none.
+- **Ordinary Twitch notices no longer look like auth failures.** Errors were
+  classified by searching for `auth`, `invalid`, `permission` or `scope` in
+  the message text, so `x509: certificate signed by unknown authority` was
+  reported as a bad OAuth token, and a `no_permission` notice turned the
+  status bar red on a perfectly healthy connection.
 - **Deleting a message no longer reprints it.** Twitch's `CLEARMSG` carries
   the deleted message's text, and twi rendered that into a new visible notice
   while leaving the original in place — so moderating a message put its text
