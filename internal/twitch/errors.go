@@ -84,3 +84,12 @@ func resolveTokenSource(source func() string, static string) func() string {
 // ErrNotConnected reports a send attempted while the IRC session is not
 // registered. It is not an auth failure and must not be reported as one.
 var ErrNotConnected = errors.New("not connected to Twitch IRC; the message was not sent")
+
+// ErrRateLimited reports a send refused locally because it would exceed
+// Twitch's chat allowance. Exceeding it gets the connection closed, not just
+// the message rejected, so twi declines rather than finding out from Twitch.
+var ErrRateLimited = errors.New("sending too fast; Twitch limits chat to 20 messages per 30 seconds")
+
+// ErrDuplicateMessage reports a message identical to one just sent in the
+// same channel, which Twitch rejects with msg_duplicate.
+var ErrDuplicateMessage = errors.New("Twitch rejects an identical repeat of your last message; change it slightly")

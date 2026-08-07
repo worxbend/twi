@@ -47,6 +47,12 @@ constant in the source tree.
   the silence and pressed `ctrl+r`, which mid-stream can be a long time. It
   now retries automatically with exponential backoff (2s doubling to 60s,
   giving up after roughly ten minutes) and says so if it gives up.
+- **Sending too fast is refused locally instead of costing the connection.**
+  Twitch allows 20 chat messages per 30 seconds and closes the connection —
+  not just the message — when you exceed it. `SendResult.RateLimited` and the
+  composer's rate-limited state both already existed with nothing setting
+  them, so hitting the ceiling looked like a successful send. Twitch's
+  duplicate-message rule is enforced the same way.
 - **Sending on a dead connection no longer reports success.** The IRC library
   queues a message and returns nothing, so `Send` always reported the message
   as accepted even with the socket down; it was written into a buffer and

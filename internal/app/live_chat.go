@@ -204,8 +204,9 @@ func (c *LiveChatClient) Send(ctx context.Context, req SendRequest) (SendResult,
 	if req.ReplyToMessageID != "" {
 		if err := transport.Reply(ctx, req.Channel, req.ReplyToMessageID, text); err != nil {
 			safeErr := credentialSafeSendError(err)
-			c.debugLiveSendComplete(req, SendResult{}, safeErr)
-			return SendResult{}, safeErr
+			result := SendResult{RateLimited: isRateLimited(err), Detail: credentialSafeSendDetail(err)}
+			c.debugLiveSendComplete(req, result, safeErr)
+			return result, safeErr
 		}
 		result := SendResult{AcceptedAt: time.Now()}
 		c.debugLiveSendComplete(req, result, nil)
@@ -213,8 +214,9 @@ func (c *LiveChatClient) Send(ctx context.Context, req SendRequest) (SendResult,
 	}
 	if err := transport.Send(ctx, req.Channel, text); err != nil {
 		safeErr := credentialSafeSendError(err)
-		c.debugLiveSendComplete(req, SendResult{}, safeErr)
-		return SendResult{}, safeErr
+		result := SendResult{RateLimited: isRateLimited(err), Detail: credentialSafeSendDetail(err)}
+		c.debugLiveSendComplete(req, result, safeErr)
+		return result, safeErr
 	}
 	result := SendResult{AcceptedAt: time.Now()}
 	c.debugLiveSendComplete(req, result, nil)
@@ -937,6 +939,14 @@ func credentialSafeError(err error) error {
 		return nil
 	}
 	return &safeError{detail: credentialSafeDetail(err), cause: err}
+}
+
+// isRateLimited reports whether the send was refused by twi's own limiter
+// rather than by Twitch. SendResult.RateLimited and the composer's
+// rate-limited state both existed with nothing setting them, so hitting the
+// ceiling was indistinguishable from a successful send.
+func isRateLimited(err error) bool {
+	return errors.Is(err, twitch.ErrRateLimited) || errors.Is(err, twitch.ErrDuplicateMessage)
 }
 
 func credentialSafeSendError(err error) error {

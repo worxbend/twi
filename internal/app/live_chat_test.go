@@ -1198,3 +1198,61 @@ func TestAutoReconnectStopsWhenClientCloses(t *testing.T) {
 		t.Fatalf("transports built after Close = %d, want none; the retry loop ignored shutdown", final-afterClose)
 	}
 }
+
+// TestSendResultReportsRateLimiting closes the loop from the limiter to the
+// composer: SendResult.RateLimited existed with nothing setting it, so the
+// composer's rate-limited state was unreachable.
+func TestSendResultReportsRateLimiting(t *testing.T) {
+	transport := newFakeTwitchTransport(2)
+	transport.sendErr = twitch.ErrRateLimited
+	client, err := NewLiveChatClient(context.Background(), transport, 2)
+	if err != nil {
+		t.Fatalf("NewLiveChatClient returned error: %v", err)
+	}
+	defer client.Close()
+	<-client.ConnectionStates()
+
+	result, err := client.Send(context.Background(), SendRequest{Channel: "example", Text: "hello"})
+	if err == nil {
+		t.Fatal("Send returned nil error for a rate-limited send")
+	}
+	if !result.RateLimited {
+		t.Fatal("SendResult.RateLimited = false for a rate-limited send")
+	}
+	if result.Detail == "" {
+		t.Fatal("SendResult.Detail is empty; the composer has nothing to show")
+	}
+}
+
+func TestSendResultReportsDuplicateAsRateLimited(t *testing.T) {
+	transport := newFakeTwitchTransport(2)
+	transport.sendErr = twitch.ErrDuplicateMessage
+	client, err := NewLiveChatClient(context.Background(), transport, 2)
+	if err != nil {
+		t.Fatalf("NewLiveChatClient returned error: %v", err)
+	}
+	defer client.Close()
+	<-client.ConnectionStates()
+
+	result, _ := client.Send(context.Background(), SendRequest{Channel: "example", Text: "gg"})
+	if !result.RateLimited {
+		t.Fatal("a duplicate-message rejection was not surfaced to the composer")
+	}
+}
+
+// TestSendResultIsNotRateLimitedForOtherFailures keeps the flag meaningful.
+func TestSendResultIsNotRateLimitedForOtherFailures(t *testing.T) {
+	transport := newFakeTwitchTransport(2)
+	transport.sendErr = twitch.ErrNotConnected
+	client, err := NewLiveChatClient(context.Background(), transport, 2)
+	if err != nil {
+		t.Fatalf("NewLiveChatClient returned error: %v", err)
+	}
+	defer client.Close()
+	<-client.ConnectionStates()
+
+	result, _ := client.Send(context.Background(), SendRequest{Channel: "example", Text: "hello"})
+	if result.RateLimited {
+		t.Fatal("a disconnected send was reported as rate limited")
+	}
+}
