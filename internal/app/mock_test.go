@@ -629,7 +629,7 @@ func TestLiveShellFailedSendShowsReasonAndRestoresComposer(t *testing.T) {
 
 func TestLiveShellSendFailureUsesSendScopeGuidance(t *testing.T) {
 	client := NewFakeChatClient(1)
-	if err := client.QueueSendResult(SendResult{}, fmt.Errorf("missing scope for oauth:secret-token")); err != nil {
+	if err := client.QueueSendResult(SendResult{}, errors.Join(twitch.ErrAuthFailed, fmt.Errorf("missing scope for oauth:secret-token"))); err != nil {
 		t.Fatalf("QueueSendResult returned error: %v", err)
 	}
 	model := newLiveShellModelWithClock("example", config.Default(), client, nil)

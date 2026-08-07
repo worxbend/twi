@@ -148,7 +148,9 @@ func TestLiveChatClientAuthErrorsAreActionableAndRedacted(t *testing.T) {
 	defer client.Close()
 	<-client.ConnectionStates()
 
-	secretErr := errors.New("login authentication failed for oauth:secret-token")
+	// The real transport joins ErrAuthFailed onto anything Twitch rejected
+	// for credential reasons; classification is by sentinel, not by text.
+	secretErr := errors.Join(twitch.ErrAuthFailed, errors.New("login authentication failed for oauth:secret-token"))
 	transport.emit(twitch.Event{
 		Kind: twitch.EventConnection,
 		Connection: twitch.ConnectionEvent{
@@ -186,7 +188,7 @@ func TestLiveChatClientTerminalFailureSurvivesEventStreamClose(t *testing.T) {
 		Kind: twitch.EventConnection,
 		Connection: twitch.ConnectionEvent{
 			Type: twitch.ConnectionEventDisconnect,
-			Err:  errors.New("login authentication failed"),
+			Err:  errors.Join(twitch.ErrAuthFailed, errors.New("login authentication failed")),
 			At:   time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC),
 		},
 	})
@@ -360,7 +362,7 @@ func TestAppDebugLogsSanitizeConnectionStateAndSendResult(t *testing.T) {
 
 func TestLiveChatClientSendRedactsTransportErrors(t *testing.T) {
 	transport := newFakeTwitchTransport(2)
-	transport.sendErr = errors.New("missing scope for oauth:secret-token")
+	transport.sendErr = errors.Join(twitch.ErrAuthFailed, errors.New("missing scope for oauth:secret-token"))
 	client, err := NewLiveChatClient(context.Background(), transport, 2)
 	if err != nil {
 		t.Fatalf("NewLiveChatClient returned error: %v", err)

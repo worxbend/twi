@@ -441,9 +441,15 @@ func credentialSafeIRCError(err error) error {
 		return nil
 	}
 	if errors.Is(err, irc.ErrLoginAuthenticationFailed) {
-		return errors.New("twitch IRC authentication failed; verify username, OAuth token, and chat:read scope")
+		// Joined to ErrAuthFailed so the app can classify this without
+		// inspecting the message, and to the original cause so nothing
+		// further up loses context it might need.
+		return newSafeError(
+			"twitch IRC authentication failed; verify username, OAuth token, and chat:read scope",
+			errors.Join(ErrAuthFailed, err),
+		)
 	}
-	return fmt.Errorf("twitch IRC connection failed: %s", redactIRCError(err.Error()))
+	return newSafeError("twitch IRC connection failed: "+redactIRCError(err.Error()), err)
 }
 
 func redactIRCError(value string) string {

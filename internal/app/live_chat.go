@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -117,7 +118,7 @@ func newLiveChatClient(ctx context.Context, reconnectFactory, initialFactory Liv
 
 	session, err := client.newSession(ctx, initialFactory)
 	if err != nil {
-		safeErr := errors.New(credentialSafeDetail(err))
+		safeErr := credentialSafeError(err)
 		client.debugLiveEvent("live_chat.start.failed", slog.String("error", safeErr.Error()))
 		client.emitState(ctx, ConnectionState{
 			Status: ConnectionFailed,
@@ -188,7 +189,7 @@ func (c *LiveChatClient) Send(ctx context.Context, req SendRequest) (SendResult,
 	}
 	if req.ReplyToMessageID != "" {
 		if err := transport.Reply(ctx, req.Channel, req.ReplyToMessageID, text); err != nil {
-			safeErr := errors.New(credentialSafeSendDetail(err))
+			safeErr := credentialSafeSendError(err)
 			c.debugLiveSendComplete(req, SendResult{}, safeErr)
 			return SendResult{}, safeErr
 		}
@@ -197,7 +198,7 @@ func (c *LiveChatClient) Send(ctx context.Context, req SendRequest) (SendResult,
 		return result, nil
 	}
 	if err := transport.Send(ctx, req.Channel, text); err != nil {
-		safeErr := errors.New(credentialSafeSendDetail(err))
+		safeErr := credentialSafeSendError(err)
 		c.debugLiveSendComplete(req, SendResult{}, safeErr)
 		return SendResult{}, safeErr
 	}
@@ -294,7 +295,7 @@ func (c *LiveChatClient) Reconnect(ctx context.Context) error {
 
 	old := c.swapSession(nil)
 	if err := old.stop(true); err != nil {
-		safeErr := errors.New(credentialSafeDetail(err))
+		safeErr := credentialSafeError(err)
 		c.debugLiveEvent("live_chat.reconnect.failed", slog.String("error", safeErr.Error()))
 		return safeErr
 	}
@@ -331,7 +332,7 @@ func (c *LiveChatClient) Reconnect(ctx context.Context) error {
 			c.debugLiveEvent("live_chat.reconnect.failed", slog.String("error", err.Error()))
 			return err
 		}
-		safeErr := errors.New(credentialSafeDetail(err))
+		safeErr := credentialSafeError(err)
 		c.emitState(ctx, ConnectionState{
 			Status: ConnectionFailed,
 			Detail: "manual reconnect failed: " + safeErr.Error() + "; retry with ctrl+r",
@@ -747,13 +748,34 @@ func cloneAppStringMap(in map[string]string) map[string]string {
 	return out
 }
 
+// authNoticeTexts are the NOTICE bodies Twitch sends when login itself fails.
+//
+// These arrive before registration completes, on the "*" channel, with no
+// msg-id, so the text is the only signal available. Every tagged notice --
+// msg_banned, no_permission, msg_channel_suspended and the rest -- describes
+// channel or account state on a connection that authenticated fine, and none
+// of them belong here.
+var authNoticeTexts = []string{
+	"login authentication failed",
+	"login unsuccessful",
+	"improperly formatted auth",
+}
+
+// isAuthNotice reports whether a NOTICE means the credentials were rejected.
+//
+// It matches the specific bodies Twitch sends for a failed login rather than
+// searching for "auth", "invalid", "permission" or "scope" anywhere in the
+// notice. That broad matching flipped the whole client to ConnectionFailed --
+// red status bar, "verify your OAuth token" -- on an ordinary no_permission
+// notice, while the connection was perfectly healthy.
 func isAuthNotice(notice twitch.Notice) bool {
-	value := strings.ToLower(notice.ID + " " + notice.Text)
-	return strings.Contains(value, "login") ||
-		strings.Contains(value, "auth") ||
-		strings.Contains(value, "invalid") ||
-		strings.Contains(value, "permission") ||
-		strings.Contains(value, "scope")
+	text := strings.ToLower(strings.TrimSpace(notice.Text))
+	if text == "" {
+		return false
+	}
+	return slices.ContainsFunc(authNoticeTexts, func(known string) bool {
+		return strings.Contains(text, known)
+	})
 }
 
 func isTerminalEvent(event twitch.Event) bool {
@@ -763,28 +785,63 @@ func isTerminalEvent(event twitch.Event) bool {
 	return event.Kind == twitch.EventConnection && event.Connection.Type == twitch.ConnectionEventDisconnect
 }
 
+// safeError reports a redacted message while keeping the original error
+// reachable through errors.Is and errors.As.
+//
+// Replacing an error with errors.New(redacted) is what this code used to do.
+// It kept credentials out of the display, but it also discarded the chain, so
+// every errors.Is check downstream stopped matching -- including the
+// context.DeadlineExceeded branch in Reconnect, which could not fire because
+// the error reaching it had already been flattened to a string.
+type safeError struct {
+	detail string
+	cause  error
+}
+
+func (e *safeError) Error() string { return e.detail }
+
+func (e *safeError) Unwrap() error { return e.cause }
+
+func credentialSafeError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &safeError{detail: credentialSafeDetail(err), cause: err}
+}
+
+func credentialSafeSendError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &safeError{detail: credentialSafeSendDetail(err), cause: err}
+}
+
+// credentialSafeDetail renders err for display without leaking credentials.
+//
+// Auth failures are identified by twitch.ErrAuthFailed, which the transport
+// attaches when Twitch actually rejected the credentials -- not by searching
+// the message for "auth". That search reported "x509: certificate signed by
+// unknown authority" as a bad OAuth token, because "authority" contains
+// "auth", sending anyone behind a corporate TLS proxy to re-run a login that
+// would never have helped. Everything else is shown redacted, as itself.
 func credentialSafeDetail(err error) string {
 	if err == nil {
 		return ""
 	}
-	redacted := redactCredentialText(err.Error())
-	lower := strings.ToLower(redacted)
-	if strings.Contains(lower, "auth") || strings.Contains(lower, "login") || strings.Contains(lower, "scope") {
+	if twitch.IsAuthError(err) {
 		return "Twitch IRC authentication failed; verify username, OAuth token, and chat:read scope"
 	}
-	return redacted
+	return redactCredentialText(err.Error())
 }
 
 func credentialSafeSendDetail(err error) string {
 	if err == nil {
 		return ""
 	}
-	redacted := redactCredentialText(err.Error())
-	lower := strings.ToLower(redacted)
-	if strings.Contains(lower, "auth") || strings.Contains(lower, "login") || strings.Contains(lower, "scope") || strings.Contains(lower, "permission") {
+	if twitch.IsAuthError(err) {
 		return "Twitch IRC send failed; verify username, OAuth token, and chat:edit scope"
 	}
-	return redacted
+	return redactCredentialText(err.Error())
 }
 
 func detailOrFallback(value, fallback string) string {
