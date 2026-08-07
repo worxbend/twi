@@ -144,7 +144,7 @@ Supported variables:
 | `TWI_ENABLE_MOUSE` | No | Enable or disable terminal mouse reporting and mouse shortcuts. |
 | `TWI_AVATAR_MODE` | No | Avatar rendering mode: `off` or `initials`. There is no image mode. |
 | `TWI_ANIMATION_MODE` | No | Animation behavior: gradient motion, pulsing status/message indicators, scene-switch flash, staged startup splash, and command-palette typewriter reveal, in addition to chat-row reveal speed. |
-| `TWI_THEME_NAME` | No | Active theme: one of the 13 built-in preset names, or `custom` to use the `TWI_THEME_*` hex fields below. Defaults to `claude`. |
+| `TWI_THEME_NAME` | No | Active theme: one of the 33 built-in preset names, or `custom` to use the `TWI_THEME_*` hex fields below. Defaults to `claude`. |
 | `TWI_MESSAGE_LAYOUT` | No | Chat message arrangement: `inline` (author and text on one row), `grouped` (author header row with text indented beneath, repeated authors collapsed), or `compact` (no avatars, timestamps, or badges). Defaults to `inline`. |
 | `TWI_BADGE_MODE` | No | Badge rendering beside usernames: `glyph` (single-cell icons), `text` (`[mod]` labels), or `off`. Defaults to `glyph`. |
 | `TWI_HIGHLIGHT_EMOTES` | No | Draw emotes and emoji on a tinted chip background. Defaults to `true`. |
@@ -174,9 +174,14 @@ Animation modes:
 
 Theme names (`theme_name`):
 
-- `claude` (default), `codex`, `btop`, `nord`, `dracula`, `gruvbox`,
+- Dark: `claude` (default), `codex`, `btop`, `nord`, `dracula`, `gruvbox`,
   `solarized-dark`, `monokai`, `one-dark`, `tokyo-night`, `catppuccin-mocha`,
-  `rose-pine`, `mono`
+  `catppuccin-macchiato`, `catppuccin-frappe`, `rose-pine`, `rose-pine-moon`,
+  `everforest`, `kanagawa`, `ayu-dark`, `ayu-mirage`, `night-owl`,
+  `palenight`, `synthwave-84`, `oceanic-next`, `nightfox`, `zenburn`,
+  `cobalt2`, `horizon`, `mono`
+- Light: `catppuccin-latte`, `rose-pine-dawn`, `gruvbox-light`,
+  `solarized-light`, `github-light`
 - `custom`, using the `theme_background`/`theme_foreground`/`theme_accent`/
   `theme_muted`/`theme_border`/`theme_surface`/`theme_warning`/`theme_error`/
   `theme_success` hex fields

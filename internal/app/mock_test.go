@@ -1884,12 +1884,28 @@ func TestThemeSettingsRendersAsFullScreenPage(t *testing.T) {
 	if lines := strings.Split(page, "\n"); len(lines) != model.height {
 		t.Fatalf("theme page height = %d lines, want %d:\n%s", len(lines), model.height, page)
 	}
-	// A full-height page fits the whole preset list, which the old docked
-	// strip could only window five rows at a time.
-	for _, name := range themeSettingsNames() {
-		if !strings.Contains(page, name) {
-			t.Errorf("theme page missing entry %q:\n%s", name, page)
+	// The preset list outgrew a single screen, so the page windows it. The
+	// window must stay full (no wasted rows) and must always contain the
+	// selection, since moving the selection is what previews a palette.
+	names := themeSettingsNames()
+	visible := 0
+	for _, name := range names {
+		if strings.Contains(page, name) {
+			visible++
 		}
+	}
+	if visible < model.height-6 {
+		t.Fatalf("theme page shows %d of %d entries on a %d-row page, want the window filled:\n%s", visible, len(names), model.height, page)
+	}
+	if !strings.Contains(page, names[model.themeSettings.selected]+" (active)") {
+		t.Fatalf("theme page window does not contain the selected entry %q:\n%s", names[model.themeSettings.selected], page)
+	}
+
+	// Every entry is reachable: End scrolls the window to the far end.
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	model = updated.(mockShellModel)
+	if end := ansi.Strip(model.View()); !strings.Contains(end, names[len(names)-1]) {
+		t.Fatalf("theme page after end missing the last entry %q:\n%s", names[len(names)-1], end)
 	}
 }
 
