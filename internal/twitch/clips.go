@@ -31,18 +31,22 @@ type ClipManager interface {
 // and HTTPClient are injectable for deterministic fake HTTP tests; zero
 // values use Twitch's production endpoint and the default HTTP client.
 type HelixClipsClientConfig struct {
-	Endpoint   string
-	HTTPClient *http.Client
-	ClientID   string
-	OAuthToken string
+	// OAuthTokenSource, when set, is read on every request so a token
+	// refreshed mid-session takes effect. OAuthToken is the static fallback
+	// used when no source is supplied.
+	OAuthTokenSource func() string
+	Endpoint         string
+	HTTPClient       *http.Client
+	ClientID         string
+	OAuthToken       string
 }
 
 // HelixClipsClient creates clips through Twitch Helix "Create Clip".
 type HelixClipsClient struct {
-	endpoint   string
-	httpClient *http.Client
-	clientID   string
-	oauthToken string
+	endpoint         string
+	httpClient       *http.Client
+	clientID         string
+	oauthTokenSource func() string
 }
 
 var _ ClipManager = (*HelixClipsClient)(nil)
@@ -59,10 +63,10 @@ func NewHelixClipsClient(cfg HelixClipsClientConfig) *HelixClipsClient {
 		httpClient = http.DefaultClient
 	}
 	return &HelixClipsClient{
-		endpoint:   endpoint,
-		httpClient: httpClient,
-		clientID:   strings.TrimSpace(cfg.ClientID),
-		oauthToken: strings.TrimSpace(cfg.OAuthToken),
+		endpoint:         endpoint,
+		httpClient:       httpClient,
+		clientID:         strings.TrimSpace(cfg.ClientID),
+		oauthTokenSource: resolveTokenSource(cfg.OAuthTokenSource, cfg.OAuthToken),
 	}
 }
 
@@ -79,18 +83,18 @@ func (c *HelixClipsClient) CreateClip(ctx context.Context, broadcasterID string)
 
 	body, err := json.Marshal(helixCreateClipRequest{BroadcasterID: broadcasterID})
 	if err != nil {
-		return Clip{}, credentialSafeUserError("encode Twitch clip request", err, c.oauthToken)
+		return Clip{}, credentialSafeUserError("encode Twitch clip request", err, c.token())
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
 	if err != nil {
-		return Clip{}, credentialSafeUserError("create Twitch clip request", err, c.oauthToken)
+		return Clip{}, credentialSafeUserError("create Twitch clip request", err, c.token())
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	c.setAuthHeaders(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return Clip{}, credentialSafeUserError("create Twitch clip", err, c.oauthToken)
+		return Clip{}, credentialSafeUserError("create Twitch clip", err, c.token())
 	}
 	defer resp.Body.Close()
 
@@ -100,7 +104,7 @@ func (c *HelixClipsClient) CreateClip(ctx context.Context, broadcasterID string)
 
 	var decoded helixCreateClipResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return Clip{}, credentialSafeUserError("decode Twitch clip response", err, c.oauthToken)
+		return Clip{}, credentialSafeUserError("decode Twitch clip response", err, c.token())
 	}
 	if len(decoded.Data) == 0 {
 		return Clip{}, fmt.Errorf("create Twitch clip: empty response")
@@ -115,7 +119,7 @@ func (c *HelixClipsClient) setAuthHeaders(req *http.Request) {
 	if c.clientID != "" {
 		req.Header.Set("Client-Id", c.clientID)
 	}
-	token := accessTokenForValidation(c.oauthToken)
+	token := accessTokenForValidation(c.token())
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -124,7 +128,7 @@ func (c *HelixClipsClient) setAuthHeaders(req *http.Request) {
 func (c *HelixClipsClient) responseError(resp *http.Response, action, endpointLabel string) error {
 	detail, err := readSmallBody(resp.Body)
 	if err != nil {
-		return credentialSafeUserError("read Twitch clip response", err, c.oauthToken)
+		return credentialSafeUserError("read Twitch clip response", err, c.token())
 	}
 	if detail != "" {
 		detail = ": " + detail
@@ -132,7 +136,7 @@ func (c *HelixClipsClient) responseError(resp *http.Response, action, endpointLa
 	wrapped := credentialSafeUserError(
 		action,
 		fmt.Errorf("twitch %s returned HTTP %d%s", endpointLabel, resp.StatusCode, detail),
-		c.oauthToken,
+		c.token(),
 	)
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusNotFound {
 		return &ChannelAPIError{StatusCode: resp.StatusCode, err: wrapped}
@@ -158,4 +162,13 @@ type helixCreateClipResponse struct {
 type helixClip struct {
 	ID      string `json:"id"`
 	EditURL string `json:"edit_url"`
+}
+
+// token returns the OAuth token to present on the next request, read now
+// rather than captured at construction so a mid-session refresh applies.
+func (c *HelixClipsClient) token() string {
+	if c == nil || c.oauthTokenSource == nil {
+		return ""
+	}
+	return c.oauthTokenSource()
 }

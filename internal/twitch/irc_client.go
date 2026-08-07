@@ -22,6 +22,13 @@ import (
 const (
 	defaultIRCEventBuffer = 128
 	defaultOAuthTokenURL  = "https://id.twitch.tv/oauth2/token"
+	// oauthRefreshTimeout bounds the token-endpoint call made while
+	// recovering a dropped connection, matching the login flow's timeout.
+	oauthRefreshTimeout = 15 * time.Second
+	// maxIRCAuthRefreshes bounds how many times one connect attempt will
+	// refresh and retry, so a server that keeps rejecting a freshly minted
+	// token cannot spin.
+	maxIRCAuthRefreshes = 3
 )
 
 var ircOAuthTokenPattern = regexp.MustCompile(`(?i)oauth:[^\s]+`)
@@ -269,7 +276,34 @@ func registerIRCHandlers(client ircSession, emit func(Event), now func() time.Ti
 	})
 }
 
+// connectWithAuthRefresh connects, refreshing the access token and retrying
+// when Twitch rejects it.
+//
+// It loops rather than refreshing once. A session can outlive several token
+// expiries -- an eight-hour stream crosses at least one -- and the previous
+// single shot ended in a bare return, so the second expiry disconnected chat
+// with no way back except restarting twi. The attempt count is bounded so a
+// server that keeps rejecting freshly minted tokens cannot spin.
 func (c *IRCClient) connectWithAuthRefresh(ctx context.Context, emit func(Event), client ircSession) error {
+	for attempt := range maxIRCAuthRefreshes {
+		err := c.connectOnceWithAuthRefresh(ctx, emit, client)
+		if !errors.Is(err, errAuthRetryable) {
+			return err
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		c.logger.Log(ctx, "twitch.irc.auth_refresh.retry", slog.Int("attempt", attempt+1))
+		client = c.currentClient()
+	}
+	return errors.New("twitch IRC authentication kept failing after refreshing the access token")
+}
+
+// errAuthRetryable signals connectWithAuthRefresh that a refresh succeeded and
+// the replacement session is ready to be connected.
+var errAuthRetryable = errors.New("twitch IRC auth refreshed; retry connect")
+
+func (c *IRCClient) connectOnceWithAuthRefresh(ctx context.Context, emit func(Event), client ircSession) error {
 	err := client.Connect()
 	if !errors.Is(err, irc.ErrLoginAuthenticationFailed) || !c.refresh.available() {
 		return err
@@ -306,7 +340,9 @@ func (c *IRCClient) connectWithAuthRefresh(ctx context.Context, emit func(Event)
 	}
 
 	registerIRCHandlers(next, emit, c.now)
-	return next.Connect()
+	// Hand the replacement session back to the loop rather than connecting it
+	// here, so a later expiry can refresh again instead of ending the session.
+	return errAuthRetryable
 }
 
 func (c *IRCClient) Send(ctx context.Context, channel, text string) error {
@@ -536,7 +572,11 @@ func (c oauthRefreshConfig) refresh(ctx context.Context, refreshedAt time.Time) 
 	c.Logger.Log(ctx, "twitch.oauth_refresh.request", fields...)
 	httpClient := c.HTTPClient
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		// Not http.DefaultClient: it has no timeout, and nothing else on this
+		// path sets a deadline either, so a token endpoint that accepts the
+		// connection and then stalls would hang the reconnect indefinitely --
+		// with chat already down. Matches the login flow's timeout.
+		httpClient = &http.Client{Timeout: oauthRefreshTimeout}
 	}
 
 	form := url.Values{}

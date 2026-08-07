@@ -1056,7 +1056,7 @@ func TestLiveChatConfiguredStartsClient(t *testing.T) {
 
 	var gotChannels []string
 	fake := app.NewFakeChatClient(1)
-	newLiveChatClient = func(_ context.Context, cfg config.Config, _ debuglog.Logger, _ credentialLoadStatus) (app.ChatClient, error) {
+	newLiveChatClient = func(_ context.Context, cfg config.Config, _ *credentialHolder, _ debuglog.Logger, _ credentialLoadStatus) (app.ChatClient, error) {
 		gotChannels = append([]string(nil), cfg.DefaultChannels...)
 		return fake, nil
 	}
@@ -1106,7 +1106,7 @@ func TestLiveChatTokenValidationMissingScopeStopsBeforeClient(t *testing.T) {
 	newLiveTokenValidator = func() twitch.TokenValidator {
 		return fakeValidator
 	}
-	newLiveChatClient = func(context.Context, config.Config, debuglog.Logger, credentialLoadStatus) (app.ChatClient, error) {
+	newLiveChatClient = func(context.Context, config.Config, *credentialHolder, debuglog.Logger, credentialLoadStatus) (app.ChatClient, error) {
 		t.Fatal("newLiveChatClient called after definitive token validation failure")
 		return nil, nil
 	}
@@ -1161,7 +1161,7 @@ func TestLiveChatTokenValidationHintsWhenEnvTokenShadowsStoredCredentials(t *tes
 	newLiveTokenValidator = func() twitch.TokenValidator {
 		return fakeValidator
 	}
-	newLiveChatClient = func(context.Context, config.Config, debuglog.Logger, credentialLoadStatus) (app.ChatClient, error) {
+	newLiveChatClient = func(context.Context, config.Config, *credentialHolder, debuglog.Logger, credentialLoadStatus) (app.ChatClient, error) {
 		t.Fatal("newLiveChatClient called after definitive token validation failure")
 		return nil, nil
 	}
@@ -1213,7 +1213,7 @@ func TestLiveChatUsesTokenLoginWhenConfiguredUsernameDisagrees(t *testing.T) {
 	newLiveTokenValidator = func() twitch.TokenValidator { return fakeValidator }
 
 	var connectedAs string
-	newLiveChatClient = func(_ context.Context, cfg config.Config, _ debuglog.Logger, _ credentialLoadStatus) (app.ChatClient, error) {
+	newLiveChatClient = func(_ context.Context, cfg config.Config, _ *credentialHolder, _ debuglog.Logger, _ credentialLoadStatus) (app.ChatClient, error) {
 		connectedAs = cfg.Twitch.Username
 		return app.NewFakeChatClient(1), nil
 	}
@@ -1259,7 +1259,7 @@ func TestLiveChatDerivesUsernameWhenNoneConfigured(t *testing.T) {
 	newLiveTokenValidator = func() twitch.TokenValidator { return fakeValidator }
 
 	var connectedAs string
-	newLiveChatClient = func(_ context.Context, cfg config.Config, _ debuglog.Logger, _ credentialLoadStatus) (app.ChatClient, error) {
+	newLiveChatClient = func(_ context.Context, cfg config.Config, _ *credentialHolder, _ debuglog.Logger, _ credentialLoadStatus) (app.ChatClient, error) {
 		connectedAs = cfg.Twitch.Username
 		return app.NewFakeChatClient(1), nil
 	}
@@ -1300,7 +1300,7 @@ func TestLiveChatMissingScopesStillBlockStartup(t *testing.T) {
 		newLiveChatClient = oldNewLiveChatClient
 	})
 	newLiveTokenValidator = func() twitch.TokenValidator { return fakeValidator }
-	newLiveChatClient = func(context.Context, config.Config, debuglog.Logger, credentialLoadStatus) (app.ChatClient, error) {
+	newLiveChatClient = func(context.Context, config.Config, *credentialHolder, debuglog.Logger, credentialLoadStatus) (app.ChatClient, error) {
 		t.Fatal("newLiveChatClient called despite missing required scopes")
 		return nil, nil
 	}
@@ -1337,7 +1337,7 @@ func TestLiveChatTokenValidationTransientFailureWarnsAndContinues(t *testing.T) 
 		return fakeValidator
 	}
 	fakeClient := app.NewFakeChatClient(1)
-	newLiveChatClient = func(context.Context, config.Config, debuglog.Logger, credentialLoadStatus) (app.ChatClient, error) {
+	newLiveChatClient = func(context.Context, config.Config, *credentialHolder, debuglog.Logger, credentialLoadStatus) (app.ChatClient, error) {
 		return fakeClient, nil
 	}
 	runLiveChat = func(stdout io.Writer, _ config.Config, client app.ChatClient, _ app.ClientOptions) error {
@@ -1381,7 +1381,7 @@ func TestLiveChatEnvCredentialsIgnoreUnsupportedCredentialFileFallback(t *testin
 		return nil, fmt.Errorf("%w: credential-file fallback is disabled on non-Unix builds; use env/config; oauth:stored-secret", storage.ErrUnsupportedCredentialFilePlatform)
 	}
 	fake := app.NewFakeChatClient(1)
-	newLiveChatClient = func(context.Context, config.Config, debuglog.Logger, credentialLoadStatus) (app.ChatClient, error) {
+	newLiveChatClient = func(context.Context, config.Config, *credentialHolder, debuglog.Logger, credentialLoadStatus) (app.ChatClient, error) {
 		return fake, nil
 	}
 	runLiveChat = func(stdout io.Writer, _ config.Config, client app.ChatClient, _ app.ClientOptions) error {
@@ -1533,7 +1533,7 @@ func TestLiveChatConfiguredStartsClientWithMultipleChannels(t *testing.T) {
 	var gotFactoryChannels []string
 	var gotRunChannels []string
 	fake := app.NewFakeChatClient(1)
-	newLiveChatClient = func(_ context.Context, cfg config.Config, _ debuglog.Logger, _ credentialLoadStatus) (app.ChatClient, error) {
+	newLiveChatClient = func(_ context.Context, cfg config.Config, _ *credentialHolder, _ debuglog.Logger, _ credentialLoadStatus) (app.ChatClient, error) {
 		gotFactoryChannels = append([]string(nil), cfg.DefaultChannels...)
 		return fake, nil
 	}

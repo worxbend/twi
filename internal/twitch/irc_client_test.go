@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -523,5 +524,136 @@ func TestIRCClientRequestsMembershipCapability(t *testing.T) {
 		if !requested {
 			t.Errorf("capability %q not requested; got %v", capability, real.Capabilities)
 		}
+	}
+}
+
+// TestIRCClientRefreshesMoreThanOnce covers a session that outlives two token
+// expiries, which any long stream does. connectWithAuthRefresh used to end in
+// a bare `return next.Connect()`, so exactly one refresh was possible per
+// process: the second expiry disconnected chat with no way back except
+// restarting twi.
+func TestIRCClientRefreshesMoreThanOnce(t *testing.T) {
+	oldNewIRCClient := newIRCClient
+	t.Cleanup(func() { newIRCClient = oldNewIRCClient })
+
+	var (
+		mu       sync.Mutex
+		sessions []*fakeIRCSession
+	)
+	newIRCClient = func(username, token string, channels []string) ircSession {
+		mu.Lock()
+		defer mu.Unlock()
+		session := &fakeIRCSession{
+			username: username,
+			token:    token,
+			channels: append([]string(nil), channels...),
+		}
+		// The first two connects are rejected, so two refreshes are needed
+		// before the session establishes.
+		if len(sessions) < 2 {
+			session.connectErr = irc.ErrLoginAuthenticationFailed
+		}
+		sessions = append(sessions, session)
+		return session
+	}
+
+	var issued int
+	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		mu.Lock()
+		issued++
+		body := fmt.Sprintf(`{"access_token":"new-access-token-%d","refresh_token":"new-refresh-token-%d","token_type":"bearer"}`, issued, issued)
+		mu.Unlock()
+		return responseWithStatus(http.StatusOK, body), nil
+	})}
+
+	client, err := NewIRCClient(IRCConfig{
+		Username:     "viewer",
+		OAuthToken:   "oauth:old-access-token",
+		RefreshToken: "old-refresh-token",
+		ClientID:     "client-id",
+		ClientSecret: "client-secret",
+		TokenURL:     "https://example.invalid/token",
+		HTTPClient:   httpClient,
+		Channels:     []string{"example"},
+		Now:          func() time.Time { return time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC) },
+	})
+	if err != nil {
+		t.Fatalf("NewIRCClient returned error: %v", err)
+	}
+
+	events, err := client.Connect(context.Background())
+	if err != nil {
+		t.Fatalf("Connect returned error: %v", err)
+	}
+	for range events {
+	}
+
+	mu.Lock()
+	got := append([]*fakeIRCSession(nil), sessions...)
+	refreshes := issued
+	mu.Unlock()
+
+	if refreshes < 2 {
+		t.Fatalf("token refreshes = %d, want at least 2; the second expiry must not end the session", refreshes)
+	}
+	if len(got) != 3 {
+		t.Fatalf("sessions = %d, want initial plus two refreshed reconnects", len(got))
+	}
+	if got[2].token != "oauth:new-access-token-2" {
+		t.Fatalf("final token = %q, want the second refreshed token", got[2].token)
+	}
+}
+
+// TestIRCClientStopsRefreshingAfterRepeatedRejection bounds the loop: a server
+// that keeps rejecting freshly minted tokens must not spin forever.
+func TestIRCClientStopsRefreshingAfterRepeatedRejection(t *testing.T) {
+	oldNewIRCClient := newIRCClient
+	t.Cleanup(func() { newIRCClient = oldNewIRCClient })
+
+	var mu sync.Mutex
+	attempts := 0
+	newIRCClient = func(username, token string, channels []string) ircSession {
+		mu.Lock()
+		defer mu.Unlock()
+		attempts++
+		return &fakeIRCSession{
+			username:   username,
+			token:      token,
+			channels:   append([]string(nil), channels...),
+			connectErr: irc.ErrLoginAuthenticationFailed,
+		}
+	}
+
+	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return responseWithStatus(http.StatusOK, `{"access_token":"still-rejected","refresh_token":"r","token_type":"bearer"}`), nil
+	})}
+
+	client, err := NewIRCClient(IRCConfig{
+		Username:     "viewer",
+		OAuthToken:   "oauth:old",
+		RefreshToken: "old-refresh",
+		ClientID:     "client-id",
+		ClientSecret: "client-secret",
+		TokenURL:     "https://example.invalid/token",
+		HTTPClient:   httpClient,
+		Channels:     []string{"example"},
+		Now:          func() time.Time { return time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC) },
+	})
+	if err != nil {
+		t.Fatalf("NewIRCClient returned error: %v", err)
+	}
+
+	events, err := client.Connect(context.Background())
+	if err != nil {
+		t.Fatalf("Connect returned error: %v", err)
+	}
+	for range events {
+	}
+
+	mu.Lock()
+	got := attempts
+	mu.Unlock()
+	if got > maxIRCAuthRefreshes+1 {
+		t.Fatalf("built %d sessions, want no more than %d; the refresh loop is unbounded", got, maxIRCAuthRefreshes+1)
 	}
 }

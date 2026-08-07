@@ -47,19 +47,23 @@ type FollowerLookup interface {
 // HTTP tests; zero values use Twitch's production endpoint and the default
 // HTTP client.
 type HelixFollowersClientConfig struct {
-	Endpoint   string
-	HTTPClient *http.Client
-	ClientID   string
-	OAuthToken string
+	// OAuthTokenSource, when set, is read on every request so a token
+	// refreshed mid-session takes effect. OAuthToken is the static fallback
+	// used when no source is supplied.
+	OAuthTokenSource func() string
+	Endpoint         string
+	HTTPClient       *http.Client
+	ClientID         string
+	OAuthToken       string
 }
 
 // HelixFollowersClient resolves follower data through Twitch Helix "Get
 // Channel Followers".
 type HelixFollowersClient struct {
-	endpoint   string
-	httpClient *http.Client
-	clientID   string
-	oauthToken string
+	endpoint         string
+	httpClient       *http.Client
+	clientID         string
+	oauthTokenSource func() string
 }
 
 var _ FollowerLookup = (*HelixFollowersClient)(nil)
@@ -77,10 +81,10 @@ func NewHelixFollowersClient(cfg HelixFollowersClientConfig) *HelixFollowersClie
 		httpClient = http.DefaultClient
 	}
 	return &HelixFollowersClient{
-		endpoint:   endpoint,
-		httpClient: httpClient,
-		clientID:   strings.TrimSpace(cfg.ClientID),
-		oauthToken: strings.TrimSpace(cfg.OAuthToken),
+		endpoint:         endpoint,
+		httpClient:       httpClient,
+		clientID:         strings.TrimSpace(cfg.ClientID),
+		oauthTokenSource: resolveTokenSource(cfg.OAuthTokenSource, cfg.OAuthToken),
 	}
 }
 
@@ -104,7 +108,7 @@ func (c *HelixFollowersClient) GetChannelFollowers(ctx context.Context, broadcas
 
 	parsed, err := url.Parse(c.endpoint)
 	if err != nil {
-		return FollowersPage{}, credentialSafeUserError("create Twitch channel followers request", err, c.oauthToken)
+		return FollowersPage{}, credentialSafeUserError("create Twitch channel followers request", err, c.token())
 	}
 	q := parsed.Query()
 	q.Set("broadcaster_id", broadcasterID)
@@ -114,26 +118,26 @@ func (c *HelixFollowersClient) GetChannelFollowers(ctx context.Context, broadcas
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 	if err != nil {
-		return FollowersPage{}, credentialSafeUserError("create Twitch channel followers request", err, c.oauthToken)
+		return FollowersPage{}, credentialSafeUserError("create Twitch channel followers request", err, c.token())
 	}
 	if c.clientID != "" {
 		httpReq.Header.Set("Client-Id", c.clientID)
 	}
-	token := accessTokenForValidation(c.oauthToken)
+	token := accessTokenForValidation(c.token())
 	if token != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return FollowersPage{}, credentialSafeUserError("get Twitch channel followers", err, c.oauthToken)
+		return FollowersPage{}, credentialSafeUserError("get Twitch channel followers", err, c.token())
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		detail, readErr := readSmallBody(resp.Body)
 		if readErr != nil {
-			return FollowersPage{}, credentialSafeUserError("read Twitch channel followers response", readErr, c.oauthToken)
+			return FollowersPage{}, credentialSafeUserError("read Twitch channel followers response", readErr, c.token())
 		}
 		if detail != "" {
 			detail = ": " + detail
@@ -141,7 +145,7 @@ func (c *HelixFollowersClient) GetChannelFollowers(ctx context.Context, broadcas
 		wrapped := credentialSafeUserError(
 			"get Twitch channel followers",
 			fmt.Errorf("twitch Get Channel Followers returned HTTP %d%s", resp.StatusCode, detail),
-			c.oauthToken,
+			c.token(),
 		)
 		if resp.StatusCode == http.StatusUnauthorized {
 			return FollowersPage{}, &ChannelAPIError{StatusCode: resp.StatusCode, err: wrapped}
@@ -151,7 +155,7 @@ func (c *HelixFollowersClient) GetChannelFollowers(ctx context.Context, broadcas
 
 	var decoded helixFollowersResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return FollowersPage{}, credentialSafeUserError("decode Twitch channel followers response", err, c.oauthToken)
+		return FollowersPage{}, credentialSafeUserError("decode Twitch channel followers response", err, c.token())
 	}
 	followers := make([]Follower, 0, len(decoded.Data))
 	for _, item := range decoded.Data {
@@ -176,4 +180,13 @@ type helixFollowerItem struct {
 	UserLogin  string `json:"user_login"`
 	UserName   string `json:"user_name"`
 	FollowedAt string `json:"followed_at"`
+}
+
+// token returns the OAuth token to present on the next request, read now
+// rather than captured at construction so a mid-session refresh applies.
+func (c *HelixFollowersClient) token() string {
+	if c == nil || c.oauthTokenSource == nil {
+		return ""
+	}
+	return c.oauthTokenSource()
 }

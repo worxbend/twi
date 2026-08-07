@@ -66,41 +66,68 @@ Environment:
   TWI_DEBUG_LOG_PATH
 `
 
-var newLiveChatClient = func(ctx context.Context, cfg config.Config, logger debuglog.Logger, credentialStatus credentialLoadStatus) (app.ChatClient, error) {
-	return app.NewRestartableLiveChatClientWithOptions(ctx, liveIRCTransportFactory(cfg, logger, credentialStatus), 0, app.LiveChatClientOptions{
+var newLiveChatClient = func(ctx context.Context, cfg config.Config, holder *credentialHolder, logger debuglog.Logger, credentialStatus credentialLoadStatus) (app.ChatClient, error) {
+	return app.NewRestartableLiveChatClientWithOptions(ctx, liveIRCTransportFactory(cfg, holder, logger, credentialStatus), 0, app.LiveChatClientOptions{
 		DebugLogger: logger,
 	})
 }
 
-func liveIRCTransportFactory(cfg config.Config, logger debuglog.Logger, credentialStatus credentialLoadStatus) app.LiveChatTransportFactory {
+// liveIRCTransportFactory builds a transport from whatever credentials are
+// current, not from the ones present at startup.
+//
+// The factory is called again for every manual reconnect, and a refresh in
+// between rotates both tokens. Reading through the holder is what makes ctrl+r
+// work after a refresh; capturing cfg by value is what made it rebuild the
+// client with credentials Twitch had already invalidated.
+func liveIRCTransportFactory(cfg config.Config, holder *credentialHolder, logger debuglog.Logger, credentialStatus credentialLoadStatus) app.LiveChatTransportFactory {
 	return func(context.Context) (twitch.ChatClient, error) {
-		return twitch.NewIRCClient(twitch.IRCConfig{
-			Username:     cfg.Twitch.Username,
-			OAuthToken:   cfg.Twitch.OAuthToken,
-			RefreshToken: cfg.Twitch.RefreshToken,
-			ClientID:     cfg.Twitch.ClientID,
-			ClientSecret: cfg.Twitch.ClientSecret,
-			Channels:     cfg.DefaultChannels,
-			DebugLogger:  logger,
-			OnOAuthRefresh: func(ctx context.Context, refreshed twitch.OAuthRefresh) error {
-				return persistRefreshedIRCCredentials(ctx, cfg, credentialStatus, refreshed)
-			},
-		})
+		return twitch.NewIRCClient(liveIRCConfig(cfg, holder, logger, credentialStatus))
 	}
 }
 
-var newLiveClientOptions = func(cfg config.Config) app.ClientOptions {
+// liveIRCConfig assembles the transport config from the credentials that are
+// current right now, which is the whole point of the holder.
+func liveIRCConfig(cfg config.Config, holder *credentialHolder, logger debuglog.Logger, credentialStatus credentialLoadStatus) twitch.IRCConfig {
+	creds := holder.current()
+	return twitch.IRCConfig{
+		Username:     creds.Username,
+		OAuthToken:   creds.OAuthToken,
+		RefreshToken: creds.RefreshToken,
+		ClientID:     creds.ClientID,
+		ClientSecret: creds.ClientSecret,
+		Channels:     cfg.DefaultChannels,
+		DebugLogger:  logger,
+		OnOAuthRefresh: func(ctx context.Context, refreshed twitch.OAuthRefresh) error {
+			// Update the holder before persisting: a failed disk write must
+			// not leave the process using dead credentials, and the in-memory
+			// value is what the next reconnect reads.
+			holder.applyRefresh(refreshed)
+			return persistRefreshedIRCCredentials(ctx, holder.configWithCurrentCredentials(cfg), credentialStatus, refreshed)
+		},
+	}
+}
+
+// newLiveClientOptionsWithHolder builds the Helix-backed features against a
+// live token source, so a mid-session refresh reaches them.
+//
+// Without it, every client froze the startup token at construction: after the
+// IRC transport refreshed, chat kept working while the LIVE indicator,
+// follower and subscriber counts, /clip, stream markers, Stream Info and the
+// emote index all began returning 401 -- a failure mode that looks like
+// several unrelated features breaking at once.
+var newLiveClientOptionsWithHolder = func(cfg config.Config, holder *credentialHolder) app.ClientOptions {
+	tokenSource := holder.tokenSource()
 	return app.ClientOptions{
-		StreamStatusResolver: newStreamStatusResolver(cfg),
-		EmoteIndex:           newEmoteIndex(cfg),
-		ChannelManager:       newChannelManager(cfg),
-		GameLookup:           newGameLookup(cfg),
-		UserLookup:           newUserLookup(cfg),
-		MarkerManager:        newMarkerManager(cfg),
-		FollowerLookup:       newFollowerLookup(cfg),
-		SubscriptionLookup:   newSubscriptionLookup(cfg),
-		ClipManager:          newClipManager(cfg),
-		FollowedChannels:     newFollowedChannelLookup(cfg),
+		StreamStatusResolver: newStreamStatusResolver(cfg, tokenSource),
+		EmoteIndex:           newEmoteIndex(cfg, tokenSource),
+		ChannelManager:       newChannelManager(cfg, tokenSource),
+		GameLookup:           newGameLookup(cfg, tokenSource),
+		UserLookup:           newUserLookup(cfg, tokenSource),
+		MarkerManager:        newMarkerManager(cfg, tokenSource),
+		FollowerLookup:       newFollowerLookup(cfg, tokenSource),
+		SubscriptionLookup:   newSubscriptionLookup(cfg, tokenSource),
+		ClipManager:          newClipManager(cfg, tokenSource),
+		FollowedChannels:     newFollowedChannelLookup(cfg, tokenSource),
 	}
 }
 
@@ -109,14 +136,15 @@ var newLiveClientOptions = func(cfg config.Config) app.ClientOptions {
 // (user:read:follows is requested at login but Twitch still enforces it
 // per-request; tokens issued before that scope existed simply fall back to
 // already-open and configured channels).
-func newFollowedChannelLookup(cfg config.Config) twitch.FollowedChannelLookup {
+func newFollowedChannelLookup(cfg config.Config, tokenSource func() string) twitch.FollowedChannelLookup {
 	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
 		return nil
 	}
 	return twitch.NewHelixFollowedChannelsClient(twitch.HelixFollowedChannelsClientConfig{
-		HTTPClient: &http.Client{Timeout: 5 * time.Second},
-		ClientID:   cfg.Twitch.ClientID,
-		OAuthToken: cfg.Twitch.OAuthToken,
+		HTTPClient:       &http.Client{Timeout: 5 * time.Second},
+		ClientID:         cfg.Twitch.ClientID,
+		OAuthToken:       cfg.Twitch.OAuthToken,
+		OAuthTokenSource: tokenSource,
 	})
 }
 
@@ -125,103 +153,110 @@ func newFollowedChannelLookup(cfg config.Config) twitch.FollowedChannelLookup {
 // credentials (channel:manage:broadcast is requested at login but Twitch
 // still enforces it per-request, so a missing grant simply surfaces as an
 // API error on the tab rather than being pre-checked here).
-func newChannelManager(cfg config.Config) twitch.ChannelManager {
+func newChannelManager(cfg config.Config, tokenSource func() string) twitch.ChannelManager {
 	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
 		return nil
 	}
 	return twitch.NewHelixChannelsClient(twitch.HelixChannelsClientConfig{
-		HTTPClient: &http.Client{Timeout: 5 * time.Second},
-		ClientID:   cfg.Twitch.ClientID,
-		OAuthToken: cfg.Twitch.OAuthToken,
+		HTTPClient:       &http.Client{Timeout: 5 * time.Second},
+		ClientID:         cfg.Twitch.ClientID,
+		OAuthToken:       cfg.Twitch.OAuthToken,
+		OAuthTokenSource: tokenSource,
 	})
 }
 
 // newGameLookup resolves a Stream Info category name to its Twitch game ID
 // when the user changes the category field.
-func newGameLookup(cfg config.Config) twitch.GameLookup {
+func newGameLookup(cfg config.Config, tokenSource func() string) twitch.GameLookup {
 	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
 		return nil
 	}
 	return twitch.NewHelixGamesClient(twitch.HelixGamesClientConfig{
-		HTTPClient: &http.Client{Timeout: 5 * time.Second},
-		ClientID:   cfg.Twitch.ClientID,
-		OAuthToken: cfg.Twitch.OAuthToken,
+		HTTPClient:       &http.Client{Timeout: 5 * time.Second},
+		ClientID:         cfg.Twitch.ClientID,
+		OAuthToken:       cfg.Twitch.OAuthToken,
+		OAuthTokenSource: tokenSource,
 	})
 }
 
 // newUserLookup resolves Twitch user IDs by login: the logged-in user's own
 // ID for Stream Info's Helix calls, and any active channel's broadcaster ID
 // for channel-specific emote autocomplete.
-func newUserLookup(cfg config.Config) twitch.UserLookup {
+func newUserLookup(cfg config.Config, tokenSource func() string) twitch.UserLookup {
 	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
 		return nil
 	}
 	return twitch.NewHelixUsersClient(twitch.HelixUsersClientConfig{
-		HTTPClient: &http.Client{Timeout: 2 * time.Second},
-		ClientID:   cfg.Twitch.ClientID,
-		OAuthToken: cfg.Twitch.OAuthToken,
+		HTTPClient:       &http.Client{Timeout: 2 * time.Second},
+		ClientID:         cfg.Twitch.ClientID,
+		OAuthToken:       cfg.Twitch.OAuthToken,
+		OAuthTokenSource: tokenSource,
 	})
 }
 
 // newMarkerManager wires the Misc tab's Create/Get Stream Marker calls to
 // real Twitch Helix. Uses the same channel:manage:broadcast scope already
 // requested for Stream Info, so no additional login scope is needed.
-func newMarkerManager(cfg config.Config) twitch.MarkerManager {
+func newMarkerManager(cfg config.Config, tokenSource func() string) twitch.MarkerManager {
 	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
 		return nil
 	}
 	return twitch.NewHelixMarkersClient(twitch.HelixMarkersClientConfig{
-		HTTPClient: &http.Client{Timeout: 5 * time.Second},
-		ClientID:   cfg.Twitch.ClientID,
-		OAuthToken: cfg.Twitch.OAuthToken,
+		HTTPClient:       &http.Client{Timeout: 5 * time.Second},
+		ClientID:         cfg.Twitch.ClientID,
+		OAuthToken:       cfg.Twitch.OAuthToken,
+		OAuthTokenSource: tokenSource,
 	})
 }
 
 // newClipManager wires the /clip chat command's Create Clip calls to real
 // Twitch Helix. Requires the clips:edit scope, requested at login alongside
 // the other tab scopes; Twitch still enforces it per-request.
-func newClipManager(cfg config.Config) twitch.ClipManager {
+func newClipManager(cfg config.Config, tokenSource func() string) twitch.ClipManager {
 	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
 		return nil
 	}
 	return twitch.NewHelixClipsClient(twitch.HelixClipsClientConfig{
-		HTTPClient: &http.Client{Timeout: 5 * time.Second},
-		ClientID:   cfg.Twitch.ClientID,
-		OAuthToken: cfg.Twitch.OAuthToken,
+		HTTPClient:       &http.Client{Timeout: 5 * time.Second},
+		ClientID:         cfg.Twitch.ClientID,
+		OAuthToken:       cfg.Twitch.OAuthToken,
+		OAuthTokenSource: tokenSource,
 	})
 }
 
 // newFollowerLookup wires the status line's follower count to real Twitch
 // Helix, gated on Twitch API credentials (moderator:read:followers is
 // requested at login but Twitch still enforces it per-request).
-func newFollowerLookup(cfg config.Config) twitch.FollowerLookup {
+func newFollowerLookup(cfg config.Config, tokenSource func() string) twitch.FollowerLookup {
 	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
 		return nil
 	}
 	return twitch.NewHelixFollowersClient(twitch.HelixFollowersClientConfig{
-		HTTPClient: &http.Client{Timeout: 5 * time.Second},
-		ClientID:   cfg.Twitch.ClientID,
-		OAuthToken: cfg.Twitch.OAuthToken,
+		HTTPClient:       &http.Client{Timeout: 5 * time.Second},
+		ClientID:         cfg.Twitch.ClientID,
+		OAuthToken:       cfg.Twitch.OAuthToken,
+		OAuthTokenSource: tokenSource,
 	})
 }
 
 // newSubscriptionLookup wires the status line's subscriber count to real
 // Twitch Helix, gated on Twitch API credentials (channel:read:subscriptions
 // is requested at login but Twitch still enforces it per-request).
-func newSubscriptionLookup(cfg config.Config) twitch.SubscriptionLookup {
+func newSubscriptionLookup(cfg config.Config, tokenSource func() string) twitch.SubscriptionLookup {
 	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
 		return nil
 	}
 	return twitch.NewHelixSubscriptionsClient(twitch.HelixSubscriptionsClientConfig{
-		HTTPClient: &http.Client{Timeout: 5 * time.Second},
-		ClientID:   cfg.Twitch.ClientID,
-		OAuthToken: cfg.Twitch.OAuthToken,
+		HTTPClient:       &http.Client{Timeout: 5 * time.Second},
+		ClientID:         cfg.Twitch.ClientID,
+		OAuthToken:       cfg.Twitch.OAuthToken,
+		OAuthTokenSource: tokenSource,
 	})
 }
 
 // newEmoteIndex wires Ctrl+E emote search to real Twitch Helix emote data. EmoteIndex is in-memory only and needs no cache,
 // just Client ID/OAuth token.
-func newEmoteIndex(cfg config.Config) *assets.EmoteIndex {
+func newEmoteIndex(cfg config.Config, tokenSource func() string) *assets.EmoteIndex {
 	if strings.EqualFold(strings.TrimSpace(cfg.Features.EmoteAutocompleteMode), "off") {
 		return nil
 	}
@@ -229,15 +264,16 @@ func newEmoteIndex(cfg config.Config) *assets.EmoteIndex {
 		return nil
 	}
 	return assets.NewEmoteIndex(twitch.NewHelixChatAssetsClient(twitch.HelixChatAssetsClientConfig{
-		HTTPClient: &http.Client{Timeout: 2 * time.Second},
-		ClientID:   cfg.Twitch.ClientID,
-		OAuthToken: cfg.Twitch.OAuthToken,
+		HTTPClient:       &http.Client{Timeout: 2 * time.Second},
+		ClientID:         cfg.Twitch.ClientID,
+		OAuthToken:       cfg.Twitch.OAuthToken,
+		OAuthTokenSource: tokenSource,
 	}))
 }
 
 // newStreamStatusResolver wires the real Twitch Helix "Get Streams" LIVE
 // indicator, gated only on stream_status_mode and Twitch API credentials.
-func newStreamStatusResolver(cfg config.Config) app.StreamStatusResolver {
+func newStreamStatusResolver(cfg config.Config, tokenSource func() string) app.StreamStatusResolver {
 	if strings.EqualFold(strings.TrimSpace(cfg.Features.StreamStatusMode), "off") {
 		return nil
 	}
@@ -245,9 +281,10 @@ func newStreamStatusResolver(cfg config.Config) app.StreamStatusResolver {
 		return nil
 	}
 	return twitch.NewHelixStreamsClient(twitch.HelixStreamsClientConfig{
-		HTTPClient: &http.Client{Timeout: 2 * time.Second},
-		ClientID:   cfg.Twitch.ClientID,
-		OAuthToken: cfg.Twitch.OAuthToken,
+		HTTPClient:       &http.Client{Timeout: 2 * time.Second},
+		ClientID:         cfg.Twitch.ClientID,
+		OAuthToken:       cfg.Twitch.OAuthToken,
+		OAuthTokenSource: tokenSource,
 	})
 }
 
@@ -420,13 +457,17 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, notice)
 	}
 
-	client, err := newLiveChatClient(context.Background(), cfg, logger, status)
+	// One holder is shared by the IRC transport and every Helix client, so a
+	// refresh reaches all of them rather than only the connection that
+	// performed it.
+	holder := newCredentialHolder(cfg.Twitch)
+	client, err := newLiveChatClient(context.Background(), cfg, holder, logger, status)
 	if err != nil {
 		logger.Log(context.Background(), "cli.chat.failed", slog.String("error", err.Error()))
 		fmt.Fprintf(stderr, "start Twitch IRC chat: %v\n", err)
 		return 1
 	}
-	if err := runLiveChat(stdout, cfg, client, withDebugLogger(newLiveClientOptions(cfg), logger)); err != nil {
+	if err := runLiveChat(stdout, cfg, client, withDebugLogger(newLiveClientOptionsWithHolder(cfg, holder), logger)); err != nil {
 		logger.Log(context.Background(), "cli.chat.failed", slog.String("error", err.Error()))
 		fmt.Fprintf(stderr, "live chat: %v\n", err)
 		return 1

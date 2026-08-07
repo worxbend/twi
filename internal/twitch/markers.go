@@ -43,19 +43,23 @@ type MarkerManager interface {
 // HTTP tests; zero values use Twitch's production endpoint and the default
 // HTTP client.
 type HelixMarkersClientConfig struct {
-	Endpoint   string
-	HTTPClient *http.Client
-	ClientID   string
-	OAuthToken string
+	// OAuthTokenSource, when set, is read on every request so a token
+	// refreshed mid-session takes effect. OAuthToken is the static fallback
+	// used when no source is supplied.
+	OAuthTokenSource func() string
+	Endpoint         string
+	HTTPClient       *http.Client
+	ClientID         string
+	OAuthToken       string
 }
 
 // HelixMarkersClient creates and lists stream markers through Twitch Helix
 // "Create/Get Stream Markers".
 type HelixMarkersClient struct {
-	endpoint   string
-	httpClient *http.Client
-	clientID   string
-	oauthToken string
+	endpoint         string
+	httpClient       *http.Client
+	clientID         string
+	oauthTokenSource func() string
 }
 
 var _ MarkerManager = (*HelixMarkersClient)(nil)
@@ -72,10 +76,10 @@ func NewHelixMarkersClient(cfg HelixMarkersClientConfig) *HelixMarkersClient {
 		httpClient = http.DefaultClient
 	}
 	return &HelixMarkersClient{
-		endpoint:   endpoint,
-		httpClient: httpClient,
-		clientID:   strings.TrimSpace(cfg.ClientID),
-		oauthToken: strings.TrimSpace(cfg.OAuthToken),
+		endpoint:         endpoint,
+		httpClient:       httpClient,
+		clientID:         strings.TrimSpace(cfg.ClientID),
+		oauthTokenSource: resolveTokenSource(cfg.OAuthTokenSource, cfg.OAuthToken),
 	}
 }
 
@@ -93,18 +97,18 @@ func (c *HelixMarkersClient) CreateStreamMarker(ctx context.Context, userID, des
 
 	body, err := json.Marshal(helixCreateMarkerRequest{UserID: userID, Description: strings.TrimSpace(description)})
 	if err != nil {
-		return StreamMarker{}, credentialSafeUserError("encode Twitch stream marker request", err, c.oauthToken)
+		return StreamMarker{}, credentialSafeUserError("encode Twitch stream marker request", err, c.token())
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
 	if err != nil {
-		return StreamMarker{}, credentialSafeUserError("create Twitch stream marker request", err, c.oauthToken)
+		return StreamMarker{}, credentialSafeUserError("create Twitch stream marker request", err, c.token())
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	c.setAuthHeaders(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return StreamMarker{}, credentialSafeUserError("create Twitch stream marker", err, c.oauthToken)
+		return StreamMarker{}, credentialSafeUserError("create Twitch stream marker", err, c.token())
 	}
 	defer resp.Body.Close()
 
@@ -114,7 +118,7 @@ func (c *HelixMarkersClient) CreateStreamMarker(ctx context.Context, userID, des
 
 	var decoded helixCreateMarkerResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return StreamMarker{}, credentialSafeUserError("decode Twitch stream marker response", err, c.oauthToken)
+		return StreamMarker{}, credentialSafeUserError("decode Twitch stream marker response", err, c.token())
 	}
 	if len(decoded.Data) == 0 {
 		return StreamMarker{}, fmt.Errorf("create Twitch stream marker: empty response")
@@ -142,7 +146,7 @@ func (c *HelixMarkersClient) GetStreamMarkers(ctx context.Context, userID string
 
 	parsed, err := url.Parse(c.endpoint)
 	if err != nil {
-		return nil, credentialSafeUserError("create Twitch stream markers request", err, c.oauthToken)
+		return nil, credentialSafeUserError("create Twitch stream markers request", err, c.token())
 	}
 	q := parsed.Query()
 	q.Set("user_id", userID)
@@ -151,13 +155,13 @@ func (c *HelixMarkersClient) GetStreamMarkers(ctx context.Context, userID string
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 	if err != nil {
-		return nil, credentialSafeUserError("create Twitch stream markers request", err, c.oauthToken)
+		return nil, credentialSafeUserError("create Twitch stream markers request", err, c.token())
 	}
 	c.setAuthHeaders(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, credentialSafeUserError("get Twitch stream markers", err, c.oauthToken)
+		return nil, credentialSafeUserError("get Twitch stream markers", err, c.token())
 	}
 	defer resp.Body.Close()
 
@@ -167,7 +171,7 @@ func (c *HelixMarkersClient) GetStreamMarkers(ctx context.Context, userID string
 
 	var decoded helixStreamMarkersListResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return nil, credentialSafeUserError("decode Twitch stream markers response", err, c.oauthToken)
+		return nil, credentialSafeUserError("decode Twitch stream markers response", err, c.token())
 	}
 	if len(decoded.Data) == 0 || len(decoded.Data[0].Videos) == 0 {
 		return nil, nil
@@ -184,7 +188,7 @@ func (c *HelixMarkersClient) setAuthHeaders(req *http.Request) {
 	if c.clientID != "" {
 		req.Header.Set("Client-Id", c.clientID)
 	}
-	token := accessTokenForValidation(c.oauthToken)
+	token := accessTokenForValidation(c.token())
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -193,7 +197,7 @@ func (c *HelixMarkersClient) setAuthHeaders(req *http.Request) {
 func (c *HelixMarkersClient) responseError(resp *http.Response, action, endpointLabel string) error {
 	detail, err := readSmallBody(resp.Body)
 	if err != nil {
-		return credentialSafeUserError("read Twitch stream markers response", err, c.oauthToken)
+		return credentialSafeUserError("read Twitch stream markers response", err, c.token())
 	}
 	if detail != "" {
 		detail = ": " + detail
@@ -201,7 +205,7 @@ func (c *HelixMarkersClient) responseError(resp *http.Response, action, endpoint
 	wrapped := credentialSafeUserError(
 		action,
 		fmt.Errorf("twitch %s returned HTTP %d%s", endpointLabel, resp.StatusCode, detail),
-		c.oauthToken,
+		c.token(),
 	)
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusNotFound {
 		return &ChannelAPIError{StatusCode: resp.StatusCode, err: wrapped}
@@ -259,4 +263,13 @@ type helixStreamMarkersUser struct {
 type helixStreamMarkersVideo struct {
 	VideoID string        `json:"video_id"`
 	Markers []helixMarker `json:"markers"`
+}
+
+// token returns the OAuth token to present on the next request, read now
+// rather than captured at construction so a mid-session refresh applies.
+func (c *HelixMarkersClient) token() string {
+	if c == nil || c.oauthTokenSource == nil {
+		return ""
+	}
+	return c.oauthTokenSource()
 }

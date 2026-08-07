@@ -36,19 +36,23 @@ type SubscriptionLookup interface {
 // deterministic fake HTTP tests; zero values use Twitch's production
 // endpoint and the default HTTP client.
 type HelixSubscriptionsClientConfig struct {
-	Endpoint   string
-	HTTPClient *http.Client
-	ClientID   string
-	OAuthToken string
+	// OAuthTokenSource, when set, is read on every request so a token
+	// refreshed mid-session takes effect. OAuthToken is the static fallback
+	// used when no source is supplied.
+	OAuthTokenSource func() string
+	Endpoint         string
+	HTTPClient       *http.Client
+	ClientID         string
+	OAuthToken       string
 }
 
 // HelixSubscriptionsClient resolves subscriber counts through Twitch Helix
 // "Get Broadcaster Subscriptions".
 type HelixSubscriptionsClient struct {
-	endpoint   string
-	httpClient *http.Client
-	clientID   string
-	oauthToken string
+	endpoint         string
+	httpClient       *http.Client
+	clientID         string
+	oauthTokenSource func() string
 }
 
 var _ SubscriptionLookup = (*HelixSubscriptionsClient)(nil)
@@ -66,10 +70,10 @@ func NewHelixSubscriptionsClient(cfg HelixSubscriptionsClientConfig) *HelixSubsc
 		httpClient = http.DefaultClient
 	}
 	return &HelixSubscriptionsClient{
-		endpoint:   endpoint,
-		httpClient: httpClient,
-		clientID:   strings.TrimSpace(cfg.ClientID),
-		oauthToken: strings.TrimSpace(cfg.OAuthToken),
+		endpoint:         endpoint,
+		httpClient:       httpClient,
+		clientID:         strings.TrimSpace(cfg.ClientID),
+		oauthTokenSource: resolveTokenSource(cfg.OAuthTokenSource, cfg.OAuthToken),
 	}
 }
 
@@ -94,7 +98,7 @@ func (c *HelixSubscriptionsClient) GetBroadcasterSubscriptions(ctx context.Conte
 
 	parsed, err := url.Parse(c.endpoint)
 	if err != nil {
-		return SubscriptionsPage{}, credentialSafeUserError("create Twitch broadcaster subscriptions request", err, c.oauthToken)
+		return SubscriptionsPage{}, credentialSafeUserError("create Twitch broadcaster subscriptions request", err, c.token())
 	}
 	q := parsed.Query()
 	q.Set("broadcaster_id", broadcasterID)
@@ -103,26 +107,26 @@ func (c *HelixSubscriptionsClient) GetBroadcasterSubscriptions(ctx context.Conte
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 	if err != nil {
-		return SubscriptionsPage{}, credentialSafeUserError("create Twitch broadcaster subscriptions request", err, c.oauthToken)
+		return SubscriptionsPage{}, credentialSafeUserError("create Twitch broadcaster subscriptions request", err, c.token())
 	}
 	if c.clientID != "" {
 		httpReq.Header.Set("Client-Id", c.clientID)
 	}
-	token := accessTokenForValidation(c.oauthToken)
+	token := accessTokenForValidation(c.token())
 	if token != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return SubscriptionsPage{}, credentialSafeUserError("get Twitch broadcaster subscriptions", err, c.oauthToken)
+		return SubscriptionsPage{}, credentialSafeUserError("get Twitch broadcaster subscriptions", err, c.token())
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		detail, readErr := readSmallBody(resp.Body)
 		if readErr != nil {
-			return SubscriptionsPage{}, credentialSafeUserError("read Twitch broadcaster subscriptions response", readErr, c.oauthToken)
+			return SubscriptionsPage{}, credentialSafeUserError("read Twitch broadcaster subscriptions response", readErr, c.token())
 		}
 		if detail != "" {
 			detail = ": " + detail
@@ -130,7 +134,7 @@ func (c *HelixSubscriptionsClient) GetBroadcasterSubscriptions(ctx context.Conte
 		wrapped := credentialSafeUserError(
 			"get Twitch broadcaster subscriptions",
 			fmt.Errorf("twitch Get Broadcaster Subscriptions returned HTTP %d%s", resp.StatusCode, detail),
-			c.oauthToken,
+			c.token(),
 		)
 		if resp.StatusCode == http.StatusUnauthorized {
 			return SubscriptionsPage{}, &ChannelAPIError{StatusCode: resp.StatusCode, err: wrapped}
@@ -140,7 +144,7 @@ func (c *HelixSubscriptionsClient) GetBroadcasterSubscriptions(ctx context.Conte
 
 	var decoded helixSubscriptionsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return SubscriptionsPage{}, credentialSafeUserError("decode Twitch broadcaster subscriptions response", err, c.oauthToken)
+		return SubscriptionsPage{}, credentialSafeUserError("decode Twitch broadcaster subscriptions response", err, c.token())
 	}
 	// The wire struct and SubscriptionsPage carry the same fields, so a
 	// conversion keeps them in lockstep: adding a field to one without the
@@ -151,4 +155,13 @@ func (c *HelixSubscriptionsClient) GetBroadcasterSubscriptions(ctx context.Conte
 type helixSubscriptionsResponse struct {
 	Total  int `json:"total"`
 	Points int `json:"points"`
+}
+
+// token returns the OAuth token to present on the next request, read now
+// rather than captured at construction so a mid-session refresh applies.
+func (c *HelixSubscriptionsClient) token() string {
+	if c == nil || c.oauthTokenSource == nil {
+		return ""
+	}
+	return c.oauthTokenSource()
 }

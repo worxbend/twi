@@ -31,19 +31,23 @@ type StreamLookup interface {
 // Endpoint, HTTPClient are injectable for deterministic fake HTTP tests; zero
 // values use Twitch's production endpoint and the default HTTP client.
 type HelixStreamsClientConfig struct {
-	Endpoint   string
-	HTTPClient *http.Client
-	ClientID   string
-	OAuthToken string
+	// OAuthTokenSource, when set, is read on every request so a token
+	// refreshed mid-session takes effect. OAuthToken is the static fallback
+	// used when no source is supplied.
+	OAuthTokenSource func() string
+	Endpoint         string
+	HTTPClient       *http.Client
+	ClientID         string
+	OAuthToken       string
 }
 
 // HelixStreamsClient resolves broadcast status through Twitch Helix Get
 // Streams.
 type HelixStreamsClient struct {
-	endpoint   string
-	httpClient *http.Client
-	clientID   string
-	oauthToken string
+	endpoint         string
+	httpClient       *http.Client
+	clientID         string
+	oauthTokenSource func() string
 }
 
 var _ StreamLookup = (*HelixStreamsClient)(nil)
@@ -60,10 +64,10 @@ func NewHelixStreamsClient(cfg HelixStreamsClientConfig) *HelixStreamsClient {
 		httpClient = http.DefaultClient
 	}
 	return &HelixStreamsClient{
-		endpoint:   endpoint,
-		httpClient: httpClient,
-		clientID:   strings.TrimSpace(cfg.ClientID),
-		oauthToken: strings.TrimSpace(cfg.OAuthToken),
+		endpoint:         endpoint,
+		httpClient:       httpClient,
+		clientID:         strings.TrimSpace(cfg.ClientID),
+		oauthTokenSource: resolveTokenSource(cfg.OAuthTokenSource, cfg.OAuthToken),
 	}
 }
 
@@ -82,30 +86,30 @@ func (c *HelixStreamsClient) GetStreams(ctx context.Context, logins []string) ([
 
 	endpoint, err := c.streamsURL(unique)
 	if err != nil {
-		return nil, credentialSafeUserError("create Twitch stream status request", err, c.oauthToken)
+		return nil, credentialSafeUserError("create Twitch stream status request", err, c.token())
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, credentialSafeUserError("create Twitch stream status request", err, c.oauthToken)
+		return nil, credentialSafeUserError("create Twitch stream status request", err, c.token())
 	}
 	if c.clientID != "" {
 		httpReq.Header.Set("Client-Id", c.clientID)
 	}
-	token := accessTokenForValidation(c.oauthToken)
+	token := accessTokenForValidation(c.token())
 	if token != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, credentialSafeUserError("lookup Twitch stream status", err, c.oauthToken)
+		return nil, credentialSafeUserError("lookup Twitch stream status", err, c.token())
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		detail, err := readSmallBody(resp.Body)
 		if err != nil {
-			return nil, credentialSafeUserError("read Twitch stream status response", err, c.oauthToken)
+			return nil, credentialSafeUserError("read Twitch stream status response", err, c.token())
 		}
 		if detail != "" {
 			detail = ": " + detail
@@ -113,13 +117,13 @@ func (c *HelixStreamsClient) GetStreams(ctx context.Context, logins []string) ([
 		return nil, credentialSafeUserError(
 			"lookup Twitch stream status",
 			fmt.Errorf("twitch Get Streams returned HTTP %d%s", resp.StatusCode, detail),
-			c.oauthToken,
+			c.token(),
 		)
 	}
 
 	var decoded helixStreamsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return nil, credentialSafeUserError("decode Twitch stream status response", err, c.oauthToken)
+		return nil, credentialSafeUserError("decode Twitch stream status response", err, c.token())
 	}
 
 	live := make(map[string]helixStream, len(decoded.Data))
@@ -171,4 +175,13 @@ type helixStream struct {
 	Type        string `json:"type"`
 	StartedAt   string `json:"started_at"`
 	ViewerCount int    `json:"viewer_count"`
+}
+
+// token returns the OAuth token to present on the next request, read now
+// rather than captured at construction so a mid-session refresh applies.
+func (c *HelixStreamsClient) token() string {
+	if c == nil || c.oauthTokenSource == nil {
+		return ""
+	}
+	return c.oauthTokenSource()
 }

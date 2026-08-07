@@ -39,18 +39,22 @@ type UserIdentity struct {
 // Endpoint, HTTPClient, and Now are injectable for deterministic fake HTTP
 // tests; zero values use Twitch's production endpoint and default HTTP client.
 type HelixUsersClientConfig struct {
-	Endpoint   string
-	HTTPClient *http.Client
-	ClientID   string
-	OAuthToken string
+	// OAuthTokenSource, when set, is read on every request so a token
+	// refreshed mid-session takes effect. OAuthToken is the static fallback
+	// used when no source is supplied.
+	OAuthTokenSource func() string
+	Endpoint         string
+	HTTPClient       *http.Client
+	ClientID         string
+	OAuthToken       string
 }
 
 // HelixUsersClient resolves Twitch users through Helix Get Users.
 type HelixUsersClient struct {
-	endpoint   string
-	httpClient *http.Client
-	clientID   string
-	oauthToken string
+	endpoint         string
+	httpClient       *http.Client
+	clientID         string
+	oauthTokenSource func() string
 }
 
 var _ UserLookup = (*HelixUsersClient)(nil)
@@ -67,10 +71,10 @@ func NewHelixUsersClient(cfg HelixUsersClientConfig) *HelixUsersClient {
 		httpClient = http.DefaultClient
 	}
 	return &HelixUsersClient{
-		endpoint:   endpoint,
-		httpClient: httpClient,
-		clientID:   strings.TrimSpace(cfg.ClientID),
-		oauthToken: strings.TrimSpace(cfg.OAuthToken),
+		endpoint:         endpoint,
+		httpClient:       httpClient,
+		clientID:         strings.TrimSpace(cfg.ClientID),
+		oauthTokenSource: resolveTokenSource(cfg.OAuthTokenSource, cfg.OAuthToken),
 	}
 }
 
@@ -88,30 +92,30 @@ func (c *HelixUsersClient) GetUsers(ctx context.Context, req UserLookupRequest) 
 
 	endpoint, err := c.usersURL(ids, logins)
 	if err != nil {
-		return nil, credentialSafeUserError("create Twitch user lookup request", err, c.oauthToken)
+		return nil, credentialSafeUserError("create Twitch user lookup request", err, c.token())
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, credentialSafeUserError("create Twitch user lookup request", err, c.oauthToken)
+		return nil, credentialSafeUserError("create Twitch user lookup request", err, c.token())
 	}
 	if c.clientID != "" {
 		httpReq.Header.Set("Client-Id", c.clientID)
 	}
-	token := accessTokenForValidation(c.oauthToken)
+	token := accessTokenForValidation(c.token())
 	if token != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, credentialSafeUserError("lookup Twitch users", err, c.oauthToken)
+		return nil, credentialSafeUserError("lookup Twitch users", err, c.token())
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		detail, err := readSmallBody(resp.Body)
 		if err != nil {
-			return nil, credentialSafeUserError("read Twitch user lookup response", err, c.oauthToken)
+			return nil, credentialSafeUserError("read Twitch user lookup response", err, c.token())
 		}
 		if detail != "" {
 			detail = ": " + detail
@@ -119,13 +123,13 @@ func (c *HelixUsersClient) GetUsers(ctx context.Context, req UserLookupRequest) 
 		return nil, credentialSafeUserError(
 			"lookup Twitch users",
 			fmt.Errorf("twitch Get Users returned HTTP %d%s", resp.StatusCode, detail),
-			c.oauthToken,
+			c.token(),
 		)
 	}
 
 	var decoded helixUsersResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return nil, credentialSafeUserError("decode Twitch user lookup response", err, c.oauthToken)
+		return nil, credentialSafeUserError("decode Twitch user lookup response", err, c.token())
 	}
 	users := make([]UserIdentity, 0, len(decoded.Data))
 	for _, item := range decoded.Data {
@@ -202,4 +206,13 @@ func credentialSafeUserError(action string, err error, oauthToken string) error 
 	}
 	credentials := TokenCredentials{OAuthToken: oauthToken}
 	return errors.New(action + ": " + redactCredentials(err.Error(), credentials))
+}
+
+// token returns the OAuth token to present on the next request, read now
+// rather than captured at construction so a mid-session refresh applies.
+func (c *HelixUsersClient) token() string {
+	if c == nil || c.oauthTokenSource == nil {
+		return ""
+	}
+	return c.oauthTokenSource()
 }

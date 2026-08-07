@@ -55,19 +55,23 @@ type ChannelManager interface {
 // Endpoint and HTTPClient are injectable for deterministic fake HTTP tests;
 // zero values use Twitch's production endpoint and the default HTTP client.
 type HelixChannelsClientConfig struct {
-	Endpoint   string
-	HTTPClient *http.Client
-	ClientID   string
-	OAuthToken string
+	// OAuthTokenSource, when set, is read on every request so a token
+	// refreshed mid-session takes effect. OAuthToken is the static fallback
+	// used when no source is supplied.
+	OAuthTokenSource func() string
+	Endpoint         string
+	HTTPClient       *http.Client
+	ClientID         string
+	OAuthToken       string
 }
 
 // HelixChannelsClient reads and updates channel info through Twitch Helix
 // "Get/Modify Channel Information".
 type HelixChannelsClient struct {
-	endpoint   string
-	httpClient *http.Client
-	clientID   string
-	oauthToken string
+	endpoint         string
+	httpClient       *http.Client
+	clientID         string
+	oauthTokenSource func() string
 }
 
 var _ ChannelManager = (*HelixChannelsClient)(nil)
@@ -85,10 +89,10 @@ func NewHelixChannelsClient(cfg HelixChannelsClientConfig) *HelixChannelsClient 
 		httpClient = http.DefaultClient
 	}
 	return &HelixChannelsClient{
-		endpoint:   endpoint,
-		httpClient: httpClient,
-		clientID:   strings.TrimSpace(cfg.ClientID),
-		oauthToken: strings.TrimSpace(cfg.OAuthToken),
+		endpoint:         endpoint,
+		httpClient:       httpClient,
+		clientID:         strings.TrimSpace(cfg.ClientID),
+		oauthTokenSource: resolveTokenSource(cfg.OAuthTokenSource, cfg.OAuthToken),
 	}
 }
 
@@ -105,17 +109,17 @@ func (c *HelixChannelsClient) GetChannelInformation(ctx context.Context, broadca
 
 	endpoint, err := c.channelsURL(broadcasterID)
 	if err != nil {
-		return ChannelInfo{}, credentialSafeUserError("create Twitch channel information request", err, c.oauthToken)
+		return ChannelInfo{}, credentialSafeUserError("create Twitch channel information request", err, c.token())
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return ChannelInfo{}, credentialSafeUserError("create Twitch channel information request", err, c.oauthToken)
+		return ChannelInfo{}, credentialSafeUserError("create Twitch channel information request", err, c.token())
 	}
 	c.setAuthHeaders(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return ChannelInfo{}, credentialSafeUserError("get Twitch channel information", err, c.oauthToken)
+		return ChannelInfo{}, credentialSafeUserError("get Twitch channel information", err, c.token())
 	}
 	defer resp.Body.Close()
 
@@ -125,7 +129,7 @@ func (c *HelixChannelsClient) GetChannelInformation(ctx context.Context, broadca
 
 	var decoded helixChannelsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return ChannelInfo{}, credentialSafeUserError("decode Twitch channel information response", err, c.oauthToken)
+		return ChannelInfo{}, credentialSafeUserError("decode Twitch channel information response", err, c.token())
 	}
 	if len(decoded.Data) == 0 {
 		return ChannelInfo{}, fmt.Errorf("get Twitch channel information: no channel found for broadcaster")
@@ -165,23 +169,23 @@ func (c *HelixChannelsClient) ModifyChannelInformation(ctx context.Context, broa
 		Tags:                update.Tags,
 	})
 	if err != nil {
-		return credentialSafeUserError("encode Twitch channel information update", err, c.oauthToken)
+		return credentialSafeUserError("encode Twitch channel information update", err, c.token())
 	}
 
 	endpoint, err := c.channelsURL(broadcasterID)
 	if err != nil {
-		return credentialSafeUserError("create Twitch channel information update request", err, c.oauthToken)
+		return credentialSafeUserError("create Twitch channel information update request", err, c.token())
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPatch, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return credentialSafeUserError("create Twitch channel information update request", err, c.oauthToken)
+		return credentialSafeUserError("create Twitch channel information update request", err, c.token())
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	c.setAuthHeaders(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return credentialSafeUserError("modify Twitch channel information", err, c.oauthToken)
+		return credentialSafeUserError("modify Twitch channel information", err, c.token())
 	}
 	defer resp.Body.Close()
 
@@ -195,7 +199,7 @@ func (c *HelixChannelsClient) setAuthHeaders(req *http.Request) {
 	if c.clientID != "" {
 		req.Header.Set("Client-Id", c.clientID)
 	}
-	token := accessTokenForValidation(c.oauthToken)
+	token := accessTokenForValidation(c.token())
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -204,7 +208,7 @@ func (c *HelixChannelsClient) setAuthHeaders(req *http.Request) {
 func (c *HelixChannelsClient) responseError(resp *http.Response, action, endpointLabel string) error {
 	detail, err := readSmallBody(resp.Body)
 	if err != nil {
-		return credentialSafeUserError("read Twitch channel information response", err, c.oauthToken)
+		return credentialSafeUserError("read Twitch channel information response", err, c.token())
 	}
 	if detail != "" {
 		detail = ": " + detail
@@ -212,7 +216,7 @@ func (c *HelixChannelsClient) responseError(resp *http.Response, action, endpoin
 	wrapped := credentialSafeUserError(
 		action,
 		fmt.Errorf("twitch %s returned HTTP %d%s", endpointLabel, resp.StatusCode, detail),
-		c.oauthToken,
+		c.token(),
 	)
 	if resp.StatusCode == http.StatusUnauthorized {
 		return &ChannelAPIError{StatusCode: resp.StatusCode, err: wrapped}
@@ -274,4 +278,13 @@ type helixChannelUpdateRequest struct {
 	GameID              *string   `json:"game_id,omitempty"`
 	BroadcasterLanguage *string   `json:"broadcaster_language,omitempty"`
 	Tags                *[]string `json:"tags,omitempty"`
+}
+
+// token returns the OAuth token to present on the next request, read now
+// rather than captured at construction so a mid-session refresh applies.
+func (c *HelixChannelsClient) token() string {
+	if c == nil || c.oauthTokenSource == nil {
+		return ""
+	}
+	return c.oauthTokenSource()
 }
