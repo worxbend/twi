@@ -36,6 +36,12 @@ constant in the source tree.
   messages and 325ms at 5,000, against a 100ms animation tick. Rendered rows
   are now memoized per message, only the visible window is styled, and the
   backlog is capped. The same measurements are now 4.1ms and 11.5ms.
+- **A busy chat can no longer stall the connection.** `emitMessage` was the
+  one emitter that blocked when its buffer filled, so a UI falling behind
+  during a raid back-pressured into the goroutine that answers Twitch's
+  keepalives — and Twitch dropped the connection. It now discards the oldest
+  queued message instead, and the status bar reports `dropped=N` so the loss
+  is visible rather than silent.
 - **Deleting a message no longer reprints it.** Twitch's `CLEARMSG` carries
   the deleted message's text, and twi rendered that into a new visible notice
   while leaving the original in place — so moderating a message put its text

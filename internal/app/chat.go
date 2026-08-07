@@ -47,6 +47,17 @@ type UserStateSource interface {
 	UserStates() <-chan twitch.UserState
 }
 
+// MessageDropCounter is an optional ChatClient capability reporting how many
+// chat messages were discarded because the UI could not keep up.
+//
+// Transports drop rather than block, because blocking the emitter stalls the
+// goroutine that answers Twitch's keepalives and costs the whole connection.
+// That trade is only acceptable if the loss is visible, which is what this
+// interface is for.
+type MessageDropCounter interface {
+	DroppedMessages() uint64
+}
+
 // ModerationSource is an optional ChatClient capability exposing moderation
 // actions: deletions, timeouts, bans, and chat clears.
 //

@@ -53,3 +53,12 @@ func newSafeError(detail string, cause error) error {
 	}
 	return &safeError{detail: detail, cause: cause}
 }
+
+// EventDropCounter is implemented by transports that discard events when a
+// consumer falls behind. Dropping is preferable to blocking -- a stalled
+// consumer must never wedge the goroutine that answers Twitch's PING -- but
+// the count has to reach the UI, because silently losing chat is not
+// something a moderator should have to discover for themselves.
+type EventDropCounter interface {
+	DroppedEvents() uint64
+}

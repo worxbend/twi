@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/worxbend/twi/internal/auth"
@@ -31,6 +32,8 @@ type LiveChatClient struct {
 	moderations chan twitch.ModerationEvent
 	done        chan struct{}
 	closed      chan struct{}
+
+	droppedMessages atomic.Uint64
 
 	mu           sync.RWMutex
 	session      *liveChatSession
@@ -570,12 +573,63 @@ func (c *LiveChatClient) handleEvent(ctx context.Context, event twitch.Event) {
 	}
 }
 
+// emitMessage hands a message to the model, dropping the oldest queued
+// message rather than blocking when the buffer is full.
+//
+// Blocking here stalls the bridge goroutine, which back-pressures into
+// go-twitch-irc's single parser goroutine -- the same goroutine that answers
+// PING. A UI that falls behind during a raid would therefore stop the client
+// responding to keepalives, and Twitch would disconnect it. Every other
+// emitter on this type already drops for the same reason; this one was the
+// exception.
+//
+// Dropping the oldest keeps chat current, which is what someone watching a
+// busy channel wants: the queue holds messages that have not been displayed
+// yet, so nothing already on screen is lost. The count is surfaced in the
+// status bar, because a moderator would rightly object to silent drops.
 func (c *LiveChatClient) emitMessage(ctx context.Context, msg twitch.ChatMessage) {
+	select {
+	case c.messages <- msg:
+		return
+	case <-ctx.Done():
+		return
+	case <-c.done:
+		return
+	default:
+	}
+
+	// Full: discard the oldest queued message to make room for this one.
+	select {
+	case <-c.messages:
+		c.droppedMessages.Add(1)
+	default:
+	}
 	select {
 	case c.messages <- msg:
 	case <-ctx.Done():
 	case <-c.done:
+	default:
+		c.droppedMessages.Add(1)
 	}
+}
+
+// DroppedMessages reports how many chat messages were discarded because the
+// UI could not keep up, including any the transport dropped upstream.
+func (c *LiveChatClient) DroppedMessages() uint64 {
+	dropped := c.droppedMessages.Load()
+	if source, ok := c.currentTransportForDrops().(twitch.EventDropCounter); ok {
+		dropped += source.DroppedEvents()
+	}
+	return dropped
+}
+
+func (c *LiveChatClient) currentTransportForDrops() twitch.ChatClient {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.session == nil {
+		return nil
+	}
+	return c.session.transport
 }
 
 // emitUserState drops the event rather than blocking when the buffer is

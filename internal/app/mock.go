@@ -1050,6 +1050,16 @@ func (m mockShellModel) View() string {
 	return backgroundOverride + rendered
 }
 
+// droppedMessageCount reports messages lost to a full buffer, or zero for a
+// source that cannot drop (mock mode, test fakes).
+func (m mockShellModel) droppedMessageCount() uint64 {
+	counter, ok := m.client.(MessageDropCounter)
+	if !ok {
+		return 0
+	}
+	return counter.DroppedMessages()
+}
+
 func (m mockShellModel) statusLine(width int) string {
 	active := m.activeChannelState()
 	channelCount := len(m.channels.channelNames())
@@ -1067,6 +1077,13 @@ func (m mockShellModel) statusLine(width int) string {
 	}
 	if totalUnread := m.channels.totalUnread(); totalUnread > 0 && width >= 34 {
 		left += fmt.Sprintf(" | unread=%d", totalUnread)
+	}
+	// Dropped messages are shown unconditionally once any exist, at any width.
+	// Chat quietly losing messages is exactly the thing a moderator must not
+	// have to discover for themselves, so this outranks the decorations above
+	// it in the same line.
+	if dropped := m.droppedMessageCount(); dropped > 0 {
+		left += fmt.Sprintf(" | dropped=%d", dropped)
 	}
 	if m.lastSystemNotification != nil && width >= 58 {
 		left += " | notify: " + systemNotificationSummary(*m.lastSystemNotification)

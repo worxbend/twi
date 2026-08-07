@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	irc "github.com/gempir/go-twitch-irc/v4"
@@ -98,12 +99,21 @@ type IRCClient struct {
 
 	done      chan struct{}
 	closeOnce sync.Once
+
+	droppedEvents atomic.Uint64
 }
 
 var (
-	_ ChatClient    = (*IRCClient)(nil)
-	_ ChannelJoiner = (*IRCClient)(nil)
+	_ ChatClient       = (*IRCClient)(nil)
+	_ ChannelJoiner    = (*IRCClient)(nil)
+	_ EventDropCounter = (*IRCClient)(nil)
 )
+
+// DroppedEvents implements EventDropCounter: the number of events discarded
+// because the consumer could not keep up.
+func (c *IRCClient) DroppedEvents() uint64 {
+	return c.droppedEvents.Load()
+}
 
 // NewIRCClient creates a Twitch IRC client without opening the network
 // connection. Call Connect to start the read loop.
@@ -169,11 +179,33 @@ func (c *IRCClient) Connect(ctx context.Context) (<-chan Event, error) {
 		slog.Int("channel_count", len(c.channels)),
 		slog.Int("buffer", c.buffer),
 	)
+	// emit drops the oldest queued event rather than blocking when the
+	// consumer falls behind. This function runs on go-twitch-irc's parser
+	// goroutine, which is also the goroutine that answers PING: blocking here
+	// stops keepalives and Twitch closes the connection. Losing the oldest
+	// unread event is a far smaller failure than losing the session.
 	emit := func(event Event) {
+		select {
+		case events <- event:
+			return
+		case <-ctx.Done():
+			return
+		case <-c.done:
+			return
+		default:
+		}
+
+		select {
+		case <-events:
+			c.droppedEvents.Add(1)
+		default:
+		}
 		select {
 		case events <- event:
 		case <-ctx.Done():
 		case <-c.done:
+		default:
+			c.droppedEvents.Add(1)
 		}
 	}
 
