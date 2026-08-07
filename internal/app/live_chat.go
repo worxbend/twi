@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -28,6 +27,7 @@ type LiveChatClient struct {
 	states      chan ConnectionState
 	memberships chan twitch.MembershipEvent
 	userStates  chan twitch.UserState
+	moderations chan twitch.ModerationEvent
 	done        chan struct{}
 	closed      chan struct{}
 
@@ -103,6 +103,7 @@ func newLiveChatClient(ctx context.Context, reconnectFactory, initialFactory Liv
 		states:      make(chan ConnectionState, buffer),
 		memberships: make(chan twitch.MembershipEvent, buffer),
 		userStates:  make(chan twitch.UserState, buffer),
+		moderations: make(chan twitch.ModerationEvent, buffer),
 		done:        make(chan struct{}),
 		closed:      make(chan struct{}),
 		debugLogger: opts.DebugLogger,
@@ -128,6 +129,7 @@ func newLiveChatClient(ctx context.Context, reconnectFactory, initialFactory Liv
 		close(client.states)
 		close(client.memberships)
 		close(client.userStates)
+		close(client.moderations)
 		close(client.closed)
 		return nil, safeErr
 	}
@@ -150,6 +152,12 @@ func (c *LiveChatClient) ConnectionStates() <-chan ConnectionState {
 // that user's own badges, because Twitch never echoes their PRIVMSGs back.
 func (c *LiveChatClient) UserStates() <-chan twitch.UserState {
 	return c.userStates
+}
+
+// Moderations implements ModerationSource. The channel stays open for the
+// client's lifetime so callers can select on it unconditionally.
+func (c *LiveChatClient) Moderations() <-chan twitch.ModerationEvent {
+	return c.moderations
 }
 
 // Memberships implements MembershipSource. The channel stays open for the
@@ -250,6 +258,7 @@ func (c *LiveChatClient) Close() error {
 		close(c.states)
 		close(c.memberships)
 		close(c.userStates)
+		close(c.moderations)
 		close(c.closed)
 	})
 	return err
@@ -535,7 +544,7 @@ func (c *LiveChatClient) handleEvent(ctx context.Context, event twitch.Event) {
 	case twitch.EventUserNotice:
 		c.emitMessage(ctx, messageFromUserNotice(event.UserNotice))
 	case twitch.EventModeration:
-		c.emitMessage(ctx, messageFromModeration(event.Moderation))
+		c.emitModeration(ctx, event.Moderation)
 	case twitch.EventMembership:
 		c.emitMembership(ctx, event.Membership)
 	case twitch.EventUserState:
@@ -574,6 +583,19 @@ func (c *LiveChatClient) emitMessage(ctx context.Context, msg twitch.ChatMessage
 func (c *LiveChatClient) emitUserState(ctx context.Context, state twitch.UserState) {
 	select {
 	case c.userStates <- state:
+	case <-ctx.Done():
+	case <-c.done:
+	default:
+	}
+}
+
+// emitModeration drops the event rather than blocking when the buffer is
+// full, matching the other side-channel emitters. A dropped deletion leaves
+// the original message visible, which is the same outcome as twi never having
+// been told - not a message that gets reprinted.
+func (c *LiveChatClient) emitModeration(ctx context.Context, event twitch.ModerationEvent) {
+	select {
+	case c.moderations <- event:
 	case <-ctx.Done():
 	case <-c.done:
 	default:
@@ -712,28 +734,6 @@ func userNoticeRawTags(notice twitch.UserNotice, systemEventID string) map[strin
 	tags["twi.kind"] = "user_notice"
 	tags["twi.event"] = systemEventID
 	return tags
-}
-
-func messageFromModeration(event twitch.ModerationEvent) twitch.ChatMessage {
-	text := string(event.Type)
-	if event.TargetLogin != "" {
-		text = fmt.Sprintf("%s: %s", text, event.TargetLogin)
-	}
-	if event.TargetMessageID != "" {
-		text = fmt.Sprintf("%s: %s", text, event.TargetMessageID)
-	}
-	if event.Text != "" {
-		text = fmt.Sprintf("%s - %s", text, event.Text)
-	}
-	return twitch.ChatMessage{
-		ID:            event.TargetMessageID,
-		Channel:       event.Channel,
-		Timestamp:     event.Timestamp,
-		Text:          text,
-		Type:          twitch.MessageTypeNotice,
-		Deleted:       event.Type == twitch.ModerationMessageDeleted,
-		SystemEventID: string(event.Type),
-	}
 }
 
 func cloneAppStringMap(in map[string]string) map[string]string {

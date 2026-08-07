@@ -47,6 +47,18 @@ type UserStateSource interface {
 	UserStates() <-chan twitch.UserState
 }
 
+// ModerationSource is an optional ChatClient capability exposing moderation
+// actions: deletions, timeouts, bans, and chat clears.
+//
+// It is deliberately not folded into the message stream. A moderation action
+// is an instruction to remove text that is already on screen, so rendering it
+// as another chat message puts the removed text back in front of the viewer -
+// on a terminal that is frequently on stream. Consumers apply these to
+// messages they already hold instead.
+type ModerationSource interface {
+	Moderations() <-chan twitch.ModerationEvent
+}
+
 type ConnectionState struct {
 	Status  ConnectionStatus
 	Channel string

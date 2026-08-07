@@ -310,6 +310,11 @@ type chatClientUserStateMsg struct {
 	ok    bool
 }
 
+type chatClientModerationMsg struct {
+	event twitch.ModerationEvent
+	ok    bool
+}
+
 type composerSendCompletedMsg struct {
 	id     int
 	result SendResult
@@ -607,6 +612,7 @@ func (m mockShellModel) Init() tea.Cmd {
 		m.nextConnectionStateCommand(),
 		m.nextClientMembershipCommand(),
 		m.nextClientUserStateCommand(),
+		m.nextClientModerationCommand(),
 		m.scheduleFrameTick(),
 		m.resolveStreamStatusCommand(),
 		m.scheduleStreamStatusTick(),
@@ -903,6 +909,12 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.applyUserState(msg.state)
 		return m, m.nextClientUserStateCommand()
+	case chatClientModerationMsg:
+		if !msg.ok {
+			return m, nil
+		}
+		m.applyModeration(msg.event)
+		return m, m.nextClientModerationCommand()
 	case composerSendCompletedMsg:
 		return m.completeComposerSend(msg)
 	case reconnectCompletedMsg:
@@ -2395,6 +2407,87 @@ func (m mockShellModel) nextClientUserStateCommand() tea.Cmd {
 	return func() tea.Msg {
 		state, ok := <-states
 		return chatClientUserStateMsg{state: state, ok: ok}
+	}
+}
+
+// nextClientModerationCommand subscribes to moderation actions when the
+// transport supports it. Transports that do not implement ModerationSource
+// (mock mode, test fakes) simply never produce these messages.
+func (m mockShellModel) nextClientModerationCommand() tea.Cmd {
+	if m.client == nil {
+		return nil
+	}
+	source, ok := m.client.(ModerationSource)
+	if !ok {
+		return nil
+	}
+	events := source.Moderations()
+	if events == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		event, ok := <-events
+		return chatClientModerationMsg{event: event, ok: ok}
+	}
+}
+
+// applyModeration redacts messages a moderator removed, rather than echoing
+// the removal as a new chat line.
+//
+// Twitch's CLEARMSG carries the deleted message's text, and reprinting it
+// would put the removed words back on screen - the opposite of what the
+// moderator asked for, on a terminal that is often being streamed. The text
+// stays in the debug log for after-the-fact review and nowhere else.
+func (m *mockShellModel) applyModeration(event twitch.ModerationEvent) {
+	channel := event.Channel
+	if strings.TrimSpace(channel) == "" {
+		channel = m.activeChannelName()
+	}
+	state := m.channels.ensure(channel)
+	if state == nil {
+		return
+	}
+
+	switch event.Type {
+	case twitch.ModerationChatCleared:
+		state.messages = nil
+		state.activeOrder = nil
+		state.activeMessages = make(map[string]twitch.ChatMessage)
+		state.scrollOffset = 0
+	case twitch.ModerationMessageDeleted:
+		state.markMessageDeleted(func(msg twitch.ChatMessage) bool {
+			return event.TargetMessageID != "" && msg.ID == event.TargetMessageID
+		})
+	case twitch.ModerationUserBanned, twitch.ModerationUserTimedOut:
+		// A ban or timeout retroactively removes everything that user said,
+		// which is what Twitch's own clients show and what a moderator means
+		// by the action.
+		target := strings.ToLower(strings.TrimSpace(event.TargetLogin))
+		if target == "" {
+			return
+		}
+		state.markMessageDeleted(func(msg twitch.ChatMessage) bool {
+			return strings.ToLower(strings.TrimSpace(msg.AuthorLogin)) == target
+		})
+	}
+}
+
+// markMessageDeleted flags every retained message matching pred, in both the
+// settled backlog and any message still animating in.
+func (s *channelState) markMessageDeleted(pred func(twitch.ChatMessage) bool) {
+	if s == nil || pred == nil {
+		return
+	}
+	for i := range s.messages {
+		if pred(s.messages[i]) {
+			s.messages[i].Deleted = true
+		}
+	}
+	for id, msg := range s.activeMessages {
+		if pred(msg) {
+			msg.Deleted = true
+			s.activeMessages[id] = msg
+		}
 	}
 }
 
