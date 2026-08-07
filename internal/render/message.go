@@ -35,6 +35,7 @@ const (
 	FragmentDeleted       FragmentKind = "deleted"
 	FragmentEmojiFallback FragmentKind = "emoji_fallback"
 	FragmentEmoteFallback FragmentKind = "emote_fallback"
+	FragmentFirstMessage  FragmentKind = "first_message"
 )
 
 // FragmentStyle describes terminal styling that can be applied without
@@ -562,10 +563,15 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 		includeTimestamp, includeBadges, includeAvatar = false, false, false
 	}
 
+	includeFirstMessage := msg.FirstMessage && opts.layout() != LayoutCompact && opts.Width >= 24
+
 	for {
 		fixedWidth := 2
 		if msg.Type == twitch.MessageTypeAction {
 			fixedWidth = 3
+		}
+		if includeFirstMessage {
+			fixedWidth += 2
 		}
 		if includeTimestamp {
 			fixedWidth += 6
@@ -606,6 +612,21 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 	}
 	if includeBadges {
 		fragments = append(fragments, badgeFragments(msg, opts)...)
+	}
+	// A first-ever message in the channel is marked before the name, where it
+	// reads as a property of the person rather than of what they said.
+	// Greeting a newcomer is one of the few things a streamer must do while
+	// it is still on screen, and Twitch's own tag is the only reliable
+	// source: a local roster cannot know about a viewer's first visit.
+	if includeFirstMessage {
+		fragments = append(fragments, Fragment{
+			Kind: FragmentFirstMessage,
+			Text: "✦ ",
+			Style: FragmentStyle{
+				Foreground: opts.Palette.Success,
+				Bold:       true,
+			},
+		})
 	}
 	if msg.Type == twitch.MessageTypeAction {
 		fragments = append(fragments, Fragment{

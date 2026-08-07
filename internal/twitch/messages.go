@@ -27,6 +27,11 @@ type ChatMessage struct {
 	// message with no cheer. Cheers arrive as ordinary chat messages (not a
 	// USERNOTICE), so this is the only signal that a message is a cheer.
 	Bits int
+	// FirstMessage marks a chatter's very first message in this channel,
+	// from Twitch's "first-msg" tag. Twitch computes it server-side, so it
+	// is accurate across devices and sessions in a way twi's own roster
+	// cannot be.
+	FirstMessage bool
 	// SystemEventID identifies a normalized non-chat event associated with a
 	// notice/system row, such as "raid" from a Twitch USERNOTICE msg-id.
 	SystemEventID string

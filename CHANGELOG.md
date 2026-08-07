@@ -17,6 +17,12 @@ constant in the source tree.
   Caps retained messages per channel. Set `0` to keep everything, at the cost
   of a repaint that slows down as the buffer grows.
 
+- **First-time chatters are marked.** A `✦` before the name on a chatter's
+  very first message in the channel, from Twitch's `first-msg` tag — the only
+  reliable source, since a local roster cannot know whether someone has
+  visited before. Hidden in `compact` layout and below 24 columns, where the
+  space belongs to the message.
+
 ### Changed
 
 - **`twi chat` and `twi doctor` now warn when OAuth refresh cannot run.**

@@ -278,3 +278,40 @@ func normalizeParsedFixture(t *testing.T, raw string) Event {
 	t.Helper()
 	return NormalizeIRCMessage(irc.ParseMessage(raw))
 }
+
+func TestParseFirstMessageTag(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		tags map[string]string
+		want bool
+	}{
+		{"present", map[string]string{"first-msg": "1"}, true},
+		{"explicitly zero", map[string]string{"first-msg": "0"}, false},
+		{"absent", map[string]string{}, false},
+		{"nil tags", nil, false},
+		// Anything twi does not recognize means "not first": over-marking
+		// regulars is worse than missing the occasional newcomer.
+		{"unexpected value", map[string]string{"first-msg": "true"}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseFirstMessageTag(tt.tags); got != tt.want {
+				t.Fatalf("parseFirstMessageTag(%v) = %v, want %v", tt.tags, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestNormalizePrivateMessageCarriesFirstMessage pins the tag through
+// normalization, which is where a field silently stops being populated.
+func TestNormalizePrivateMessageCarriesFirstMessage(t *testing.T) {
+	event := NormalizeIRCPrivateMessage(irc.PrivateMessage{
+		ID:      "m1",
+		Channel: "example",
+		Message: "hi",
+		User:    irc.User{Name: "newcomer", DisplayName: "Newcomer"},
+		Tags:    map[string]string{"first-msg": "1"},
+	})
+	if !event.Message.FirstMessage {
+		t.Fatal("first-msg tag did not reach ChatMessage.FirstMessage")
+	}
+}

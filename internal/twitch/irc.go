@@ -251,23 +251,33 @@ func normalizeIRCChatMessage(id, channel, channelID string, timestamp time.Time,
 	}
 
 	return ChatMessage{
-		ID:          id,
-		Channel:     channel,
-		ChannelID:   channelID,
-		Timestamp:   timestamp,
-		AuthorLogin: user.Name,
-		AuthorID:    user.ID,
-		DisplayName: user.DisplayName,
-		AuthorColor: user.Color,
-		Badges:      normalizeIRCBadges(user.Badges, tags),
-		Text:        text,
-		Fragments:   normalizeMessageFragments(text, emotes),
-		Emotes:      emotes,
-		Reply:       normalizeIRCReply(reply),
-		Type:        messageType,
-		Bits:        parseBitsTag(tags),
-		RawTags:     cloneStringMap(tags),
+		ID:           id,
+		Channel:      channel,
+		ChannelID:    channelID,
+		Timestamp:    timestamp,
+		AuthorLogin:  user.Name,
+		AuthorID:     user.ID,
+		DisplayName:  user.DisplayName,
+		AuthorColor:  user.Color,
+		Badges:       normalizeIRCBadges(user.Badges, tags),
+		Text:         text,
+		Fragments:    normalizeMessageFragments(text, emotes),
+		Emotes:       emotes,
+		Reply:        normalizeIRCReply(reply),
+		Type:         messageType,
+		Bits:         parseBitsTag(tags),
+		FirstMessage: parseFirstMessageTag(tags),
+		RawTags:      cloneStringMap(tags),
 	}
+}
+
+// parseFirstMessageTag reads Twitch's "first-msg" tag, set to 1 on a
+// chatter's first ever message in the channel. Anything other than "1" -- a
+// missing tag, "0", or a value Twitch changes later -- means "not first",
+// which is the safe default: over-highlighting regulars is worse than missing
+// the occasional newcomer.
+func parseFirstMessageTag(tags map[string]string) bool {
+	return strings.TrimSpace(tags["first-msg"]) == "1"
 }
 
 // parseBitsTag reads a PRIVMSG's "bits" tag, present only on cheer messages.
