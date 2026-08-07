@@ -11,29 +11,27 @@ constant in the source tree.
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-08-08
+
 ### Added
 
-- **11 more vibrant dark themes**, taking the built-in set from 46 to 57:
-  `plasma`, `sapphire`, `orchid`, `ruby`, `magma`, `bullion`,
-  `emerald-noir`, `mint-noir`, `abyss`, `spectre`, and `obsidian`. These fill
-  the hues the first batch left thin — blues and blue-violets, jewel greens,
-  gold — plus two deliberately low-chroma looks: `spectre` (pale cyan) and
-  `obsidian` (silver chrome, with color kept for the roles that carry
-  meaning). Same contrast bar as everything else; the tightest is `plasma`'s
-  accent at 4.45:1 against a 3:1 floor.
-- **13 vibrant dark themes**, taking the built-in set from 33 to 46:
-  `neon-tokyo`, `vaporwave`, `hotline`, `ultraviolet`, `cyberpunk`, `matrix`,
-  `toxic`, `amber-crt`, `midnight-ember`, `blood-moon`, `deep-ocean`,
-  `arctic-neon`, and `carbon`. Unlike the ported schemes these are authored
-  for twi: each starts from a near-black or true-black canvas and carries one
-  saturated accent, for streamers who want the terminal to read as part of the
-  overlay rather than disappear into it. All clear the same contrast bar as
-  the rest — body text at 4.5:1 on both the canvas and pane surfaces, accent
-  at 3:1 — with the tightest at 5.23:1 on the accent.
+- **24 vibrant dark themes**, taking the built-in set from 33 to 57:
+  `neon-tokyo`, `vaporwave`, `hotline`, `ultraviolet`, `orchid`, `plasma`,
+  `sapphire`, `cyberpunk`, `bullion`, `amber-crt`, `midnight-ember`, `magma`,
+  `blood-moon`, `ruby`, `matrix`, `toxic`, `emerald-noir`, `mint-noir`,
+  `abyss`, `deep-ocean`, `arctic-neon`, `spectre`, `carbon`, and `obsidian`.
+  Unlike the ported editor schemes, these are authored for twi: each starts
+  from a near-black or true-black canvas and commits to one accent, for
+  streamers who want the terminal to read as part of the overlay rather than
+  disappear into it. `spectre` and `obsidian` are deliberately low-chroma for
+  anyone who wants a black terminal without a neon accent — `obsidian` keeps
+  color only for the roles that carry meaning, so warnings and errors are the
+  only colored things on screen. All clear the same contrast bar as the rest
+  — body text at 4.5:1 on both the canvas and pane surfaces, accent at 3:1 —
+  with the tightest accent at 4.45:1.
 - **`scrollback_limit` config key** (`TWI_SCROLLBACK_LIMIT`, default `2000`).
   Caps retained messages per channel. Set `0` to keep everything, at the cost
   of a repaint that slows down as the buffer grows.
-
 - **First-time chatters are marked.** A `✦` before the name on a chatter's
   very first message in the channel, from Twitch's `first-msg` tag — the only
   reliable source, since a local roster cannot know whether someone has
@@ -58,7 +56,6 @@ constant in the source tree.
 - **`twi doctor` no longer says a missing `twitch_username` breaks live
   chat.** The login has been derived from the OAuth token since v0.12.0; the
   config value is only a fallback for when token validation is unreachable.
-
 - **`twi chat` and `twi doctor` now warn when OAuth refresh cannot run.**
   `twi login` saves a refresh token and client ID but no client secret, and
   the refresh flow needs all three — so the documented setup held a refresh
@@ -346,7 +343,8 @@ Releases before `0.8.0` predate this changelog; see the
 [commit history](https://github.com/worxbend/twi/commits/main) and the
 [releases page](https://github.com/worxbend/twi/releases).
 
-[Unreleased]: https://github.com/worxbend/twi/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/worxbend/twi/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/worxbend/twi/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/worxbend/twi/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/worxbend/twi/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/worxbend/twi/compare/v0.12.0...v0.12.1
