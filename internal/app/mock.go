@@ -426,10 +426,51 @@ func newMockShellModel(channel string, cfg config.Config) mockShellModel {
 	return newMockShellModelWithClock(channel, cfg, nil)
 }
 
+// newShellModel builds the parts of the model that come from configuration,
+// which is everything both the mock and live sources share.
+//
+// It exists because the two constructors were maintained by hand and drifted:
+// the live one silently never read cfg.Features.MessageLayout, BadgeMode,
+// HighlightEmotes or FullUsername, so four settings that config parses,
+// doctor validates and the display toggles persist to disk did nothing in the
+// only mode that talks to Twitch. Callers add only their source-specific
+// tail, so a new feature flag cannot be wired into one path and not the other.
+func newShellModel(channel string, cfg config.Config, clock animation.Clock) mockShellModel {
+	animationConfig := mockAnimationConfig(cfg.Features.AnimationMode)
+	channels := newChannelStateSet(
+		configuredChannels(channel, cfg.DefaultChannels),
+		animationConfig,
+		clock,
+		cfg.Features.ScrollbackLimit,
+	)
+	return mockShellModel{
+		channels:        channels,
+		rowCache:        newChatRowCache(),
+		theme:           cfg.ResolveTheme(),
+		mentionLogin:    cfg.Twitch.Username,
+		animationMode:   string(animationConfig.Mode),
+		mouseEnabled:    cfg.Features.EnableMouse,
+		avatarMode:      cfg.Features.AvatarMode,
+		messageLayout:   render.NormalizeLayoutMode(cfg.Features.MessageLayout),
+		badgeMode:       render.NormalizeBadgeMode(cfg.Features.BadgeMode),
+		highlightEmotes: cfg.Features.HighlightEmotes,
+		fullUsername:    cfg.Features.FullUsername,
+		debugRecording:  cfg.Debug.Enabled,
+		effectiveConfig: cfg,
+		// -1 means "no membership burst is being coalesced". Zero would name
+		// the first activity row as an open burst before one exists.
+		membershipBurstIndex: -1,
+		width:                defaultMockWidth,
+		height:               defaultMockHeight,
+		focus:                mockFocusChat,
+		terminalFocused:      true,
+	}
+}
+
 func newMockShellModelWithClock(channel string, cfg config.Config, clock animation.Clock) mockShellModel {
 	connectedAt := time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)
-	animationConfig := mockAnimationConfig(cfg.Features.AnimationMode)
-	channels := newChannelStateSet(configuredChannels(channel, cfg.DefaultChannels), animationConfig, clock, cfg.Features.ScrollbackLimit)
+	model := newShellModel(channel, cfg, clock)
+	channels := model.channels
 	for _, channelName := range channels.channelNames() {
 		state := channels.ensure(channelName)
 		state.status = ConnectionState{
@@ -447,29 +488,10 @@ func newMockShellModelWithClock(channel string, cfg config.Config, clock animati
 	for _, channelName := range channels.channelNames() {
 		emoteEntries[channelKey(channelName)] = sampleEmoteEntries()
 	}
-	return mockShellModel{
-		channels:             channels,
-		rowCache:             newChatRowCache(),
-		theme:                cfg.ResolveTheme(),
-		membershipBurstIndex: -1,
-		mentionLogin:         cfg.Twitch.Username,
-		animationMode:        string(animationConfig.Mode),
-		mouseEnabled:         cfg.Features.EnableMouse,
-		avatarMode:           cfg.Features.AvatarMode,
-		messageLayout:        render.NormalizeLayoutMode(cfg.Features.MessageLayout),
-		badgeMode:            render.NormalizeBadgeMode(cfg.Features.BadgeMode),
-		highlightEmotes:      cfg.Features.HighlightEmotes,
-		fullUsername:         cfg.Features.FullUsername,
-		sourceDetail:         "mock source: no network",
-		incoming:             incomingMockMessages(channels.activeName(), connectedAt),
-		width:                defaultMockWidth,
-		height:               defaultMockHeight,
-		focus:                mockFocusChat,
-		terminalFocused:      true,
-		debugRecording:       cfg.Debug.Enabled,
-		emoteEntries:         emoteEntries,
-		effectiveConfig:      cfg,
-	}
+	model.sourceDetail = "mock source: no network"
+	model.incoming = incomingMockMessages(channels.activeName(), connectedAt)
+	model.emoteEntries = emoteEntries
+	return model
 }
 
 // sampleEmoteEntries seeds the Ctrl+E emote picker in --mock mode with
@@ -503,46 +525,32 @@ func newLiveShellModelWithClock(channel string, cfg config.Config, client ChatCl
 }
 
 func newLiveShellModelWithClockAndOptions(channel string, cfg config.Config, client ChatClient, clock animation.Clock, opts ClientOptions) mockShellModel {
-	animationConfig := mockAnimationConfig(cfg.Features.AnimationMode)
-	channels := newChannelStateSet(configuredChannels(channel, cfg.DefaultChannels), animationConfig, clock, cfg.Features.ScrollbackLimit)
-	active := channels.activeState()
+	model := newShellModel(channel, cfg, clock)
+	active := model.channels.activeState()
 	active.status = ConnectionState{
 		Status:  ConnectionConnecting,
 		Channel: active.name,
 		Detail:  "connecting to Twitch IRC",
 		At:      time.Now(),
 	}
-	return mockShellModel{
-		channels:              channels,
-		rowCache:              newChatRowCache(),
-		theme:                 cfg.ResolveTheme(),
-		mentionLogin:          cfg.Twitch.Username,
-		animationMode:         string(animationConfig.Mode),
-		mouseEnabled:          cfg.Features.EnableMouse,
-		avatarMode:            cfg.Features.AvatarMode,
-		sourceDetail:          "live IRC",
-		client:                client,
-		systemNotifier:        opts.SystemNotifier,
-		streamStatusResolver:  opts.StreamStatusResolver,
-		emoteIndex:            opts.EmoteIndex,
-		channelManager:        opts.ChannelManager,
-		gameLookup:            opts.GameLookup,
-		userLookup:            opts.UserLookup,
-		markerManager:         opts.MarkerManager,
-		followerLookup:        opts.FollowerLookup,
-		subscriptionLookup:    opts.SubscriptionLookup,
-		clipManager:           opts.ClipManager,
-		followedChannels:      opts.FollowedChannels,
-		emoteEntries:          make(map[string][]assets.EmoteEntry),
-		emoteEntriesRequested: make(map[string]bool),
-		debugLogger:           opts.DebugLogger,
-		width:                 defaultMockWidth,
-		height:                defaultMockHeight,
-		focus:                 mockFocusChat,
-		terminalFocused:       true,
-		debugRecording:        cfg.Debug.Enabled,
-		effectiveConfig:       cfg,
-	}
+
+	model.sourceDetail = "live IRC"
+	model.client = client
+	model.systemNotifier = opts.SystemNotifier
+	model.streamStatusResolver = opts.StreamStatusResolver
+	model.emoteIndex = opts.EmoteIndex
+	model.channelManager = opts.ChannelManager
+	model.gameLookup = opts.GameLookup
+	model.userLookup = opts.UserLookup
+	model.markerManager = opts.MarkerManager
+	model.followerLookup = opts.FollowerLookup
+	model.subscriptionLookup = opts.SubscriptionLookup
+	model.clipManager = opts.ClipManager
+	model.followedChannels = opts.FollowedChannels
+	model.emoteEntries = make(map[string][]assets.EmoteEntry)
+	model.emoteEntriesRequested = make(map[string]bool)
+	model.debugLogger = opts.DebugLogger
+	return model
 }
 
 func seededMockMessages(channel string, startedAt time.Time) []twitch.ChatMessage {

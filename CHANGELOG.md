@@ -11,6 +11,35 @@ constant in the source tree.
 
 ## [Unreleased]
 
+### Added
+
+- **`scrollback_limit` config key** (`TWI_SCROLLBACK_LIMIT`, default `2000`).
+  Caps retained messages per channel. Set `0` to keep everything, at the cost
+  of a repaint that slows down as the buffer grows.
+
+### Fixed
+
+- **Chat no longer slows down over a long stream.** Every repaint re-rendered
+  the entire retained backlog, and the backlog was never trimmed, so frame
+  time grew with session length: `View()` measured 65ms at 1,000 retained
+  messages and 325ms at 5,000, against a 100ms animation tick. Rendered rows
+  are now memoized per message, only the visible window is styled, and the
+  backlog is capped. The same measurements are now 4.1ms and 11.5ms.
+- **Deleting a message no longer reprints it.** Twitch's `CLEARMSG` carries
+  the deleted message's text, and twi rendered that into a new visible notice
+  while leaving the original in place — so moderating a message put its text
+  on screen twice. Deletions, bans, timeouts and chat clears now redact the
+  messages already on screen instead.
+- **Outbound chat text is sanitized.** Carriage returns and newlines in a sent
+  message could end the IRC command early, letting the remainder be parsed as
+  a new command. Line breaks are now collapsed, other control characters
+  dropped, and messages capped at Twitch's 500-character limit.
+- **`message_layout`, `badge_mode`, `highlight_emotes` and `full_username` now
+  apply to live chat.** The live and mock models were constructed separately
+  and the live one never read these four settings, so they worked in
+  `--mock` and did nothing against real Twitch. If you set any of them, live
+  chat will now look the way it was already configured to.
+
 ## [0.14.0] — 2026-08-07
 
 ### Added
