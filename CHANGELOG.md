@@ -13,6 +13,15 @@ constant in the source tree.
 
 ### Added
 
+- **13 vibrant dark themes**, taking the built-in set from 33 to 46:
+  `neon-tokyo`, `vaporwave`, `hotline`, `ultraviolet`, `cyberpunk`, `matrix`,
+  `toxic`, `amber-crt`, `midnight-ember`, `blood-moon`, `deep-ocean`,
+  `arctic-neon`, and `carbon`. Unlike the ported schemes these are authored
+  for twi: each starts from a near-black or true-black canvas and carries one
+  saturated accent, for streamers who want the terminal to read as part of the
+  overlay rather than disappear into it. All clear the same contrast bar as
+  the rest — body text at 4.5:1 on both the canvas and pane surfaces, accent
+  at 3:1 — with the tightest at 5.23:1 on the accent.
 - **`scrollback_limit` config key** (`TWI_SCROLLBACK_LIMIT`, default `2000`).
   Caps retained messages per channel. Set `0` to keep everything, at the cost
   of a repaint that slows down as the buffer grows.

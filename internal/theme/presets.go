@@ -383,6 +383,172 @@ var presets = map[string]Palette{
 		Error:      "#f43e5c",
 		Success:    "#29d398",
 	},
+
+	// Vibrant dark presets. These are authored for twi rather than ported
+	// from an upstream scheme: each starts from a near-black or true-black
+	// canvas and carries one saturated accent, for streamers who want the
+	// terminal to read as part of the overlay instead of disappearing into
+	// it. Every one clears the same contrast bar as the ported schemes.
+	"neon-tokyo": {
+		// Near-black with hot magenta and mint, the after-dark end of the
+		// Tokyo Night family rather than its slate blues.
+		Background: "#07060d",
+		Foreground: "#eae6ff",
+		Accent:     "#ff2bd6",
+		Muted:      "#7b7596",
+		Border:     "#2b2447",
+		Surface:    "#100c1c",
+		Warning:    "#ffc531",
+		Error:      "#ff4d6d",
+		Success:    "#3df5c4",
+	},
+	"vaporwave": {
+		// Deep violet-black under pink and cyan.
+		Background: "#0d0618",
+		Foreground: "#f2e9ff",
+		Accent:     "#ff6ad5",
+		Muted:      "#8d7fa8",
+		Border:     "#3a2a5c",
+		Surface:    "#170c28",
+		Warning:    "#ffd166",
+		Error:      "#ff5c8a",
+		Success:    "#61e8e1",
+	},
+	"hotline": {
+		// Black-violet with hot pink and teal.
+		Background: "#0a0410",
+		Foreground: "#ffe9f4",
+		Accent:     "#ff2e88",
+		Muted:      "#96738c",
+		Border:     "#3d1230",
+		Surface:    "#16081d",
+		Warning:    "#ffb627",
+		Error:      "#ff4d4d",
+		Success:    "#00e0c7",
+	},
+	"ultraviolet": {
+		// Black with electric purple.
+		Background: "#08040f",
+		Foreground: "#ece2ff",
+		Accent:     "#a855ff",
+		Muted:      "#7d6f9c",
+		Border:     "#2d1a4d",
+		Surface:    "#110a1e",
+		Warning:    "#ffcc4d",
+		Error:      "#ff4f81",
+		Success:    "#4de8b0",
+	},
+	"cyberpunk": {
+		// Black with warning-sign yellow and electric cyan.
+		Background: "#050505",
+		Foreground: "#f4f4e8",
+		Accent:     "#fcee0a",
+		Muted:      "#8a8a7a",
+		Border:     "#2e2e18",
+		Surface:    "#0f0f0a",
+		Warning:    "#ff9f1c",
+		Error:      "#ff003c",
+		Success:    "#00f0ff",
+	},
+	"matrix": {
+		// Pure black with phosphor green, one hue for accent and success
+		// because the reference it comes from only had the one.
+		Background: "#000000",
+		Foreground: "#c8ffc8",
+		Accent:     "#00ff41",
+		Muted:      "#4f8f4f",
+		Border:     "#0f3d0f",
+		Surface:    "#050f05",
+		Warning:    "#b6ff00",
+		Error:      "#ff5f56",
+		Success:    "#00ff41",
+	},
+	"toxic": {
+		// Near-black with acid lime.
+		Background: "#040703",
+		Foreground: "#e8ffd9",
+		Accent:     "#aaff00",
+		Muted:      "#7f9a66",
+		Border:     "#1f3312",
+		Surface:    "#0a1006",
+		Warning:    "#ffe600",
+		Error:      "#ff4d3d",
+		Success:    "#39ff88",
+	},
+	"amber-crt": {
+		// Black with amber, after monochrome amber-phosphor terminals.
+		// Error and success step off the hue so they stay distinguishable.
+		Background: "#0a0600",
+		Foreground: "#ffd799",
+		Accent:     "#ffab00",
+		Muted:      "#9a7440",
+		Border:     "#3d2a08",
+		Surface:    "#140d02",
+		Warning:    "#ffd500",
+		Error:      "#ff6b4a",
+		Success:    "#b8e04a",
+	},
+	"midnight-ember": {
+		// Black with ember orange, the warm counterpart to deep-ocean.
+		Background: "#0a0705",
+		Foreground: "#ffe8d6",
+		Accent:     "#ff7a33",
+		Muted:      "#9c7f6b",
+		Border:     "#3a2618",
+		Surface:    "#150e09",
+		Warning:    "#ffc233",
+		Error:      "#ff5a4d",
+		Success:    "#7fd98a",
+	},
+	"blood-moon": {
+		// Near-black with crimson; warmer and darker than Dracula's red.
+		Background: "#0b0406",
+		Foreground: "#f6e3e6",
+		Accent:     "#ff3b52",
+		Muted:      "#96707a",
+		Border:     "#3b1620",
+		Surface:    "#160a0e",
+		Warning:    "#ffab4a",
+		Error:      "#ff5c6c",
+		Success:    "#59d99d",
+	},
+	"deep-ocean": {
+		// Very dark blue with aqua, the deepest of the blue presets.
+		Background: "#020914",
+		Foreground: "#dcefff",
+		Accent:     "#00d4ff",
+		Muted:      "#5f7f99",
+		Border:     "#123049",
+		Surface:    "#06141f",
+		Warning:    "#ffc857",
+		Error:      "#ff5d73",
+		Success:    "#2ee6a8",
+	},
+	"arctic-neon": {
+		// Near-black with ice blue; the coolest of the neon presets.
+		Background: "#04080d",
+		Foreground: "#e6f4ff",
+		Accent:     "#4dd8ff",
+		Muted:      "#6f8799",
+		Border:     "#183040",
+		Surface:    "#0a1219",
+		Warning:    "#ffd166",
+		Error:      "#ff6b81",
+		Success:    "#5df2b5",
+	},
+	"carbon": {
+		// True black with a single orange accent and otherwise system
+		// colors, for terminals where anything but pure black shows a seam.
+		Background: "#000000",
+		Foreground: "#f0f0f0",
+		Accent:     "#ff5f1f",
+		Muted:      "#8c8c8c",
+		Border:     "#262626",
+		Surface:    "#0d0d0d",
+		Warning:    "#ffbf00",
+		Error:      "#ff3b30",
+		Success:    "#32d74b",
+	},
 }
 
 // Presets returns the built-in named palettes, keyed by lowercase name.
