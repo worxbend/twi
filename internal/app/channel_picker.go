@@ -53,7 +53,7 @@ type followedChannelsResolvedMsg struct {
 // session, kicks off the follow-list fetch. The list is cached for the rest
 // of the session: follows change rarely, and re-fetching on every open would
 // make the picker feel slow for no benefit.
-func (m *mockShellModel) openChannelPicker() tea.Cmd {
+func (m *shellModel) openChannelPicker() tea.Cmd {
 	if m.channelPicker.open {
 		m.channelPicker = channelPickerState{}
 		return nil
@@ -68,7 +68,7 @@ func (m *mockShellModel) openChannelPicker() tea.Cmd {
 // user has to act on: the picker still lists open and configured channels
 // and accepts any typed name, so the failure is reported inline and the
 // request is not retried on every open.
-func (m *mockShellModel) scheduleFollowedChannelsLookup() tea.Cmd {
+func (m *shellModel) scheduleFollowedChannelsLookup() tea.Cmd {
 	if m.followedChannels == nil || m.followedChannelsRequested {
 		return nil
 	}
@@ -94,7 +94,7 @@ func (m *mockShellModel) scheduleFollowedChannelsLookup() tea.Cmd {
 	}
 }
 
-func (m *mockShellModel) applyFollowedChannels(msg followedChannelsResolvedMsg) {
+func (m *shellModel) applyFollowedChannels(msg followedChannelsResolvedMsg) {
 	m.channelPicker.loading = false
 	if msg.err != nil {
 		// Tokens issued before user:read:follows existed land here; say so
@@ -111,7 +111,7 @@ func (m *mockShellModel) applyFollowedChannels(msg followedChannelsResolvedMsg) 
 	m.clampChannelPickerSelection()
 }
 
-func (m mockShellModel) handleChannelPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m shellModel) handleChannelPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
 		m.channelPicker = channelPickerState{}
@@ -149,7 +149,7 @@ func (m mockShellModel) handleChannelPickerKey(msg tea.KeyMsg) (tea.Model, tea.C
 	return m, nil
 }
 
-func (m *mockShellModel) moveChannelPickerSelection(delta int) {
+func (m *shellModel) moveChannelPickerSelection(delta int) {
 	entries := m.channelPickerEntries()
 	if len(entries) == 0 {
 		m.channelPicker.selected = 0
@@ -164,7 +164,7 @@ func (m *mockShellModel) moveChannelPickerSelection(delta int) {
 	}
 }
 
-func (m *mockShellModel) clampChannelPickerSelection() {
+func (m *shellModel) clampChannelPickerSelection() {
 	entries := m.channelPickerEntries()
 	if len(entries) == 0 || m.channelPicker.selected < 0 {
 		m.channelPicker.selected = 0
@@ -178,7 +178,7 @@ func (m *mockShellModel) clampChannelPickerSelection() {
 // commitChannelPickerSelection opens the highlighted channel (or closes an
 // already-open one, so the picker doubles as a switcher) and dismisses the
 // overlay.
-func (m mockShellModel) commitChannelPickerSelection() (tea.Model, tea.Cmd) {
+func (m shellModel) commitChannelPickerSelection() (tea.Model, tea.Cmd) {
 	entries := m.channelPickerEntries()
 	index := m.channelPicker.selected
 	if index < 0 || index >= len(entries) {
@@ -193,7 +193,7 @@ func (m mockShellModel) commitChannelPickerSelection() (tea.Model, tea.Cmd) {
 // channelPickerEntries builds the filtered, ordered row list: open channels
 // first (they are the switch targets), then followed channels, then the
 // literal typed name when it matches nothing already listed.
-func (m mockShellModel) channelPickerEntries() []channelPickerEntry {
+func (m shellModel) channelPickerEntries() []channelPickerEntry {
 	query := strings.ToLower(strings.TrimSpace(m.channelPicker.query))
 	query = strings.TrimPrefix(query, "#")
 
@@ -241,7 +241,7 @@ func (m mockShellModel) channelPickerEntries() []channelPickerEntry {
 	return entries
 }
 
-func (m mockShellModel) channelPickerView(layout mockShellLayout) string {
+func (m shellModel) channelPickerView(layout shellLayout) string {
 	contentWidth := layout.width
 	if layout.channelPickerFramed {
 		contentWidth = clampMin(layout.width-4, 1)
@@ -263,7 +263,7 @@ func (m mockShellModel) channelPickerView(layout mockShellLayout) string {
 	})
 }
 
-func (m mockShellModel) channelPickerLines(width, height int) []string {
+func (m shellModel) channelPickerLines(width, height int) []string {
 	if height <= 0 {
 		return nil
 	}

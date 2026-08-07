@@ -118,14 +118,14 @@ func TestRosterApplyFollowersOnlyAnnotatesKnownChatters(t *testing.T) {
 func TestMembershipEventsFeedRosterAndActivityLog(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 120, 24
 	at := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 
 	updated, _ := model.Update(chatClientMembershipMsg{ok: true, membership: twitch.MembershipEvent{
 		Type: twitch.MembershipJoin, Channel: "alpha", Login: "newviewer", At: at,
 	}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	entry, ok := model.activeChannelState().roster.lookup("newviewer")
 	if !ok || !entry.Present {
@@ -141,7 +141,7 @@ func TestMembershipEventsFeedRosterAndActivityLog(t *testing.T) {
 	updated, _ = model.Update(chatClientMembershipMsg{ok: true, membership: twitch.MembershipEvent{
 		Type: twitch.MembershipPart, Channel: "alpha", Login: "newviewer", At: at.Add(time.Second),
 	}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if entry, _ = model.activeChannelState().roster.lookup("newviewer"); entry.Present {
 		t.Fatal("part did not clear presence")
 	}
@@ -153,7 +153,7 @@ func TestMembershipEventsFeedRosterAndActivityLog(t *testing.T) {
 func TestMembershipBurstCollapsesIntoOneSummaryRow(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	at := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 
 	const joins = 40
@@ -185,7 +185,7 @@ func TestMembershipBurstCollapsesIntoOneSummaryRow(t *testing.T) {
 func TestChatPaneTitleAlwaysShowsActiveChatterCount(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 100, 24
 
 	// Without membership the count is marked approximate.
@@ -196,7 +196,7 @@ func TestChatPaneTitleAlwaysShowsActiveChatterCount(t *testing.T) {
 	updated, _ := model.Update(chatClientMembershipMsg{ok: true, membership: twitch.MembershipEvent{
 		Type: twitch.MembershipJoin, Channel: "alpha", Login: "viewer-one", At: time.Now(),
 	}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	// Once membership arrives the count becomes exact and drops the "~".
 	view := ansi.Strip(model.View())
@@ -208,13 +208,13 @@ func TestChatPaneTitleAlwaysShowsActiveChatterCount(t *testing.T) {
 func TestClosedMembershipStreamDoesNotReportDisconnect(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	before := model.activeChannelState().status.Status
 
 	// Twitch stops sending membership for busy channels; that must not be
 	// mistaken for the chat connection dropping.
 	updated, cmd := model.Update(chatClientMembershipMsg{ok: false})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("closed membership stream returned command %#v, want nil", cmd)
 	}
@@ -230,7 +230,7 @@ func TestOwnBadgesFromUserStateAppearOnLocalEcho(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	cfg.Twitch.Username = "streamerguy"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 100, 24
 
 	updated, _ := model.Update(chatClientUserStateMsg{ok: true, state: twitch.UserState{
@@ -240,7 +240,7 @@ func TestOwnBadgesFromUserStateAppearOnLocalEcho(t *testing.T) {
 		AuthorColor: "#ff0000",
 		Badges:      []twitch.Badge{{SetID: "broadcaster", ID: "1"}},
 	}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	echo := model.localEchoMessage(queuedComposerSend{ID: 1, Text: "hello"}, SendResult{}, "alpha")
 	if len(echo.Badges) != 1 || echo.Badges[0].SetID != "broadcaster" {
@@ -258,7 +258,7 @@ func TestUserStateRecordsOwnRoleWithoutInventingMessages(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	cfg.Twitch.Username = "streamerguy"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 
 	updated, _ := model.Update(chatClientUserStateMsg{ok: true, state: twitch.UserState{
 		Channel:     "alpha",
@@ -266,7 +266,7 @@ func TestUserStateRecordsOwnRoleWithoutInventingMessages(t *testing.T) {
 		DisplayName: "StreamerGuy",
 		Badges:      []twitch.Badge{{SetID: "broadcaster", ID: "1"}},
 	}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	entry, ok := model.activeChannelState().roster.lookup("streamerguy")
 	if !ok {
@@ -284,11 +284,11 @@ func TestUserStateRecordsOwnRoleWithoutInventingMessages(t *testing.T) {
 func TestClosedUserStateStreamIsNotAFailure(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	before := model.activeChannelState().status.Status
 
 	updated, cmd := model.Update(chatClientUserStateMsg{ok: false})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("closed USERSTATE stream returned command %#v, want nil", cmd)
 	}

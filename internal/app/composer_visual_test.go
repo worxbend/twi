@@ -11,9 +11,9 @@ import (
 
 func TestComposerUsesOpenCodeInspiredSurfaceAnatomy(t *testing.T) {
 	forceColorProfile(t)
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 88, 20
-	model.focus = mockFocusComposer
+	model.focus = focusComposer
 	model.activeChannelState().composerText = "hello chat"
 	layout := model.layout()
 
@@ -39,7 +39,7 @@ func TestComposerUsesOpenCodeInspiredSurfaceAnatomy(t *testing.T) {
 }
 
 func TestComposerFocusSwapsPlaceholderForBlockCursor(t *testing.T) {
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 72, 18
 	layout := model.layout()
 
@@ -48,7 +48,7 @@ func TestComposerFocusSwapsPlaceholderForBlockCursor(t *testing.T) {
 		t.Fatalf("unfocused composer should show placeholder without cursor:\n%s", unfocused)
 	}
 
-	model.focus = mockFocusComposer
+	model.focus = focusComposer
 	focused := model.composerView(layout)
 	if strings.Contains(focused, "Message #alpha…") || !strings.Contains(focused, "█") {
 		t.Fatalf("focused empty composer should show only the block cursor:\n%s", focused)
@@ -56,9 +56,9 @@ func TestComposerFocusSwapsPlaceholderForBlockCursor(t *testing.T) {
 }
 
 func TestComposerCursorBlinksFromSharedFrameClock(t *testing.T) {
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 72, 18
-	model.focus = mockFocusComposer
+	model.focus = focusComposer
 	layout := model.layout()
 
 	model.lastFrameAt = time.UnixMilli(1000)
@@ -74,9 +74,9 @@ func TestComposerCursorBlinksFromSharedFrameClock(t *testing.T) {
 }
 
 func TestComposerKeepsLongUnicodeDraftTailBesideCursor(t *testing.T) {
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 32, 18
-	model.focus = mockFocusComposer
+	model.focus = focusComposer
 	model.activeChannelState().composerText = strings.Repeat("old-", 12) + "latest 😀"
 
 	view := model.composerView(model.layout())
@@ -96,9 +96,9 @@ func TestTailDisplayCellsPreservesWideGrapheme(t *testing.T) {
 }
 
 func TestComposerShowsReplyAndSendStateInSurface(t *testing.T) {
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 88, 20
-	model.focus = mockFocusComposer
+	model.focus = focusComposer
 	state := model.activeChannelState()
 	state.composerText = "thanks!"
 	state.replyTo = &composerReplyContext{MessageID: "parent", Author: "viewer", Text: "question for chat"}
@@ -117,9 +117,9 @@ func TestComposerShowsReplyAndSendStateInSurface(t *testing.T) {
 
 func TestComposerCompactsWithoutOverflow(t *testing.T) {
 	for _, width := range []int{24, 8, 7, 5, 4, 1} {
-		model := newMockShellModel("alpha", config.Default())
+		model := newMockModel("alpha", config.Default())
 		model.width, model.height = width, 8
-		model.focus = mockFocusComposer
+		model.focus = focusComposer
 		model.activeChannelState().composerText = "hello 😀 表"
 		layout := model.layout()
 		view := model.composerView(layout)
@@ -137,9 +137,9 @@ func TestComposerCompactsWithoutOverflow(t *testing.T) {
 
 func TestComposerUsesReadableFallbackAtBoundaryWidths(t *testing.T) {
 	for _, width := range []int{5, 6, 7} {
-		model := newMockShellModel("alpha", config.Default())
+		model := newMockModel("alpha", config.Default())
 		model.width, model.height = width, 8
-		model.focus = mockFocusComposer
+		model.focus = focusComposer
 		model.activeChannelState().composerText = "hello"
 		layout := model.layout()
 		if layout.composerFramed {
@@ -150,9 +150,9 @@ func TestComposerUsesReadableFallbackAtBoundaryWidths(t *testing.T) {
 		}
 	}
 
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 8, 8
-	model.focus = mockFocusComposer
+	model.focus = focusComposer
 	model.activeChannelState().composerText = "hello"
 	if layout := model.layout(); !layout.composerFramed || !strings.Contains(model.composerView(layout), "█") {
 		t.Fatalf("width 8 should use the compact surface with a cursor:\n%s", model.composerView(layout))
@@ -161,9 +161,9 @@ func TestComposerUsesReadableFallbackAtBoundaryWidths(t *testing.T) {
 
 func TestPlainComposerKeepsLongDraftTailVisible(t *testing.T) {
 	for _, width := range []int{5, 6, 7} {
-		model := newMockShellModel("alpha", config.Default())
+		model := newMockModel("alpha", config.Default())
 		model.width, model.height = width, 8
-		model.focus = mockFocusComposer
+		model.focus = focusComposer
 		model.activeChannelState().composerText = "old-old-newest"
 		view := model.composerView(model.layout())
 		if !strings.Contains(view, "est█") || strings.Contains(view, "old-") {
@@ -173,9 +173,9 @@ func TestPlainComposerKeepsLongDraftTailVisible(t *testing.T) {
 }
 
 func TestCompactComposerKeepsReplyContextVisible(t *testing.T) {
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 48, 8
-	model.focus = mockFocusComposer
+	model.focus = focusComposer
 	state := model.activeChannelState()
 	state.composerText = "reply draft"
 	state.replyTo = &composerReplyContext{MessageID: "parent", Author: "viewer", Text: "original message"}

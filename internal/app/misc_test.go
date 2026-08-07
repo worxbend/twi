@@ -35,11 +35,11 @@ func (f *appFakeMarkerManager) CreateStreamMarker(_ context.Context, _ string, d
 }
 
 func TestTabSwitchAltThreeOpensMiscTab(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 	model.width, model.height = 88, 20
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}, Alt: true})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.activeTab != tabMisc {
 		t.Fatalf("activeTab after alt+3 = %v, want tabMisc", model.activeTab)
 	}
@@ -55,7 +55,7 @@ func TestTabSwitchAltThreeOpensMiscTab(t *testing.T) {
 func TestMiscLoadsAndDisplaysMarkers(t *testing.T) {
 	cfg := config.Default()
 	cfg.Twitch.Username = "streamer"
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 	model.width, model.height = 88, 20
 	model.markerManager = &appFakeMarkerManager{markers: []twitch.StreamMarker{
 		{ID: "1", Description: "hype moment", PositionSeconds: 65},
@@ -64,7 +64,7 @@ func TestMiscLoadsAndDisplaysMarkers(t *testing.T) {
 	model.userLookup = &appFakeUserLookup{users: []twitch.UserIdentity{{UserID: "123", Login: "streamer"}}}
 
 	updated, cmd := model.switchToTab(tabMisc)
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("switchToTab(tabMisc) returned nil command, want a load command")
 	}
@@ -94,7 +94,7 @@ func TestMiscLoadsAndDisplaysMarkers(t *testing.T) {
 
 func TestMiscLoadFailureSurfacesError(t *testing.T) {
 	cfg := config.Default()
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 	model.width, model.height = 88, 20
 	model.activeTab = tabMisc
 	model.markerManager = &appFakeMarkerManager{getErr: errors.New("twitch says no")}
@@ -117,7 +117,7 @@ func TestMiscLoadFailureSurfacesError(t *testing.T) {
 
 func TestMiscCreateMarkerFlow(t *testing.T) {
 	cfg := config.Default()
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 	model.width, model.height = 88, 20
 	model.activeTab = tabMisc
 	fake := &appFakeMarkerManager{created: twitch.StreamMarker{ID: "99", Description: "big play", PositionSeconds: 42}}
@@ -126,18 +126,18 @@ func TestMiscCreateMarkerFlow(t *testing.T) {
 	model.misc.loaded = true
 
 	updated, _ := model.handleMiscKey(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if !model.misc.editing {
 		t.Fatal("editing = false after enter, want true")
 	}
 
 	for _, r := range "big play" {
 		updated, _ = model.handleMiscKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-		model = updated.(mockShellModel)
+		model = updated.(shellModel)
 	}
 
 	updated, cmd := model.handleMiscKey(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.misc.editing {
 		t.Fatal("editing = true after commit, want false")
 	}
@@ -169,7 +169,7 @@ func TestMiscCreateMarkerFailureIsUserFriendlyOnMissingScope(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.Default()
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 	model.markerManager = twitch.NewHelixMarkersClient(twitch.HelixMarkersClientConfig{Endpoint: server.URL})
 	model.selfBroadcasterID = "123"
 
@@ -192,7 +192,7 @@ func TestMiscLoadFailureShowsNotLiveHintOnNoVideoFound(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.Default()
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 	model.width, model.height = 88, 20
 	model.activeTab = tabMisc
 	model.markerManager = twitch.NewHelixMarkersClient(twitch.HelixMarkersClientConfig{Endpoint: server.URL})
@@ -213,7 +213,7 @@ func TestMiscLoadFailureShowsNotLiveHintOnNoVideoFound(t *testing.T) {
 }
 
 func TestMoveMiscSelectionWrapsAndHandlesEmpty(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 	model.moveMiscSelection(-1)
 	if model.misc.selected != 0 {
 		t.Fatalf("selected = %d with no markers, want 0", model.misc.selected)

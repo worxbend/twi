@@ -17,7 +17,7 @@ const (
 
 // handleLeaderKey consumes the key following a pending space leader. It
 // always clears the pending flag: a chord is exactly two keystrokes.
-func (m mockShellModel) handleLeaderKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m shellModel) handleLeaderKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.leaderPending = false
 	if msg.Type != tea.KeyRunes || len(msg.Runes) != 1 {
 		return m, nil
@@ -44,7 +44,7 @@ func isInsertRune(r rune) bool {
 	return r == 'i' || r == 'o' || r == 'a'
 }
 
-func (m *mockShellModel) toggleInspect() {
+func (m *shellModel) toggleInspect() {
 	m.inspectOpen = !m.inspectOpen
 	if m.inspectOpen {
 		m.closeOtherOverlays("inspect")

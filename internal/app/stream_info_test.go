@@ -66,7 +66,7 @@ func (f *appFakeUserLookup) GetUsers(context.Context, twitch.UserLookupRequest) 
 }
 
 func TestTabSwitchAltDigitTogglesBetweenChatAndStreamInfo(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 	model.width, model.height = 88, 20
 
 	if model.activeTab != tabChat {
@@ -77,7 +77,7 @@ func TestTabSwitchAltDigitTogglesBetweenChatAndStreamInfo(t *testing.T) {
 	}
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}, Alt: true})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.activeTab != tabStreamInfo {
 		t.Fatalf("activeTab after alt+2 = %v, want tabStreamInfo", model.activeTab)
 	}
@@ -90,7 +90,7 @@ func TestTabSwitchAltDigitTogglesBetweenChatAndStreamInfo(t *testing.T) {
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}, Alt: true})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.activeTab != tabChat {
 		t.Fatalf("activeTab after alt+1 = %v, want tabChat", model.activeTab)
 	}
@@ -102,7 +102,7 @@ func TestTabSwitchAltDigitTogglesBetweenChatAndStreamInfo(t *testing.T) {
 func TestStreamInfoLoadsAndDisplaysChannelInfo(t *testing.T) {
 	cfg := config.Default()
 	cfg.Twitch.Username = "streamer"
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 	model.width, model.height = 88, 20
 	model.channelManager = &appFakeChannelManager{info: twitch.ChannelInfo{
 		BroadcasterID: "123",
@@ -114,7 +114,7 @@ func TestStreamInfoLoadsAndDisplaysChannelInfo(t *testing.T) {
 	model.userLookup = &appFakeUserLookup{users: []twitch.UserIdentity{{UserID: "123", Login: "streamer"}}}
 
 	updated, cmd := model.switchToTab(tabStreamInfo)
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("switchToTab(tabStreamInfo) returned nil command, want a load command")
 	}
@@ -141,7 +141,7 @@ func TestStreamInfoLoadsAndDisplaysChannelInfo(t *testing.T) {
 
 func TestStreamInfoLoadFailureSurfacesError(t *testing.T) {
 	cfg := config.Default()
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 	model.width, model.height = 88, 20
 	model.activeTab = tabStreamInfo
 	model.channelManager = &appFakeChannelManager{getErr: errors.New("twitch says no")}
@@ -164,7 +164,7 @@ func TestStreamInfoLoadFailureSurfacesError(t *testing.T) {
 
 func TestStreamInfoEditAndSaveUpdatesOnlyChangedFields(t *testing.T) {
 	cfg := config.Default()
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 	model.width, model.height = 88, 20
 	channelManager := &appFakeChannelManager{info: twitch.ChannelInfo{
 		BroadcasterID: "123",
@@ -183,17 +183,17 @@ func TestStreamInfoEditAndSaveUpdatesOnlyChangedFields(t *testing.T) {
 	// Edit only the title field; category/language/tags stay untouched.
 	model.streamInfo.selected = streamInfoFieldTitle
 	updated, _ := model.handleStreamInfoKey(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if !model.streamInfo.editing {
 		t.Fatal("editing = false after enter on unedited field, want true")
 	}
 	model.streamInfo.editBuffer = ""
 	for _, r := range "New title" {
 		updated, _ = model.handleStreamInfoKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-		model = updated.(mockShellModel)
+		model = updated.(shellModel)
 	}
 	updated, _ = model.handleStreamInfoKey(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.streamInfo.editing {
 		t.Fatal("editing = true after commit, want false")
 	}
@@ -202,7 +202,7 @@ func TestStreamInfoEditAndSaveUpdatesOnlyChangedFields(t *testing.T) {
 	}
 
 	updated, cmd := model.handleStreamInfoKey(tea.KeyMsg{Type: tea.KeyCtrlS})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("ctrl+s returned nil command, want save command")
 	}
@@ -230,7 +230,7 @@ func TestStreamInfoEditAndSaveUpdatesOnlyChangedFields(t *testing.T) {
 
 func TestStreamInfoCategoryChangeSendsPickedGameID(t *testing.T) {
 	cfg := config.Default()
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 	channelManager := &appFakeChannelManager{info: twitch.ChannelInfo{
 		BroadcasterID: "123",
 		GameName:      "Old Game",
@@ -260,7 +260,7 @@ func TestStreamInfoCategoryChangeSendsPickedGameID(t *testing.T) {
 
 func TestCategoryPickerSearchesAndSelectsCategory(t *testing.T) {
 	cfg := config.Default()
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 	model.width, model.height = 88, 20
 	model.activeTab = tabStreamInfo
 	model.channelManager = &appFakeChannelManager{info: twitch.ChannelInfo{
@@ -280,7 +280,7 @@ func TestCategoryPickerSearchesAndSelectsCategory(t *testing.T) {
 
 	model.streamInfo.selected = streamInfoFieldCategory
 	updated, cmd := model.handleStreamInfoKey(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if !model.categoryPicker.open {
 		t.Fatal("categoryPicker.open = false after enter on category field, want true")
 	}
@@ -299,14 +299,14 @@ func TestCategoryPickerSearchesAndSelectsCategory(t *testing.T) {
 	model.categoryPicker.query = ""
 	for _, r := range "fort" {
 		updated, cmd = model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-		model = updated.(mockShellModel)
+		model = updated.(shellModel)
 		if cmd == nil {
 			t.Fatal("typing in category picker returned nil command, want debounce tick")
 		}
 	}
 	debounceMsg := cmd().(categoryPickerDebounceMsg)
 	updated, cmd = model.applyCategoryPickerDebounce(debounceMsg)
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("debounce tick returned nil command, want search command")
 	}
@@ -320,7 +320,7 @@ func TestCategoryPickerSearchesAndSelectsCategory(t *testing.T) {
 	// (Fortnite, alphabetically before Fortnite Creative) and select it.
 	model.moveCategoryPickerSelection(1)
 	updated, _ = model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.categoryPicker.open {
 		t.Fatal("categoryPicker.open = true after enter, want closed")
 	}
@@ -331,14 +331,14 @@ func TestCategoryPickerSearchesAndSelectsCategory(t *testing.T) {
 
 func TestCategoryPickerNoCategoryEntryClearsCategory(t *testing.T) {
 	cfg := config.Default()
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 	model.gameLookup = &appFakeGameLookup{games: map[string]twitch.Game{}}
 	model.streamInfo.category = "Old Game"
 	model.streamInfo.categoryGameID = "1"
 	model.categoryPicker = categoryPickerState{open: true}
 
 	updated, _ := model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.streamInfo.category != "" || model.streamInfo.categoryGameID != "" {
 		t.Fatalf("category = %q id = %q, want cleared", model.streamInfo.category, model.streamInfo.categoryGameID)
 	}
@@ -346,13 +346,13 @@ func TestCategoryPickerNoCategoryEntryClearsCategory(t *testing.T) {
 
 func TestCategoryPickerEscCancelsWithoutChangingCategory(t *testing.T) {
 	cfg := config.Default()
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 	model.streamInfo.category = "Old Game"
 	model.streamInfo.categoryGameID = "1"
 	model.categoryPicker = categoryPickerState{open: true, query: "fort"}
 
 	updated, _ := model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyEsc})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.categoryPicker.open {
 		t.Fatal("categoryPicker.open = true after esc, want closed")
 	}
@@ -363,24 +363,24 @@ func TestCategoryPickerEscCancelsWithoutChangingCategory(t *testing.T) {
 
 func TestCategoryPickerStaleDebounceAndResultsAreDiscarded(t *testing.T) {
 	cfg := config.Default()
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 	model.gameLookup = &appFakeGameLookup{games: map[string]twitch.Game{
 		"Fortnite": {ID: "33214", Name: "Fortnite"},
 	}}
 	model.categoryPicker = categoryPickerState{open: true}
 
 	updated, cmd1 := model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	staleDebounce := cmd1().(categoryPickerDebounceMsg)
 
 	updated, _ = model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	// The first keystroke's debounce tick arrives after the second keystroke
 	// already bumped the generation counter; it must be ignored, not trigger
 	// a search for the stale "f" query.
 	updated, cmd := model.applyCategoryPickerDebounce(staleDebounce)
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatal("stale debounce triggered a search command, want nil")
 	}
@@ -400,7 +400,7 @@ func TestStreamInfoMissingScopeErrorIsUserFriendly(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.Default()
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 	model.width, model.height = 88, 20
 	model.activeTab = tabStreamInfo
 	model.channelManager = twitch.NewHelixChannelsClient(twitch.HelixChannelsClientConfig{Endpoint: server.URL})

@@ -16,7 +16,7 @@ import (
 // change the user just asked for.
 
 // cycleMessageLayout advances the chat layout: inline → grouped → compact.
-func (m *mockShellModel) cycleMessageLayout() {
+func (m *shellModel) cycleMessageLayout() {
 	switch m.messageLayout {
 	case render.LayoutInline:
 		m.messageLayout = render.LayoutGrouped
@@ -31,7 +31,7 @@ func (m *mockShellModel) cycleMessageLayout() {
 }
 
 // cycleBadgeMode advances badge rendering: glyph → text → off.
-func (m *mockShellModel) cycleBadgeMode() {
+func (m *shellModel) cycleBadgeMode() {
 	switch m.badgeMode {
 	case render.BadgeModeGlyph:
 		m.badgeMode = render.BadgeModeText
@@ -46,7 +46,7 @@ func (m *mockShellModel) cycleBadgeMode() {
 }
 
 // toggleEmoteHighlight turns the emote/emoji chip background on and off.
-func (m *mockShellModel) toggleEmoteHighlight() {
+func (m *shellModel) toggleEmoteHighlight() {
 	m.highlightEmotes = !m.highlightEmotes
 	m.persistDisplayPreference(onOffLabel("emote highlight", m.highlightEmotes), func(cfg *config.Config) {
 		cfg.Features.HighlightEmotes = m.highlightEmotes
@@ -54,7 +54,7 @@ func (m *mockShellModel) toggleEmoteHighlight() {
 }
 
 // toggleFullUsername turns the "DisplayName (login)" form on and off.
-func (m *mockShellModel) toggleFullUsername() {
+func (m *shellModel) toggleFullUsername() {
 	m.fullUsername = !m.fullUsername
 	m.persistDisplayPreference(onOffLabel("full usernames", m.fullUsername), func(cfg *config.Config) {
 		cfg.Features.FullUsername = m.fullUsername
@@ -70,7 +70,7 @@ func onOffLabel(name string, on bool) string {
 
 // persistDisplayPreference applies mutate to the effective config, saves it,
 // and reports the outcome through the composer's status feedback.
-func (m *mockShellModel) persistDisplayPreference(label string, mutate func(*config.Config)) {
+func (m *shellModel) persistDisplayPreference(label string, mutate func(*config.Config)) {
 	cfg := m.effectiveConfig
 	mutate(&cfg)
 	m.effectiveConfig = cfg
@@ -92,7 +92,7 @@ func (m *mockShellModel) persistDisplayPreference(label string, mutate func(*con
 // The chosen keys avoid the control codes terminals reserve: ctrl+h is
 // backspace, ctrl+i is tab, and ctrl+m is enter, so none of those can carry
 // a binding here.
-func (m *mockShellModel) handleDisplayToggleKey(msg tea.KeyMsg) bool {
+func (m *shellModel) handleDisplayToggleKey(msg tea.KeyMsg) bool {
 	switch msg.Type {
 	case tea.KeyCtrlG:
 		m.cycleMessageLayout()

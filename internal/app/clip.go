@@ -125,7 +125,7 @@ type clipCreatedMsg struct {
 // state.sendState/sendFeedback (the same composer-feedback fields the chat
 // send flow uses) carry progress and the result back to the status line,
 // since a clip isn't itself a chat message.
-func (m *mockShellModel) scheduleClipCreate(state *channelState, offsets clipOffsets) tea.Cmd {
+func (m *shellModel) scheduleClipCreate(state *channelState, offsets clipOffsets) tea.Cmd {
 	if m.clipManager == nil {
 		state.sendState = composerSendFailed
 		state.sendFeedback = "clip: unavailable (requires Twitch API credentials; run `twi login`)"
@@ -161,7 +161,7 @@ func (m *mockShellModel) scheduleClipCreate(state *channelState, offsets clipOff
 	}
 }
 
-func (m mockShellModel) applyClipCreated(msg clipCreatedMsg) mockShellModel {
+func (m shellModel) applyClipCreated(msg clipCreatedMsg) shellModel {
 	if msg.broadcasterID != "" {
 		m.selfBroadcasterID = msg.broadcasterID
 	}

@@ -29,7 +29,7 @@ func (f *appFakeSubscriptionLookup) GetBroadcasterSubscriptions(context.Context,
 }
 
 func TestChannelMetricsResolvesFollowerAndSubscriberCounts(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 	model.selfBroadcasterID = "123"
 	model.followerLookup = &appFakeFollowerLookup{page: twitch.FollowersPage{Total: 42, Followers: []twitch.Follower{
 		{UserID: "1", UserName: "Viewer1"},
@@ -57,7 +57,7 @@ func TestChannelMetricsResolvesFollowerAndSubscriberCounts(t *testing.T) {
 }
 
 func TestChannelMetricsNilLookupsSkipNetwork(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 	if cmd := model.resolveChannelMetricsCommand(); cmd != nil {
 		t.Fatal("resolveChannelMetricsCommand with no lookups = non-nil, want nil")
 	}
@@ -67,7 +67,7 @@ func TestChannelMetricsNilLookupsSkipNetwork(t *testing.T) {
 }
 
 func TestChannelMetricsErrorLeavesCountsUnknown(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 	model.selfBroadcasterID = "123"
 	model.followerLookup = &appFakeFollowerLookup{err: errors.New("twitch says no")}
 	model.subscriptionLookup = &appFakeSubscriptionLookup{err: errors.New("twitch says no")}
@@ -80,7 +80,7 @@ func TestChannelMetricsErrorLeavesCountsUnknown(t *testing.T) {
 }
 
 func TestChannelMetricsTickReschedulesAndResolvesAgain(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 	model.selfBroadcasterID = "123"
 	model.followerLookup = &appFakeFollowerLookup{page: twitch.FollowersPage{Total: 1}}
 
@@ -96,7 +96,7 @@ func TestChannelMetricsTickReschedulesAndResolvesAgain(t *testing.T) {
 	}
 
 	updated, batchCmd := model.Update(channelMetricsTickMsg{})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if !model.channelMetricsTickScheduled {
 		t.Fatal("channelMetricsTickScheduled = false after tick fired and rescheduled, want true")
 	}

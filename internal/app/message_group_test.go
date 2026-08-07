@@ -105,7 +105,7 @@ func TestAuthorlessEventsRemainSeparateGroups(t *testing.T) {
 func TestAuthorSeparatorsParticipateInScrollAccounting(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 12
 	state := model.activeChannelState()
 	state.messages = make([]twitch.ChatMessage, 10)
@@ -139,13 +139,13 @@ func TestAuthorSeparatorsParticipateInScrollAccounting(t *testing.T) {
 }
 
 func TestDifferentAuthorAppendPreservesScrolledViewport(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 	model.activeChannelState().messages = numberedMockMessages("example", 30)
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 12})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	state := model.activeChannelState()
 	if state.scrollOffset == 0 {
 		t.Fatal("test setup failed: expected a scrolled viewport")
@@ -161,7 +161,7 @@ func TestDifferentAuthorAppendPreservesScrolledViewport(t *testing.T) {
 	message.AuthorLogin = "another-viewer"
 	message.DisplayName = "another-viewer"
 	updated, cmd := model.Update(mockIncomingMessageMsg{message: message})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("scrolled append returned command %#v, want no reveal tick", cmd)
 	}
@@ -177,7 +177,7 @@ func TestDifferentAuthorAppendPreservesScrolledViewport(t *testing.T) {
 
 // visibleChatPage returns the chat rows currently on screen, which is what
 // "the visible scrolled page" means for scroll-stability assertions.
-func visibleChatPage(model mockShellModel) string {
+func visibleChatPage(model shellModel) string {
 	layout := model.layout()
 	rows := visibleRows(model.chatRows(layout), layout.chatContentHeight, model.activeChannelState().scrollOffset)
 	return strings.Join(rows, "\n")
@@ -185,7 +185,7 @@ func visibleChatPage(model mockShellModel) string {
 
 func TestMessageGroupSeparatorPreservesResponsiveWidth(t *testing.T) {
 	forceColorProfile(t)
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	for width := 1; width <= 60; width++ {
 		line := model.messageGroupSeparatorString(width)
 		if got := lipgloss.Width(line); got != width {
@@ -197,10 +197,10 @@ func TestMessageGroupSeparatorPreservesResponsiveWidth(t *testing.T) {
 	}
 }
 
-func groupedChatTestModel() mockShellModel {
+func groupedChatTestModel() shellModel {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 22
 	model.activeChannelState().messages = []twitch.ChatMessage{
 		{ID: "alice-1", Channel: "alpha", AuthorLogin: "Alice", DisplayName: "Alice", Type: twitch.MessageTypeChat, Text: "first"},

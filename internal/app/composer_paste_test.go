@@ -10,14 +10,14 @@ import (
 	"github.com/worxbend/twi/internal/twitch"
 )
 
-func composerTestModel(t *testing.T) mockShellModel {
+func composerTestModel(t *testing.T) shellModel {
 	t.Helper()
 	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
-	model := newMockShellModelWithClock("example", cfg, clock)
-	model.focus = mockFocusComposer
+	model := newMockModelWithClock("example", cfg, clock)
+	model.focus = focusComposer
 	return model
 }
 
@@ -63,7 +63,7 @@ func TestComposerTypingStillWorks(t *testing.T) {
 	model := composerTestModel(t)
 	for _, r := range "gg wp" {
 		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-		model = updated.(mockShellModel)
+		model = updated.(shellModel)
 	}
 	if got, want := model.activeChannelState().composerText, "gg wp"; got != want {
 		t.Fatalf("composerText = %q, want %q", got, want)
@@ -75,7 +75,7 @@ func TestComposerTypingStillWorks(t *testing.T) {
 func TestComposerPasteArrivesThroughUpdate(t *testing.T) {
 	model := composerTestModel(t)
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("one\ntwo")})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	if got, want := model.activeChannelState().composerText, "one two"; got != want {
 		t.Fatalf("composerText = %q, want %q", got, want)

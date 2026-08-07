@@ -32,12 +32,12 @@ func (c *joiningChatClient) PartChannel(channel string) error {
 	return nil
 }
 
-func emptyChannelModel(t *testing.T, client ChatClient) mockShellModel {
+func emptyChannelModel(t *testing.T, client ChatClient) shellModel {
 	t.Helper()
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	cfg.DefaultChannels = nil
-	model := newLiveShellModelWithClockAndOptions("", cfg, client, nil, ClientOptions{})
+	model := newLiveModelWithClockAndOptions("", cfg, client, nil, ClientOptions{})
 	model.width, model.height = 96, 24
 	return model
 }
@@ -58,9 +58,9 @@ func TestEmptyChannelSetRendersEmptyStateAndRefusesSends(t *testing.T) {
 	// Sending with nothing open must fail locally rather than reaching a
 	// transport with an empty channel name.
 	model.activeChannelState().composerText = "hello"
-	model.focus = mockFocusComposer
+	model.focus = focusComposer
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("send with no channel returned command %#v, want nil", cmd)
 	}
@@ -74,7 +74,7 @@ func TestOpenChannelJoinsTransportAndClosingParts(t *testing.T) {
 	model := emptyChannelModel(t, client)
 
 	updated, _ := model.openChannel("#Alpha")
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got, want := model.activeChannelName(), "Alpha"; got != want {
 		t.Fatalf("active channel after open = %q, want %q", got, want)
 	}
@@ -84,9 +84,9 @@ func TestOpenChannelJoinsTransportAndClosingParts(t *testing.T) {
 
 	// Reopening an open channel switches to it without a second join.
 	updated, _ = model.openChannel("beta")
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, _ = model.openChannel("alpha")
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got := len(client.joined); got != 2 {
 		t.Fatalf("join count after reopening = %d, want 2", got)
 	}
@@ -95,7 +95,7 @@ func TestOpenChannelJoinsTransportAndClosingParts(t *testing.T) {
 	}
 
 	updated, _ = model.closeChannel("alpha")
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got := client.departed; len(got) != 1 || got[0] != "alpha" {
 		t.Fatalf("departed = %#v, want [alpha]", got)
 	}
@@ -106,7 +106,7 @@ func TestOpenChannelJoinsTransportAndClosingParts(t *testing.T) {
 	// Closing the last channel lands back on the empty state instead of
 	// leaving a phantom channel behind.
 	updated, _ = model.closeChannel("beta")
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if !model.channels.empty() {
 		t.Fatalf("channels after closing the last one = %#v, want empty", model.channels.channelNames())
 	}
@@ -114,11 +114,11 @@ func TestOpenChannelJoinsTransportAndClosingParts(t *testing.T) {
 
 func TestComposerChannelsCommandOpensPickerOrNamedChannel(t *testing.T) {
 	model := emptyChannelModel(t, NewFakeChatClient(1))
-	model.focus = mockFocusComposer
+	model.focus = focusComposer
 
 	model.activeChannelState().composerText = "/channels"
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if !model.channelPicker.open {
 		t.Fatal("channelPicker.open after /channels = false, want true")
 	}
@@ -129,7 +129,7 @@ func TestComposerChannelsCommandOpensPickerOrNamedChannel(t *testing.T) {
 	model.channelPicker = channelPickerState{}
 	model.activeChannelState().composerText = "/channels #alpha"
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.channelPicker.open {
 		t.Fatal("channelPicker.open after /channels <name> = true, want false")
 	}
@@ -142,7 +142,7 @@ func TestChannelPickerEntriesListOpenFollowedAndTypedNames(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	cfg.DefaultChannels = []string{"alpha"}
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.followedChannelList = []twitch.FollowedChannel{
 		{BroadcasterLogin: "gamma", BroadcasterName: "GammaTV"},
 		{BroadcasterLogin: "alpha", BroadcasterName: "Alpha"},
@@ -190,7 +190,7 @@ func TestChannelPickerEnterOpensSelection(t *testing.T) {
 	model.channelPicker = channelPickerState{open: true}
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.channelPicker.open {
 		t.Fatal("channelPicker.open after enter = true, want false")
 	}

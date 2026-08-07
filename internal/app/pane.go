@@ -21,14 +21,14 @@ type paneSpec struct {
 	focused       bool
 }
 
-func (m mockShellModel) canvasBackground() string {
+func (m shellModel) canvasBackground() string {
 	return theme.Darken(m.theme.Background, canvasDarkenAmount)
 }
 
 // renderPane builds an exact-size panel whose title occupies the existing top
 // border row. This preserves layout capacity while giving every pane a surface
 // fill, icon-bearing title, quiet frame, and independently colored left rail.
-func (m mockShellModel) renderPane(spec paneSpec) string {
+func (m shellModel) renderPane(spec paneSpec) string {
 	if spec.width <= 0 || spec.contentHeight < 0 {
 		return ""
 	}
@@ -69,7 +69,7 @@ func (m mockShellModel) renderPane(spec paneSpec) string {
 	return title + "\n" + body
 }
 
-func (m mockShellModel) paneTitleLine(width int, icon, title, accent, railColor string, focused bool) string {
+func (m shellModel) paneTitleLine(width int, icon, title, accent, railColor string, focused bool) string {
 	if width <= 0 {
 		return ""
 	}
@@ -106,7 +106,7 @@ func (m mockShellModel) paneTitleLine(width int, icon, title, accent, railColor 
 	return left + styledLabel + border
 }
 
-func (m mockShellModel) paneGradientEnd(start string) string {
+func (m shellModel) paneGradientEnd(start string) string {
 	for _, candidate := range []string{
 		m.theme.Success,
 		m.theme.Warning,

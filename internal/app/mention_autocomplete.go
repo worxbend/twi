@@ -86,7 +86,7 @@ func isMentionRune(r rune) bool {
 
 // mentionSuggestions returns the completions offered for the current draft,
 // or nil when the strip should be hidden.
-func (m mockShellModel) mentionSuggestions() []*chatterEntry {
+func (m shellModel) mentionSuggestions() []*chatterEntry {
 	if !m.composerFocused() {
 		return nil
 	}
@@ -112,7 +112,7 @@ func (m mockShellModel) mentionSuggestions() []*chatterEntry {
 
 // mentionSelectedIndex clamps the stored selection against the live candidate
 // list, which can shrink as the user keeps typing.
-func (m mockShellModel) mentionSelectedIndex(matches []*chatterEntry) int {
+func (m shellModel) mentionSelectedIndex(matches []*chatterEntry) int {
 	if len(matches) == 0 {
 		return 0
 	}
@@ -123,7 +123,7 @@ func (m mockShellModel) mentionSelectedIndex(matches []*chatterEntry) int {
 	return selected
 }
 
-func (m *mockShellModel) moveMentionSelection(delta int) {
+func (m *shellModel) moveMentionSelection(delta int) {
 	matches := m.mentionSuggestions()
 	if len(matches) == 0 {
 		return
@@ -140,7 +140,7 @@ func (m *mockShellModel) moveMentionSelection(delta int) {
 
 // acceptMentionSuggestion replaces the trailing @prefix with the selected
 // chatter's name and a trailing space, so the user can keep typing.
-func (m *mockShellModel) acceptMentionSuggestion() bool {
+func (m *shellModel) acceptMentionSuggestion() bool {
 	matches := m.mentionSuggestions()
 	if len(matches) == 0 {
 		return false
@@ -157,7 +157,7 @@ func (m *mockShellModel) acceptMentionSuggestion() bool {
 }
 
 // dismissMentionSuggestions hides the strip for the current word only.
-func (m *mockShellModel) dismissMentionSuggestions() bool {
+func (m *shellModel) dismissMentionSuggestions() bool {
 	prefix, ok := composerMentionPrefix(m.activeChannelState().composerText)
 	if !ok {
 		return false
@@ -175,14 +175,14 @@ func (m *mockShellModel) dismissMentionSuggestions() bool {
 // resetMentionSelection returns the highlight to the first candidate. It runs
 // whenever the draft changes so a stale index never carries over to a
 // different candidate list.
-func (m *mockShellModel) resetMentionSelection() {
+func (m *shellModel) resetMentionSelection() {
 	m.mentionAutocomplete.selected = 0
 }
 
 // composerMentionSegments renders the suggestion strip: the selected
 // candidate is highlighted, each entry carries its role glyph, and the list
 // is truncated to whatever width the composer has.
-func (m mockShellModel) composerMentionSegments(matches []*chatterEntry) []composerSegment {
+func (m shellModel) composerMentionSegments(matches []*chatterEntry) []composerSegment {
 	if len(matches) == 0 {
 		return nil
 	}

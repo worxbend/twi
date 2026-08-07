@@ -36,7 +36,7 @@ func themeSettingsNames() []string {
 	return names
 }
 
-func (m *mockShellModel) toggleThemeSettings() {
+func (m *shellModel) toggleThemeSettings() {
 	if m.themeSettings.open {
 		m.themeSettings = themeSettingsState{}
 		return
@@ -62,7 +62,7 @@ func (m *mockShellModel) toggleThemeSettings() {
 // View() re-derives the OSC 11 background sequence from m.theme on every
 // render (see themeBackgroundSequence), so changing m.theme here is enough
 // to keep the terminal background in sync with the live preview.
-func (m mockShellModel) handleThemeSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m shellModel) handleThemeSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
 		m.theme = m.themeSettings.originalPalette
@@ -82,7 +82,7 @@ func (m mockShellModel) handleThemeSettingsKey(msg tea.KeyMsg) (tea.Model, tea.C
 	return m, nil
 }
 
-func (m *mockShellModel) moveThemeSettingsSelection(delta int) {
+func (m *shellModel) moveThemeSettingsSelection(delta int) {
 	names := themeSettingsNames()
 	if len(names) == 0 {
 		return
@@ -97,7 +97,7 @@ func (m *mockShellModel) moveThemeSettingsSelection(delta int) {
 	m.setThemeSettingsSelection(selected)
 }
 
-func (m *mockShellModel) setThemeSettingsSelection(selected int) {
+func (m *shellModel) setThemeSettingsSelection(selected int) {
 	names := themeSettingsNames()
 	if selected < 0 || selected >= len(names) {
 		return
@@ -109,7 +109,7 @@ func (m *mockShellModel) setThemeSettingsSelection(selected int) {
 // persistSelectedTheme writes the previewed theme to the effective config
 // file, preserving every other setting already in effect (it round-trips
 // the full config, not just the theme fields, so nothing else is reset).
-func (m mockShellModel) persistSelectedTheme() (tea.Model, tea.Cmd) {
+func (m shellModel) persistSelectedTheme() (tea.Model, tea.Cmd) {
 	names := themeSettingsNames()
 	selected := m.themeSettings.selected
 	if selected < 0 || selected >= len(names) {
@@ -132,7 +132,7 @@ func (m mockShellModel) persistSelectedTheme() (tea.Model, tea.Cmd) {
 // pattern) means View() returns this instead of the dashboard, so the palette
 // never has to be judged through a chat pane squeezed down to make room for
 // it, and the list gets the whole terminal for swatches.
-func (m mockShellModel) themeSettingsPageView() string {
+func (m shellModel) themeSettingsPageView() string {
 	width := clampMin(m.width, 1)
 	height := clampMin(m.height, 1)
 	if height < 3 || width < 5 {
@@ -157,7 +157,7 @@ func (m mockShellModel) themeSettingsPageView() string {
 // entry list, and a key-hint footer. Lines are pre-styled against background
 // because the swatches need per-segment color, which the pane body style
 // cannot apply on its own.
-func (m mockShellModel) themeSettingsLines(width, height int, background string) []string {
+func (m shellModel) themeSettingsLines(width, height int, background string) []string {
 	if height <= 0 || width <= 0 {
 		return nil
 	}
@@ -212,7 +212,7 @@ func (m mockShellModel) themeSettingsLines(width, height int, background string)
 // themeSettingsEntryLine draws one row: selection marker, theme name, and a
 // swatch strip rendered in that preset's own colors so the list doubles as a
 // palette comparison without having to select each entry in turn.
-func (m mockShellModel) themeSettingsEntryLine(name string, width int, selected bool, background string) string {
+func (m shellModel) themeSettingsEntryLine(name string, width int, selected bool, background string) string {
 	if width <= 0 {
 		return ""
 	}

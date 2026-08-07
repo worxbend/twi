@@ -8,23 +8,23 @@ import (
 	"github.com/worxbend/twi/internal/config"
 )
 
-func keymapModel(t *testing.T) mockShellModel {
+func keymapModel(t *testing.T) shellModel {
 	t.Helper()
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	cfg.Features.EnableMouse = true
 	cfg.DefaultChannels = []string{"alpha", "beta"}
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 26})
-	return updated.(mockShellModel)
+	return updated.(shellModel)
 }
 
-func press(model mockShellModel, msg tea.KeyMsg) (mockShellModel, tea.Cmd) {
+func press(model shellModel, msg tea.KeyMsg) (shellModel, tea.Cmd) {
 	updated, cmd := model.Update(msg)
-	return updated.(mockShellModel), cmd
+	return updated.(shellModel), cmd
 }
 
-func pressRune(model mockShellModel, r rune) (mockShellModel, tea.Cmd) {
+func pressRune(model shellModel, r rune) (shellModel, tea.Cmd) {
 	return press(model, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 }
 
@@ -32,7 +32,7 @@ func TestInsertKeysFocusComposerAndEscReturnsToChat(t *testing.T) {
 	for _, key := range []rune{'i', 'o', 'a'} {
 		model := keymapModel(t)
 		model, _ = pressRune(model, key)
-		if model.focus != mockFocusComposer {
+		if model.focus != focusComposer {
 			t.Fatalf("focus after %q = %v, want composer", string(key), model.focus)
 		}
 		if got := model.activeChannelState().composerText; got != "" {
@@ -46,7 +46,7 @@ func TestInsertKeysFocusComposerAndEscReturnsToChat(t *testing.T) {
 		}
 
 		model, _ = press(model, tea.KeyMsg{Type: tea.KeyEsc})
-		if model.focus != mockFocusChat {
+		if model.focus != focusChat {
 			t.Fatalf("focus after esc = %v, want chat", model.focus)
 		}
 		// esc leaves insert mode without discarding the draft.
@@ -126,7 +126,7 @@ func TestSpaceLeaderTogglesSidebarOpensPickerAndClosesChannel(t *testing.T) {
 
 func TestSpaceIsLiteralInComposerAndUnboundLeaderKeysCancel(t *testing.T) {
 	model := keymapModel(t)
-	model.focus = mockFocusComposer
+	model.focus = focusComposer
 	model, _ = press(model, tea.KeyMsg{Type: tea.KeySpace})
 	if model.leaderPending {
 		t.Fatal("space armed the leader from the composer, want a literal space")
@@ -135,7 +135,7 @@ func TestSpaceIsLiteralInComposerAndUnboundLeaderKeysCancel(t *testing.T) {
 		t.Fatalf("composer text = %q, want %q", got, want)
 	}
 
-	model.focus = mockFocusChat
+	model.focus = focusChat
 	model, _ = press(model, tea.KeyMsg{Type: tea.KeySpace})
 	model, _ = pressRune(model, 'z')
 	if model.leaderPending {
@@ -148,7 +148,7 @@ func TestSpaceIsLiteralInComposerAndUnboundLeaderKeysCancel(t *testing.T) {
 
 func TestSidebarFocusNavigatesSwitchesAndCloses(t *testing.T) {
 	model := keymapModel(t)
-	model.focus = mockFocusSidebar
+	model.focus = focusSidebar
 	model.syncSidebarSelectionToActive()
 
 	model, _ = pressRune(model, 'j')
@@ -170,25 +170,25 @@ func TestSidebarFocusNavigatesSwitchesAndCloses(t *testing.T) {
 		t.Fatalf("channels after x = %#v, want [alpha]", got)
 	}
 
-	model.focus = mockFocusSidebar
+	model.focus = focusSidebar
 	model, _ = pressRune(model, 'h')
-	if model.focus != mockFocusChat {
+	if model.focus != focusChat {
 		t.Fatalf("focus after h = %v, want chat", model.focus)
 	}
 }
 
 func TestTabCycleIncludesTheSidebarOnlyWhenVisible(t *testing.T) {
 	model := keymapModel(t)
-	model.focus = mockFocusComposer
+	model.focus = focusComposer
 	model, _ = press(model, tea.KeyMsg{Type: tea.KeyTab})
-	if model.focus != mockFocusSidebar {
+	if model.focus != focusSidebar {
 		t.Fatalf("focus after tab from composer = %v, want the visible sidebar", model.focus)
 	}
 
 	model.sidebarVisibility = sidebarHidden
-	model.focus = mockFocusComposer
+	model.focus = focusComposer
 	model, _ = press(model, tea.KeyMsg{Type: tea.KeyTab})
-	if model.focus != mockFocusChat {
+	if model.focus != focusChat {
 		t.Fatalf("focus after tab with a hidden sidebar = %v, want chat", model.focus)
 	}
 }

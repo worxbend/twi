@@ -43,14 +43,14 @@ type categoryPickerResultsMsg struct {
 // category (if any) so the first results are immediately relevant, and
 // kicks off that initial search without debouncing (unlike per-keystroke
 // typing, opening the picker is one deliberate action).
-func (m *mockShellModel) openCategoryPicker() tea.Cmd {
+func (m *shellModel) openCategoryPicker() tea.Cmd {
 	m.closeOtherOverlays("category")
 	query := strings.TrimSpace(m.streamInfo.category)
 	m.categoryPicker = categoryPickerState{open: true, query: query}
 	return m.scheduleCategorySearch()
 }
 
-func (m mockShellModel) handleCategoryPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m shellModel) handleCategoryPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
 		m.categoryPicker = categoryPickerState{}
@@ -86,7 +86,7 @@ func (m mockShellModel) handleCategoryPickerKey(msg tea.KeyMsg) (tea.Model, tea.
 	return m, nil
 }
 
-func (m *mockShellModel) moveCategoryPickerSelection(delta int) {
+func (m *shellModel) moveCategoryPickerSelection(delta int) {
 	entries := m.categoryPickerEntries()
 	if len(entries) == 0 {
 		m.categoryPicker.selected = 0
@@ -105,7 +105,7 @@ func (m *mockShellModel) moveCategoryPickerSelection(delta int) {
 // Info Category field (both display name and Twitch game ID, so saving never
 // needs a separate name->ID resolution step) and closes the picker. The
 // pinned first entry clears the category entirely.
-func (m mockShellModel) commitCategoryPickerSelection() (tea.Model, tea.Cmd) {
+func (m shellModel) commitCategoryPickerSelection() (tea.Model, tea.Cmd) {
 	entries := m.categoryPickerEntries()
 	index := m.categoryPicker.selected
 	if index < 0 || index >= len(entries) {
@@ -125,7 +125,7 @@ func (m mockShellModel) commitCategoryPickerSelection() (tea.Model, tea.Cmd) {
 // categoryPickerEntries pins a synthetic "no category" entry first (Twitch
 // has no search result for "clear the category", so the picker offers it
 // directly) followed by the current search results.
-func (m mockShellModel) categoryPickerEntries() []twitch.Game {
+func (m shellModel) categoryPickerEntries() []twitch.Game {
 	entries := make([]twitch.Game, 0, len(m.categoryPicker.results)+1)
 	entries = append(entries, twitch.Game{Name: "(no category)"})
 	entries = append(entries, m.categoryPicker.results...)
@@ -136,7 +136,7 @@ func (m mockShellModel) categoryPickerEntries() []twitch.Game {
 // delayed tick carrying it; handleCategoryPickerKey calls this on every
 // query-changing key so a burst of keystrokes collapses into one search
 // instead of one per keystroke.
-func (m *mockShellModel) debounceCategorySearch() tea.Cmd {
+func (m *shellModel) debounceCategorySearch() tea.Cmd {
 	m.categoryPicker.generation++
 	generation := m.categoryPicker.generation
 	return tea.Tick(categoryPickerDebounce, func(time.Time) tea.Msg {
@@ -149,7 +149,7 @@ func (m *mockShellModel) debounceCategorySearch() tea.Cmd {
 // open call this; the generation captured here is compared against the
 // model's current generation when the response (or a superseding debounce
 // tick) arrives, so stale results from an old query are discarded.
-func (m *mockShellModel) scheduleCategorySearch() tea.Cmd {
+func (m *shellModel) scheduleCategorySearch() tea.Cmd {
 	query := strings.TrimSpace(m.categoryPicker.query)
 	generation := m.categoryPicker.generation
 	if m.gameLookup == nil || query == "" {
@@ -169,14 +169,14 @@ func (m *mockShellModel) scheduleCategorySearch() tea.Cmd {
 	}
 }
 
-func (m mockShellModel) applyCategoryPickerDebounce(msg categoryPickerDebounceMsg) (tea.Model, tea.Cmd) {
+func (m shellModel) applyCategoryPickerDebounce(msg categoryPickerDebounceMsg) (tea.Model, tea.Cmd) {
 	if msg.generation != m.categoryPicker.generation {
 		return m, nil
 	}
 	return m, m.scheduleCategorySearch()
 }
 
-func (m mockShellModel) applyCategoryPickerResults(msg categoryPickerResultsMsg) mockShellModel {
+func (m shellModel) applyCategoryPickerResults(msg categoryPickerResultsMsg) shellModel {
 	if msg.generation != m.categoryPicker.generation {
 		return m
 	}
@@ -192,7 +192,7 @@ func (m mockShellModel) applyCategoryPickerResults(msg categoryPickerResultsMsg)
 	return m
 }
 
-func (m mockShellModel) categoryPickerView(layout mockShellLayout) string {
+func (m shellModel) categoryPickerView(layout shellLayout) string {
 	contentWidth := layout.width
 	if layout.categoryPickerFramed {
 		contentWidth = clampMin(layout.width-4, 1)
@@ -214,7 +214,7 @@ func (m mockShellModel) categoryPickerView(layout mockShellLayout) string {
 	})
 }
 
-func (m mockShellModel) categoryPickerLines(width, height int) []string {
+func (m shellModel) categoryPickerLines(width, height int) []string {
 	if height <= 0 {
 		return nil
 	}

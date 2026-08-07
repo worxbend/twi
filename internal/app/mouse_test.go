@@ -30,7 +30,7 @@ func TestClickSidebarCloseAffordanceClosesChannel(t *testing.T) {
 	if layout.sidebarWidth <= 0 {
 		t.Fatal("test setup: sidebar not visible")
 	}
-	model.focus = mockFocusSidebar
+	model.focus = focusSidebar
 	model.syncSidebarSelectionToActive()
 
 	row := layout.tabBarHeight + layout.statusHeight + 1
@@ -81,7 +81,7 @@ func TestWheelStillScrollsChatWithNoOverlayOpen(t *testing.T) {
 		Button: tea.MouseButtonWheelUp,
 		Action: tea.MouseActionPress,
 	}))
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.activeChannelState().scrollOffset == 0 {
 		t.Fatal("scrollOffset after a wheel-up over chat = 0, want scrolled")
 	}

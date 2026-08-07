@@ -11,7 +11,7 @@ import (
 func TestActivityLogColumnAppearsAboveMinWidthAndRenders(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 	model.width, model.height = 140, 20
 	model.appendActivity(activityEntry{Kind: activityFollow, Text: "NewViewer followed"})
 
@@ -32,7 +32,7 @@ func TestActivityLogColumnAppearsAboveMinWidthAndRenders(t *testing.T) {
 
 func TestActivityLogColumnHiddenBelowMinWidth(t *testing.T) {
 	cfg := config.Default()
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 	model.width, model.height = 88, 20
 
 	layout := model.layout()
@@ -46,7 +46,7 @@ func TestActivityLogColumnHiddenBelowMinWidth(t *testing.T) {
 
 func TestActivityLogColumnHiddenOnStreamInfoAndMiscTabs(t *testing.T) {
 	cfg := config.Default()
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 	model.width, model.height = 140, 20
 
 	model.activeTab = tabStreamInfo
@@ -63,7 +63,7 @@ func TestActivityLogColumnHiddenOnStreamInfoAndMiscTabs(t *testing.T) {
 func TestMouseInChatRegionExcludesActivityLogColumn(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 	model.width, model.height = 140, 20
 	layout := model.layout()
 	if layout.activityWidth <= 0 {

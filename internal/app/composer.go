@@ -20,7 +20,7 @@ type composerSegment struct {
 // panel, one focus rail, a block cursor, and a compact metadata footer. The
 // borderless shape keeps the chat hierarchy light while send/reply state stays
 // visible. Small terminals collapse to a compact surface or plain text.
-func (m mockShellModel) composerView(layout mockShellLayout) string {
+func (m shellModel) composerView(layout shellLayout) string {
 	if layout.composerHeight <= 0 {
 		return ""
 	}
@@ -60,7 +60,7 @@ func (m mockShellModel) composerView(layout mockShellLayout) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m mockShellModel) plainComposerView(layout mockShellLayout) string {
+func (m shellModel) plainComposerView(layout shellLayout) string {
 	active := m.activeChannelState()
 	input := active.composerText
 	if input == "" && !m.composerFocused() {
@@ -85,7 +85,7 @@ func (m mockShellModel) plainComposerView(layout mockShellLayout) string {
 	return fitBlock(input, layout.width, layout.composerHeight)
 }
 
-func (m mockShellModel) composerPanelLines(height, width int) [][]composerSegment {
+func (m shellModel) composerPanelLines(height, width int) [][]composerSegment {
 	if height <= 0 {
 		return nil
 	}
@@ -113,7 +113,7 @@ func (m mockShellModel) composerPanelLines(height, width int) [][]composerSegmen
 	return lines
 }
 
-func (m mockShellModel) composerInputSegments(width int) []composerSegment {
+func (m shellModel) composerInputSegments(width int) []composerSegment {
 	focused := m.composerFocused()
 	cursorWidth := 0
 	if focused && width > 0 {
@@ -172,7 +172,7 @@ func tailDisplayCells(value string, cells int) string {
 	return strings.Join(clusters[start:], "")
 }
 
-func (m mockShellModel) composerReplySegments() []composerSegment {
+func (m shellModel) composerReplySegments() []composerSegment {
 	reply := m.activeChannelState().replyTo
 	if reply == nil {
 		return nil
@@ -191,7 +191,7 @@ func (m mockShellModel) composerReplySegments() []composerSegment {
 	return segments
 }
 
-func (m mockShellModel) composerMetadataSegments() []composerSegment {
+func (m shellModel) composerMetadataSegments() []composerSegment {
 	state, color := m.composerStateLabel()
 	return []composerSegment{
 		{text: "✉ Chat", foreground: m.theme.Accent, bold: true},
@@ -205,21 +205,21 @@ func (m mockShellModel) composerMetadataSegments() []composerSegment {
 // composerPlaceholder names what typing will do. With nothing open the
 // composer is still usable - /channels is typed into it - so the prompt
 // points there instead of naming a channel that does not exist.
-func (m mockShellModel) composerPlaceholder(suffix string) string {
+func (m shellModel) composerPlaceholder(suffix string) string {
 	if m.channels.empty() {
 		return "/channels to open a channel" + suffix
 	}
 	return "Message #" + m.activeChannelName() + suffix
 }
 
-func (m mockShellModel) composerChannelLabel() string {
+func (m shellModel) composerChannelLabel() string {
 	if m.channels.empty() {
 		return "no channel"
 	}
 	return "#" + m.activeChannelName()
 }
 
-func (m mockShellModel) composerStateLabel() (string, string) {
+func (m shellModel) composerStateLabel() (string, string) {
 	switch m.activeChannelState().sendState {
 	case composerSendQueued:
 		return "queued", m.theme.Warning
@@ -236,11 +236,11 @@ func (m mockShellModel) composerStateLabel() (string, string) {
 	}
 }
 
-func (m mockShellModel) composerFocused() bool {
-	return m.focus == mockFocusComposer && !m.anyOverlayOpen()
+func (m shellModel) composerFocused() bool {
+	return m.focus == focusComposer && !m.anyOverlayOpen()
 }
 
-func (m mockShellModel) composerCursorVisible() bool {
+func (m shellModel) composerCursorVisible() bool {
 	if !m.composerFocused() {
 		return false
 	}

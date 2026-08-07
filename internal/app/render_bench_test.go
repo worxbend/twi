@@ -13,7 +13,7 @@ import (
 // benchModel builds a sized model holding count backlog messages in the
 // active channel, with animation off so the benchmark measures the static
 // render path rather than reveal progress.
-func benchModel(b *testing.B, count int) mockShellModel {
+func benchModel(b *testing.B, count int) shellModel {
 	b.Helper()
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
@@ -21,10 +21,10 @@ func benchModel(b *testing.B, count int) mockShellModel {
 	// can still measure the cost of a large backlog directly.
 	cfg.Features.ScrollbackLimit = 0
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
-	model := newMockShellModelWithClock("example", cfg, clock)
+	model := newMockModelWithClock("example", cfg, clock)
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	state := model.activeChannelState()
 	state.messages = make([]twitch.ChatMessage, 0, count)

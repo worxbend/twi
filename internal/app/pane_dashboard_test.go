@@ -12,7 +12,7 @@ func TestDashboardPanesExposeIconTitlesAndComposerIdentity(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	cfg.DefaultChannels = []string{"alpha", "beta", "gamma"}
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 140, 24
 	model.appendActivity(activityEntry{Kind: activityFollow, Text: "NewViewer followed"})
 
@@ -31,9 +31,9 @@ func TestDashboardPanesExposeIconTitlesAndComposerIdentity(t *testing.T) {
 }
 
 func TestModalAndTabPanesExposeIconTitles(t *testing.T) {
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 100, 24
-	layout := mockShellLayout{
+	layout := shellLayout{
 		width:                       100,
 		paletteHeight:               8,
 		paletteContentHeight:        6,

@@ -26,7 +26,7 @@ type channelMetricsResolvedMsg struct {
 // scheduleChannelMetricsTick polls follower/subscriber counts on
 // channelMetricsPollInterval. Disabled (both lookups nil) without live
 // credentials or the relevant scopes.
-func (m *mockShellModel) scheduleChannelMetricsTick() tea.Cmd {
+func (m *shellModel) scheduleChannelMetricsTick() tea.Cmd {
 	if (m.followerLookup == nil && m.subscriptionLookup == nil) || m.channelMetricsTickScheduled {
 		return nil
 	}
@@ -36,7 +36,7 @@ func (m *mockShellModel) scheduleChannelMetricsTick() tea.Cmd {
 	})
 }
 
-func (m mockShellModel) resolveChannelMetricsCommand() tea.Cmd {
+func (m shellModel) resolveChannelMetricsCommand() tea.Cmd {
 	if m.followerLookup == nil && m.subscriptionLookup == nil {
 		return nil
 	}
@@ -70,7 +70,7 @@ func (m mockShellModel) resolveChannelMetricsCommand() tea.Cmd {
 	}
 }
 
-func (m mockShellModel) applyChannelMetrics(msg channelMetricsResolvedMsg) mockShellModel {
+func (m shellModel) applyChannelMetrics(msg channelMetricsResolvedMsg) shellModel {
 	if msg.broadcasterID != "" {
 		m.selfBroadcasterID = msg.broadcasterID
 	}

@@ -17,13 +17,13 @@ import (
 // displayTestModel returns a model with a deterministic three-message
 // conversation: two consecutive messages from one author (so grouping has
 // something to collapse) followed by a different author.
-func displayTestModel(t *testing.T) mockShellModel {
+func displayTestModel(t *testing.T) shellModel {
 	t.Helper()
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	cfg.Path = filepath.Join(t.TempDir(), "config.toml")
 
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 20
 	now := time.Date(2026, 8, 1, 20, 0, 0, 0, time.Local)
 	messages := []twitch.ChatMessage{
@@ -51,7 +51,7 @@ func displayTestModel(t *testing.T) mockShellModel {
 	return model
 }
 
-func chatText(model mockShellModel) string {
+func chatText(model shellModel) string {
 	return ansi.Strip(strings.Join(model.chatRows(model.layout()), "\n"))
 }
 
@@ -91,7 +91,7 @@ func TestCycleMessageLayoutRotatesAndPersists(t *testing.T) {
 
 	for _, want := range []render.LayoutMode{render.LayoutGrouped, render.LayoutCompact, render.LayoutInline} {
 		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
-		model = updated.(mockShellModel)
+		model = updated.(shellModel)
 		if model.messageLayout != want {
 			t.Fatalf("layout after ctrl+g = %q, want %q", model.messageLayout, want)
 		}
@@ -115,7 +115,7 @@ func TestCycleBadgeModeRotatesAndChangesRendering(t *testing.T) {
 	}
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.badgeMode != render.BadgeModeText {
 		t.Fatalf("badge mode after one ctrl+b = %q, want text", model.badgeMode)
 	}
@@ -124,7 +124,7 @@ func TestCycleBadgeModeRotatesAndChangesRendering(t *testing.T) {
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.badgeMode != render.BadgeModeOff {
 		t.Fatalf("badge mode after two ctrl+b = %q, want off", model.badgeMode)
 	}
@@ -133,7 +133,7 @@ func TestCycleBadgeModeRotatesAndChangesRendering(t *testing.T) {
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.badgeMode != render.BadgeModeGlyph {
 		t.Fatalf("badge mode after three ctrl+b = %q, want glyph again", model.badgeMode)
 	}
@@ -150,7 +150,7 @@ func TestToggleFullUsernameShowsLogin(t *testing.T) {
 	}
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if !model.fullUsername {
 		t.Fatal("ctrl+n did not enable full usernames")
 	}
@@ -166,7 +166,7 @@ func TestToggleEmoteHighlightFlipsRenderOption(t *testing.T) {
 	}
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.highlightEmotes {
 		t.Fatal("ctrl+y did not disable emote highlighting")
 	}
@@ -187,7 +187,7 @@ func TestDisplayTogglesSurviveAFailedConfigWrite(t *testing.T) {
 	model.effectiveConfig.Path = filepath.Join(blocker, "config.toml")
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.messageLayout != render.LayoutGrouped {
 		t.Fatalf("layout = %q after a failed save, want the change applied anyway", model.messageLayout)
 	}
@@ -242,7 +242,7 @@ func TestGroupedLayoutDoesNotRepeatHeaderWhileAnimating(t *testing.T) {
 	cfg.Features.MessageLayout = "grouped"
 	cfg.Path = filepath.Join(t.TempDir(), "config.toml")
 
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 20
 	now := time.Date(2026, 8, 1, 20, 0, 0, 0, time.Local)
 	state := model.activeChannelState()
@@ -258,7 +258,7 @@ func TestGroupedLayoutDoesNotRepeatHeaderWhileAnimating(t *testing.T) {
 		ID: "2", Channel: "alpha", AuthorLogin: "alice", DisplayName: "Alice",
 		Timestamp: now, Type: twitch.MessageTypeChat, Text: "animated continuation",
 	}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if len(model.activeChannelState().activeOrder) == 0 {
 		t.Fatal("test setup failed: expected an in-flight reveal")
 	}
@@ -271,7 +271,7 @@ func TestGroupedLayoutDoesNotRepeatHeaderWhileAnimating(t *testing.T) {
 		ID: "3", Channel: "alpha", AuthorLogin: "bob", DisplayName: "Bob",
 		Timestamp: now, Type: twitch.MessageTypeChat, Text: "new author",
 	}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got := strings.Count(chatText(model), "Alice"); got != 1 {
 		t.Fatalf("Alice header count changed after a different author arrived:\n%s", chatText(model))
 	}

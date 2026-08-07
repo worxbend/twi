@@ -9,7 +9,7 @@ import (
 	"github.com/worxbend/twi/internal/twitch"
 )
 
-func (m mockShellModel) inspectView(layout mockShellLayout) string {
+func (m shellModel) inspectView(layout shellLayout) string {
 	contentWidth := layout.width
 	if layout.inspectFramed {
 		contentWidth = clampMin(layout.width-4, 1)
@@ -35,7 +35,7 @@ func (m mockShellModel) inspectView(layout mockShellLayout) string {
 	})
 }
 
-func (m mockShellModel) inspectLines(width, height int) []string {
+func (m shellModel) inspectLines(width, height int) []string {
 	if height <= 0 {
 		return nil
 	}
@@ -79,7 +79,7 @@ func fitInspectLines(lines []string, width, height int) []string {
 	return lines
 }
 
-func (m mockShellModel) selectedInspectMessage() (twitch.ChatMessage, bool) {
+func (m shellModel) selectedInspectMessage() (twitch.ChatMessage, bool) {
 	selectedID := replyMessageID(m.activeChannelState().replyTo)
 	if strings.TrimSpace(selectedID) == "" {
 		return twitch.ChatMessage{}, false
@@ -87,7 +87,7 @@ func (m mockShellModel) selectedInspectMessage() (twitch.ChatMessage, bool) {
 	return m.messageByID(selectedID)
 }
 
-func (m mockShellModel) messageByID(id string) (twitch.ChatMessage, bool) {
+func (m shellModel) messageByID(id string) (twitch.ChatMessage, bool) {
 	active := m.activeChannelState()
 	for _, message := range active.messages {
 		if message.ID == id {

@@ -32,7 +32,7 @@ func TestLiveModelReadsEveryFeatureSetting(t *testing.T) {
 	cfg.Features.AnimationMode = "off"
 	cfg.Features.ScrollbackLimit = 321
 
-	live := newLiveShellModelWithClock("example", cfg, nil, nil)
+	live := newLiveModelWithClock("example", cfg, nil, nil)
 
 	checks := []struct {
 		field string
@@ -96,8 +96,8 @@ func TestMockAndLiveModelsAgreeOnConfigDerivedState(t *testing.T) {
 	cfg.Features.FullUsername = true
 	cfg.Features.AnimationMode = "off"
 
-	mock := newMockShellModelWithClock("example", cfg, nil)
-	live := newLiveShellModelWithClock("example", cfg, nil, nil)
+	mock := newMockModelWithClock("example", cfg, nil)
+	live := newLiveModelWithClock("example", cfg, nil, nil)
 
 	if mock.messageLayout != live.messageLayout {
 		t.Errorf("messageLayout: mock %v, live %v", mock.messageLayout, live.messageLayout)

@@ -12,7 +12,7 @@ import (
 // switchToTab activates tab, closing any open overlay so the new screen
 // isn't obscured, and kicks off that screen's data load the first time it's
 // opened. Switching to the already-active tab is a no-op.
-func (m mockShellModel) switchToTab(tab shellTab) (tea.Model, tea.Cmd) {
+func (m shellModel) switchToTab(tab shellTab) (tea.Model, tea.Cmd) {
 	if m.activeTab == tab {
 		return m, nil
 	}
@@ -34,7 +34,7 @@ func (m mockShellModel) switchToTab(tab shellTab) (tea.Model, tea.Cmd) {
 // login plus active chat aligned on the right when space permits. Built as
 // plain text and fit/padded with fitLine (like every other region) before a
 // single style wraps the whole line, since fitLine itself is not ANSI-aware.
-func (m mockShellModel) tabBarLine(width int) string {
+func (m shellModel) tabBarLine(width int) string {
 	username, channel := m.tabBarContextParts()
 	context := strings.Join(nonEmptyStrings(username, channel), "  ")
 	tabs := m.tabBarTabs(false)
@@ -69,7 +69,7 @@ func (m mockShellModel) tabBarLine(width int) string {
 	)
 }
 
-func (m mockShellModel) tabBarTabs(compact bool) string {
+func (m shellModel) tabBarTabs(compact bool) string {
 	parts := make([]string, 0, len(shellTabs))
 	for i, entry := range shellTabs {
 		marker := ""
@@ -92,7 +92,7 @@ func (m mockShellModel) tabBarTabs(compact bool) string {
 	return " " + strings.Join(parts, "  ")
 }
 
-func (m mockShellModel) activeTabLabel() string {
+func (m shellModel) activeTabLabel() string {
 	for i, entry := range shellTabs {
 		if entry.tab == m.activeTab {
 			return fmt.Sprintf(" *%d", i+1)
@@ -101,7 +101,7 @@ func (m mockShellModel) activeTabLabel() string {
 	return ""
 }
 
-func (m mockShellModel) tabBarContextParts() (string, string) {
+func (m shellModel) tabBarContextParts() (string, string) {
 	username := sanitizeTabBarValue(m.effectiveConfig.Twitch.Username)
 	if username != "" {
 		username = "@" + username

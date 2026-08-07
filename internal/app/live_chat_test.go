@@ -312,7 +312,7 @@ func TestAppDebugLogsSanitizeConnectionStateAndSendResult(t *testing.T) {
 			auth.NewSecret("explicit-send-secret"),
 		},
 	})
-	model := newLiveShellModelWithClockAndOptions("example", config.Default(), NewFakeChatClient(1), nil, ClientOptions{DebugLogger: logger})
+	model := newLiveModelWithClockAndOptions("example", config.Default(), NewFakeChatClient(1), nil, ClientOptions{DebugLogger: logger})
 
 	state := ConnectionState{
 		Status:  ConnectionFailed,
@@ -322,7 +322,7 @@ func TestAppDebugLogsSanitizeConnectionStateAndSendResult(t *testing.T) {
 		At:      time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC),
 	}
 	updated, _ := model.Update(chatClientConnectionStateMsg{state: state, ok: true})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	model.activeChannelState().activeSend = &queuedComposerSend{
 		ID:      1,
 		Channel: "example",
@@ -690,7 +690,7 @@ func TestLiveShellConsumesClientMessagesAndConnectionStates(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	client := NewFakeChatClient(1)
-	model := newLiveShellModelWithClock("example", cfg, client, nil)
+	model := newLiveModelWithClock("example", cfg, client, nil)
 
 	state := ConnectionState{
 		Status:  ConnectionReconnecting,
@@ -699,7 +699,7 @@ func TestLiveShellConsumesClientMessagesAndConnectionStates(t *testing.T) {
 		At:      time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC),
 	}
 	updated, _ := model.Update(chatClientConnectionStateMsg{state: state, ok: true})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if !strings.Contains(model.View(), "reconnecting") || !strings.Contains(model.View(), "Twitch requested reconnect") {
 		t.Fatalf("view missing reconnect state:\n%s", model.View())
 	}
@@ -714,7 +714,7 @@ func TestLiveShellConsumesClientMessagesAndConnectionStates(t *testing.T) {
 		Type:        twitch.MessageTypeChat,
 	}
 	updated, cmd := model.Update(chatClientMessageMsg{message: msg, ok: true})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("client message did not schedule next client read")
 	}
@@ -733,7 +733,7 @@ func TestLiveShellKeepsPerChannelHistoryStatusUnreadAndSwitching(t *testing.T) {
 	cfg.Features.AnimationMode = "off"
 	cfg.DefaultChannels = []string{"alpha", "beta"}
 	client := NewFakeChatClient(1)
-	model := newLiveShellModelWithClock("alpha", cfg, client, nil)
+	model := newLiveModelWithClock("alpha", cfg, client, nil)
 
 	alphaState := ConnectionState{
 		Status:  ConnectionConnected,
@@ -749,14 +749,14 @@ func TestLiveShellKeepsPerChannelHistoryStatusUnreadAndSwitching(t *testing.T) {
 	}
 	for _, state := range []ConnectionState{alphaState, betaState} {
 		updated, _ := model.Update(chatClientConnectionStateMsg{state: state, ok: true})
-		model = updated.(mockShellModel)
+		model = updated.(shellModel)
 	}
 
 	alphaMessage := mockIncomingMessage("alpha", "alpha-1", "alpha active history")
 	betaMessage := mockIncomingMessage("beta", "beta-1", "beta inactive history")
 	for _, msg := range []twitch.ChatMessage{alphaMessage, betaMessage} {
 		updated, _ := model.Update(chatClientMessageMsg{message: msg, ok: true})
-		model = updated.(mockShellModel)
+		model = updated.(shellModel)
 	}
 
 	alpha := model.channels.states[channelKey("alpha")]
@@ -790,7 +790,7 @@ func TestLiveShellKeepsPerChannelHistoryStatusUnreadAndSwitching(t *testing.T) {
 	}
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("channel switch returned command %#v, want nil without visible assets", cmd)
 	}
@@ -811,7 +811,7 @@ func TestLiveShellKeepsPerChannelHistoryStatusUnreadAndSwitching(t *testing.T) {
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got, want := model.activeChannelName(), "alpha"; got != want {
 		t.Fatalf("active channel after wrap = %q, want %q", got, want)
 	}
@@ -825,26 +825,26 @@ func TestLiveShellRoutesInactiveMessagesWithoutStealingFocusOrScroll(t *testing.
 	cfg.Features.AnimationMode = "off"
 	cfg.DefaultChannels = []string{"alpha", "beta"}
 	client := NewFakeChatClient(1)
-	model := newLiveShellModelWithClock("alpha", cfg, client, nil)
+	model := newLiveModelWithClock("alpha", cfg, client, nil)
 	alpha := model.channels.ensure("alpha")
 	beta := model.channels.ensure("beta")
 	alpha.messages = numberedMockMessages("alpha", 40)
 	alpha.scrollOffset = 3
-	model.focus = mockFocusComposer
+	model.focus = focusComposer
 	alpha.composerText = "active draft"
 
 	updated, cmd := model.Update(chatClientMessageMsg{
 		message: mockIncomingMessage("#beta", "beta-live-1", "beta stays inactive"),
 		ok:      true,
 	})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("client message did not schedule next client read")
 	}
 	if got, want := model.activeChannelName(), "alpha"; got != want {
 		t.Fatalf("active channel = %q, want %q", got, want)
 	}
-	if got, want := model.focus, mockFocusComposer; got != want {
+	if got, want := model.focus, focusComposer; got != want {
 		t.Fatalf("focus = %v, want composer", got)
 	}
 	if got, want := alpha.scrollOffset, 3; got != want {
@@ -875,7 +875,7 @@ func TestLiveShellAppliesGlobalConnectionEventsToConfiguredChannels(t *testing.T
 	cfg := config.Default()
 	cfg.DefaultChannels = []string{"alpha", "beta"}
 	client := NewFakeChatClient(1)
-	model := newLiveShellModelWithClock("alpha", cfg, client, nil)
+	model := newLiveModelWithClock("alpha", cfg, client, nil)
 
 	updated, _ := model.Update(chatClientConnectionStateMsg{
 		state: ConnectionState{
@@ -885,7 +885,7 @@ func TestLiveShellAppliesGlobalConnectionEventsToConfiguredChannels(t *testing.T
 		},
 		ok: true,
 	})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	for _, channel := range []string{"alpha", "beta"} {
 		state := model.channels.states[channelKey(channel)]

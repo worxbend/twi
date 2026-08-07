@@ -9,7 +9,7 @@ import (
 	"github.com/worxbend/twi/internal/theme"
 )
 
-func (m mockShellModel) gradientPhase(width int) int {
+func (m shellModel) gradientPhase(width int) int {
 	if width <= 0 || m.animationMode == string(animation.ModeOff) || m.lastFrameAt.IsZero() {
 		return 0
 	}
@@ -23,7 +23,7 @@ func (m mockShellModel) gradientPhase(width int) int {
 // gradientEndColor keeps decorative gradients visible when a colorful theme
 // intentionally reuses Accent for Success. Monochrome palettes remain solid
 // so their absence of hue is preserved rather than silently colorized.
-func (m mockShellModel) gradientEndColor() string {
+func (m shellModel) gradientEndColor() string {
 	if !strings.EqualFold(m.theme.Accent, m.theme.Success) {
 		return m.theme.Success
 	}

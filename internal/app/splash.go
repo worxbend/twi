@@ -29,14 +29,14 @@ var splashLogo = []string{
 // splashActive reports whether the animated startup splash should still cover
 // the normal dashboard. Any keypress sets splashSkipped so users are never
 // trapped waiting it out.
-func (m mockShellModel) splashActive() bool {
+func (m shellModel) splashActive() bool {
 	if m.splashUntil.IsZero() || m.splashSkipped {
 		return false
 	}
 	return time.Now().Before(m.splashUntil)
 }
 
-func (m mockShellModel) splashView() string {
+func (m shellModel) splashView() string {
 	return m.splashViewAt(time.Now())
 }
 
@@ -45,7 +45,7 @@ func (m mockShellModel) splashView() string {
 // in and the progress head moves through named initialization phases. Keeping
 // now explicit makes every animation state deterministic in tests while
 // splashView remains the production wall-clock adapter.
-func (m mockShellModel) splashViewAt(now time.Time) string {
+func (m shellModel) splashViewAt(now time.Time) string {
 	width := clampMin(m.width, 1)
 	height := clampMin(m.height, 1)
 	fraction := m.splashFraction(now)
@@ -126,7 +126,7 @@ func splashLinesForHeight(height int, logo []string, tagline, decorative, blank,
 // The step is set explicitly rather than taken from the effect default
 // because the tagline has to finish inside splashDuration in every animation
 // mode; a reduced-motion default would still be typing when the splash lifts.
-func (m mockShellModel) splashTaglineLine(contentWidth int, elapsed time.Duration, canvas string) string {
+func (m shellModel) splashTaglineLine(contentWidth int, elapsed time.Duration, canvas string) string {
 	cfg := m.textEffectConfig(animation.EffectTypewriter)
 	cfg.Bold = true
 	cfg.Step = splashTaglineStep(m.animationMode)
@@ -137,7 +137,7 @@ func (m mockShellModel) splashTaglineLine(contentWidth int, elapsed time.Duratio
 // splashDecorativeLine sweeps a highlight across the strapline while the
 // tagline types, so the boot sequence has motion on both lines without two
 // competing reveals.
-func (m mockShellModel) splashDecorativeLine(contentWidth int, elapsed time.Duration, canvas string) string {
+func (m shellModel) splashDecorativeLine(contentWidth int, elapsed time.Duration, canvas string) string {
 	cfg := m.textEffectConfig(animation.EffectShimmer)
 	cfg.Base = m.theme.Muted
 	frame := animatedText(revealDisplayCells(splashDecorativeText, contentWidth), cfg, elapsed, canvas)
@@ -152,14 +152,14 @@ func splashTaglineStep(animationMode string) time.Duration {
 }
 
 // splashElapsed returns how long the splash has been on screen at now.
-func (m mockShellModel) splashElapsed(now time.Time) time.Duration {
+func (m shellModel) splashElapsed(now time.Time) time.Duration {
 	if m.splashUntil.IsZero() {
 		return 0
 	}
 	return splashDuration - m.splashUntil.Sub(now)
 }
 
-func (m mockShellModel) splashFraction(now time.Time) float64 {
+func (m shellModel) splashFraction(now time.Time) float64 {
 	return clampFraction(float64(m.splashElapsed(now)) / float64(splashDuration))
 }
 

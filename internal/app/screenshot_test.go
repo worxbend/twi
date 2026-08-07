@@ -66,7 +66,7 @@ func screenshotScenes() []screenshotScene {
 
 // screenshotModel builds a deterministic, populated chat so every screenshot
 // shows the same conversation under different settings.
-func screenshotModel(t *testing.T, theme string, layout string, width, height int) mockShellModel {
+func screenshotModel(t *testing.T, theme string, layout string, width, height int) shellModel {
 	t.Helper()
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
@@ -75,7 +75,7 @@ func screenshotModel(t *testing.T, theme string, layout string, width, height in
 	cfg.Path = filepath.Join(t.TempDir(), "config.toml")
 	cfg.DefaultChannels = []string{"pixelforge", "synthwave", "codegolf"}
 
-	model := newMockShellModel("pixelforge", cfg)
+	model := newMockModel("pixelforge", cfg)
 	model.width, model.height = width, height
 	model.splashSkipped = true
 
@@ -143,7 +143,7 @@ func sceneInline(t *testing.T) string {
 
 func sceneMentions(t *testing.T) string {
 	model := screenshotModel(t, "catppuccin-mocha", "grouped", 132, 30)
-	model.focus = mockFocusComposer
+	model.focus = focusComposer
 	model.activeChannelState().composerText = "great point @nov"
 	return model.View()
 }

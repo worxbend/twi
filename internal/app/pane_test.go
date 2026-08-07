@@ -12,7 +12,7 @@ import (
 
 func TestRenderPanePreservesDimensionsAndAddsIconTitle(t *testing.T) {
 	forceColorProfile(t)
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	view := model.renderPane(paneSpec{
 		icon:          "💬",
 		title:         "Chat · #alpha",
@@ -42,7 +42,7 @@ func TestRenderPanePreservesDimensionsAndAddsIconTitle(t *testing.T) {
 
 func TestFocusedPaneChromeAnimatesFromSharedFrame(t *testing.T) {
 	forceColorProfile(t)
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	spec := paneSpec{icon: "💬", title: "Chat", width: 24, contentHeight: 1, accent: model.theme.Accent, focused: true}
 	model.lastFrameAt = time.UnixMilli(1600)
 	first := model.renderPane(spec)
@@ -60,7 +60,7 @@ func TestChatPaneChromeIsStaticAcrossSharedFrames(t *testing.T) {
 	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "fast"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 22
 	layout := model.layout()
 
@@ -74,7 +74,7 @@ func TestChatPaneChromeIsStaticAcrossSharedFrames(t *testing.T) {
 }
 
 func TestCanvasBackgroundIsDarkerThanThemeBackground(t *testing.T) {
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	if got := model.canvasBackground(); got == model.theme.Background {
 		t.Fatalf("canvas background = pane base %q, want a darker derived color", got)
 	}
@@ -82,7 +82,7 @@ func TestCanvasBackgroundIsDarkerThanThemeBackground(t *testing.T) {
 
 func TestPaneTitleLinePreservesResponsiveWidth(t *testing.T) {
 	forceColorProfile(t)
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	for width := 1; width <= 60; width++ {
 		for _, focused := range []bool{false, true} {
 			line := model.paneTitleLine(width, "🎮", "A deliberately long Unicode title · #δοκιμή", model.theme.Accent, model.theme.Success, focused)

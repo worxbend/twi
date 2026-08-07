@@ -25,7 +25,7 @@ type emoteIndexResolvedMsg struct {
 // (which Twitch Helix keys by broadcaster ID, not login) needs no separate
 // credential plumbing. A missing/failed lookup just means emote search falls
 // back to global emotes only.
-func (m *mockShellModel) scheduleBroadcasterIDLookup() tea.Cmd {
+func (m *shellModel) scheduleBroadcasterIDLookup() tea.Cmd {
 	if m.userLookup == nil {
 		return nil
 	}
@@ -52,7 +52,7 @@ func (m *mockShellModel) scheduleBroadcasterIDLookup() tea.Cmd {
 	}
 }
 
-func (m *mockShellModel) applyBroadcasterIDResult(msg broadcasterIDResolvedMsg) {
+func (m *shellModel) applyBroadcasterIDResult(msg broadcasterIDResolvedMsg) {
 	if msg.userID == "" {
 		return
 	}
@@ -65,7 +65,7 @@ func (m *mockShellModel) applyBroadcasterIDResult(msg broadcasterIDResolvedMsg) 
 // (global + channel-specific) once per channel; the EmoteIndex itself
 // handles TTL-based refresh, so this only needs to guard against re-issuing
 // a redundant in-flight request for a channel already resolved this session.
-func (m *mockShellModel) scheduleEmoteIndexLookup() tea.Cmd {
+func (m *shellModel) scheduleEmoteIndexLookup() tea.Cmd {
 	if m.emoteIndex == nil {
 		return nil
 	}
@@ -89,7 +89,7 @@ func (m *mockShellModel) scheduleEmoteIndexLookup() tea.Cmd {
 	}
 }
 
-func (m *mockShellModel) applyEmoteIndexResult(msg emoteIndexResolvedMsg) {
+func (m *shellModel) applyEmoteIndexResult(msg emoteIndexResolvedMsg) {
 	if msg.err != nil {
 		delete(m.emoteEntriesRequested, msg.channel)
 		return
@@ -139,7 +139,7 @@ func emoteIndexByName(entries []assets.EmoteEntry, name string, fallback int) in
 // channel. Terminal-native emoji remain available before Twitch emotes resolve
 // or when that lookup is disabled; resolved entries are merged without
 // duplicates and retain their provider ordering.
-func (m mockShellModel) activeEmoteEntries() []assets.EmoteEntry {
+func (m shellModel) activeEmoteEntries() []assets.EmoteEntry {
 	resolved := m.emoteEntries[channelKey(m.activeChannelName())]
 	entries := make([]assets.EmoteEntry, 0, len(resolved)+10)
 	seen := make(map[string]bool, len(resolved)+10)

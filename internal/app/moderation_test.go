@@ -11,13 +11,13 @@ import (
 	"github.com/worxbend/twi/internal/twitch"
 )
 
-func moderationTestModel(t *testing.T) mockShellModel {
+func moderationTestModel(t *testing.T) shellModel {
 	t.Helper()
 	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
-	model := newMockShellModelWithClock("example", cfg, clock)
+	model := newMockModelWithClock("example", cfg, clock)
 
 	state := model.activeChannelState()
 	state.messages = []twitch.ChatMessage{
@@ -147,7 +147,7 @@ func TestModerationTargetsNamedChannelNotActive(t *testing.T) {
 	cfg.Features.AnimationMode = "off"
 	cfg.DefaultChannels = []string{"example", "other"}
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
-	model := newMockShellModelWithClock("example", cfg, clock)
+	model := newMockModelWithClock("example", cfg, clock)
 
 	active := model.channels.ensure("example")
 	active.messages = []twitch.ChatMessage{

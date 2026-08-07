@@ -25,7 +25,7 @@ func TestGradientEndpointStaysDistinctForColorPresets(t *testing.T) {
 		if !ok {
 			t.Fatalf("theme.ResolvePalette(%q) was not found", name)
 		}
-		model := mockShellModel{theme: palette}
+		model := shellModel{theme: palette}
 		if strings.EqualFold(model.theme.Accent, model.gradientEndColor()) {
 			t.Fatalf("%s gradient endpoint = accent %q, want a distinct theme color", name, model.theme.Accent)
 		}
@@ -35,7 +35,7 @@ func TestGradientEndpointStaysDistinctForColorPresets(t *testing.T) {
 	if !ok {
 		t.Fatal("theme.ResolvePalette(\"mono\") was not found")
 	}
-	model := mockShellModel{theme: mono}
+	model := shellModel{theme: mono}
 	if !strings.EqualFold(model.theme.Accent, model.gradientEndColor()) {
 		t.Fatalf("mono gradient endpoint = %q, want solid accent %q", model.gradientEndColor(), model.theme.Accent)
 	}
@@ -43,7 +43,7 @@ func TestGradientEndpointStaysDistinctForColorPresets(t *testing.T) {
 
 func TestSplashViewHasAnimatedLogoAndNamedBootPhases(t *testing.T) {
 	cfg := config.Default()
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 22
 	started := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	model.splashUntil = started.Add(splashDuration)
@@ -62,7 +62,7 @@ func TestSplashViewHasAnimatedLogoAndNamedBootPhases(t *testing.T) {
 }
 
 func TestSplashViewRemainsResponsiveOnCompactTerminal(t *testing.T) {
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 30, 8
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	model.splashUntil = now.Add(splashDuration)
@@ -79,7 +79,7 @@ func TestSplashViewRemainsResponsiveOnCompactTerminal(t *testing.T) {
 }
 
 func TestSplashViewFitsVeryShortTerminals(t *testing.T) {
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	model.splashUntil = now.Add(splashDuration)
 
@@ -98,7 +98,7 @@ func TestSplashViewFitsVeryShortTerminals(t *testing.T) {
 }
 
 func TestChatRowsUseMessageRailsMailIconsAndEmoji(t *testing.T) {
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 88, 22
 	rows := strings.Join(model.chatRows(model.layout()), "\n")
 	for _, want := range []string{"│ ✉ ", "✨", "💜", "👀", "🔔"} {
@@ -110,7 +110,7 @@ func TestChatRowsUseMessageRailsMailIconsAndEmoji(t *testing.T) {
 
 func TestAnimatingMessageRailChangesWithSharedFrame(t *testing.T) {
 	forceColorProfile(t)
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	block := chatRowBlock{animating: true}
 	row := render.Row{Fragments: []render.Fragment{{Kind: render.FragmentText, Text: "hello"}}}
 	model.lastFrameAt = time.UnixMilli(1600)

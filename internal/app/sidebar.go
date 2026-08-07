@@ -19,11 +19,11 @@ const (
 // toggleSidebar flips the sidebar between shown and hidden, starting from
 // whatever the current layout actually shows, so the first press always does
 // the visible thing regardless of what auto had decided.
-func (m *mockShellModel) toggleSidebar() {
+func (m *shellModel) toggleSidebar() {
 	if m.layout().sidebarWidth > 0 {
 		m.sidebarVisibility = sidebarHidden
-		if m.focus == mockFocusSidebar {
-			m.focus = mockFocusChat
+		if m.focus == focusSidebar {
+			m.focus = focusChat
 		}
 		return
 	}
@@ -34,7 +34,7 @@ func (m *mockShellModel) toggleSidebar() {
 // sidebarVisibleFor decides whether the channel sidebar has room and reason
 // to be drawn. Width and chat height are hard constraints in every mode: a
 // sidebar that would leave no usable chat column helps nobody.
-func (m mockShellModel) sidebarVisibleFor(width, chatHeight int) bool {
+func (m shellModel) sidebarVisibleFor(width, chatHeight int) bool {
 	if width < sidebarMinWidth || chatHeight < 3 {
 		return false
 	}
@@ -50,7 +50,7 @@ func (m mockShellModel) sidebarVisibleFor(width, chatHeight int) bool {
 
 // clampSidebarSelection keeps the highlighted sidebar row inside the open
 // channel list as channels are opened and closed.
-func (m *mockShellModel) clampSidebarSelection() {
+func (m *shellModel) clampSidebarSelection() {
 	names := m.channels.channelNames()
 	if len(names) == 0 {
 		m.sidebarSelected = 0
@@ -64,7 +64,7 @@ func (m *mockShellModel) clampSidebarSelection() {
 	}
 }
 
-func (m *mockShellModel) moveSidebarSelection(delta int) {
+func (m *shellModel) moveSidebarSelection(delta int) {
 	names := m.channels.channelNames()
 	if len(names) == 0 {
 		m.sidebarSelected = 0
@@ -79,7 +79,7 @@ func (m *mockShellModel) moveSidebarSelection(delta int) {
 	}
 }
 
-func (m mockShellModel) selectedSidebarChannel() string {
+func (m shellModel) selectedSidebarChannel() string {
 	names := m.channels.channelNames()
 	if len(names) == 0 {
 		return ""
@@ -93,7 +93,7 @@ func (m mockShellModel) selectedSidebarChannel() string {
 
 // handleSidebarKey implements the sidebar's vim-style navigation: j/k move,
 // enter/l switch, x/d close, esc/h leave for the chat pane.
-func (m mockShellModel) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+func (m shellModel) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	switch msg.Type {
 	case tea.KeyUp:
 		m.moveSidebarSelection(-1)
@@ -102,7 +102,7 @@ func (m mockShellModel) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bo
 		m.moveSidebarSelection(1)
 		return m, nil, true
 	case tea.KeyEsc, tea.KeyLeft:
-		m.focus = mockFocusChat
+		m.focus = focusChat
 		return m, nil, true
 	case tea.KeyEnter, tea.KeyRight:
 		model, cmd := m.switchToSelectedSidebarChannel()
@@ -125,7 +125,7 @@ func (m mockShellModel) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bo
 			model, cmd := m.switchToSelectedSidebarChannel()
 			return model, cmd, true
 		case 'h':
-			m.focus = mockFocusChat
+			m.focus = focusChat
 			return m, nil, true
 		case 'x', 'd':
 			model, cmd := m.closeChannel(m.selectedSidebarChannel())
@@ -134,14 +134,14 @@ func (m mockShellModel) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bo
 		// i/o/a mean "start typing" everywhere outside the composer, the
 		// sidebar included.
 		if isInsertRune(msg.Runes[0]) {
-			m.focus = mockFocusComposer
+			m.focus = focusComposer
 			return m, nil, true
 		}
 	}
 	return m, nil, false
 }
 
-func (m mockShellModel) switchToSelectedSidebarChannel() (tea.Model, tea.Cmd) {
+func (m shellModel) switchToSelectedSidebarChannel() (tea.Model, tea.Cmd) {
 	channel := m.selectedSidebarChannel()
 	if channel == "" {
 		return m, nil
@@ -156,7 +156,7 @@ func (m mockShellModel) switchToSelectedSidebarChannel() (tea.Model, tea.Cmd) {
 // syncSidebarSelectionToActive lines the highlight up with the channel the
 // chat pane is showing, so entering the sidebar starts from where the user
 // already is.
-func (m *mockShellModel) syncSidebarSelectionToActive() {
+func (m *shellModel) syncSidebarSelectionToActive() {
 	names := m.channels.channelNames()
 	active := m.channels.activeName()
 	for i, name := range names {

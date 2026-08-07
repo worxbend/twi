@@ -32,7 +32,7 @@ type streamStatusResolvedMsg struct {
 // configured channel every streamStatusPollInterval. Polling is disabled
 // (StreamStatusResolver is nil) without live credentials or when
 // stream_status_mode is "off".
-func (m *mockShellModel) scheduleStreamStatusTick() tea.Cmd {
+func (m *shellModel) scheduleStreamStatusTick() tea.Cmd {
 	if m.streamStatusResolver == nil || m.streamStatusTickScheduled {
 		return nil
 	}
@@ -42,7 +42,7 @@ func (m *mockShellModel) scheduleStreamStatusTick() tea.Cmd {
 	})
 }
 
-func (m mockShellModel) resolveStreamStatusCommand() tea.Cmd {
+func (m shellModel) resolveStreamStatusCommand() tea.Cmd {
 	resolver := m.streamStatusResolver
 	if resolver == nil {
 		return nil
@@ -61,7 +61,7 @@ func (m mockShellModel) resolveStreamStatusCommand() tea.Cmd {
 // same convention applyNewFollowerActivity uses, so twi doesn't log a
 // misleading "went live" for a stream that was already live before twi
 // started.
-func (m *mockShellModel) applyStreamStatusResults(results []twitch.StreamInfo) {
+func (m *shellModel) applyStreamStatusResults(results []twitch.StreamInfo) {
 	for _, result := range results {
 		state := m.channels.ensure(result.UserLogin)
 		if state == nil {
@@ -94,7 +94,7 @@ func (m *mockShellModel) applyStreamStatusResults(results []twitch.StreamInfo) {
 // bitrate" status-bar figure. Twitch does not expose stream ingest/encode
 // bitrate through any public API, so this reports actual chat-message
 // throughput instead of implying a stream encode bitrate.
-func (m *mockShellModel) recordChatBytes(message twitch.ChatMessage) {
+func (m *shellModel) recordChatBytes(message twitch.ChatMessage) {
 	m.chatByteSamples = append(m.chatByteSamples, chatByteSample{
 		at:    time.Now(),
 		bytes: len(message.Text),
@@ -107,7 +107,7 @@ func (m *mockShellModel) recordChatBytes(message twitch.ChatMessage) {
 // state instead of reading live, ever-changing runtime stats mid-render.
 // Unavailable on platforms without sampleProcessCPUTime support (see
 // status_metrics_unix.go / status_metrics_other.go).
-func (m *mockShellModel) sampleResourceUsage(now time.Time) {
+func (m *shellModel) sampleResourceUsage(now time.Time) {
 	cpuTime, ok := sampleProcessCPUTime()
 	if !ok {
 		m.cpuAvailable = false
@@ -129,7 +129,7 @@ func (m *mockShellModel) sampleResourceUsage(now time.Time) {
 }
 
 // trimChatByteSamples drops samples outside the rolling bitrate window.
-func (m *mockShellModel) trimChatByteSamples(now time.Time) {
+func (m *shellModel) trimChatByteSamples(now time.Time) {
 	cutoff := now.Add(-chatBitrateWindow)
 	trimmed := m.chatByteSamples[:0]
 	for _, sample := range m.chatByteSamples {
@@ -141,7 +141,7 @@ func (m *mockShellModel) trimChatByteSamples(now time.Time) {
 }
 
 // chatBitrateBps returns the rolling-window chat-message byte throughput.
-func (m mockShellModel) chatBitrateBps() float64 {
+func (m shellModel) chatBitrateBps() float64 {
 	if len(m.chatByteSamples) == 0 {
 		return 0
 	}
@@ -154,7 +154,7 @@ func (m mockShellModel) chatBitrateBps() float64 {
 
 // fps returns the shared animation clock's achieved frame rate over the last
 // second (see advanceFrame's frameTimestamps bookkeeping).
-func (m mockShellModel) fps() float64 {
+func (m shellModel) fps() float64 {
 	return float64(len(m.frameTimestamps))
 }
 
@@ -164,7 +164,7 @@ func (m mockShellModel) fps() float64 {
 // animation clock's first tick (animation disabled, or no Update() cycle has
 // run yet), in which case elapsed/pulse render as static, deterministic
 // values instead of reading the wall clock directly from View().
-func (m mockShellModel) formatStatusMetrics(now time.Time, debugRecording bool) string {
+func (m shellModel) formatStatusMetrics(now time.Time, debugRecording bool) string {
 	active := m.activeChannelState()
 	pulse := now.IsZero() || (now.UnixMilli()/500)%2 == 0
 
@@ -200,13 +200,13 @@ func (m mockShellModel) formatStatusMetrics(now time.Time, debugRecording bool) 
 // wall clock: View() must stay a pure function of already-ticked model
 // state, matching how the rest of the app (chat reveal, scene flash) is
 // tested with an injectable clock rather than free-floating real time.
-func (m mockShellModel) metricsNow() time.Time {
+func (m shellModel) metricsNow() time.Time {
 	return m.lastFrameAt
 }
 
 // compactStatusMetrics renders just the LIVE/OFFLINE badge and elapsed time
 // for narrower terminals that don't have room for the full metrics line.
-func (m mockShellModel) compactStatusMetrics(now time.Time) string {
+func (m shellModel) compactStatusMetrics(now time.Time) string {
 	active := m.activeChannelState()
 	pulse := now.IsZero() || (now.UnixMilli()/500)%2 == 0
 	if !active.live {

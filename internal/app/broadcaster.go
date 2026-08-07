@@ -11,7 +11,7 @@ import (
 // resolveSelfBroadcasterID looks up the logged-in user's own Twitch user ID
 // by login, the broadcaster_id every Stream Info and Misc tab Helix call
 // needs. Shared so both tabs reuse one lookup instead of resolving (and
-// caching, via mockShellModel.selfBroadcasterID) the ID twice.
+// caching, via shellModel.selfBroadcasterID) the ID twice.
 func resolveSelfBroadcasterID(ctx context.Context, userLookup twitch.UserLookup, username string) (string, error) {
 	username = strings.TrimSpace(username)
 	if userLookup == nil || username == "" {

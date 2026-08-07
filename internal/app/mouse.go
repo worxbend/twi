@@ -11,7 +11,7 @@ import (
 // tabAtMouse resolves which tab-bar entry sits under the cursor by rebuilding
 // the same label run tabBarTabs renders, so the hit boxes cannot drift from
 // what is drawn.
-func (m mockShellModel) tabAtMouse(event tea.MouseEvent, layout mockShellLayout) (shellTab, bool) {
+func (m shellModel) tabAtMouse(event tea.MouseEvent, layout shellLayout) (shellTab, bool) {
 	if layout.tabBarHeight <= 0 || event.Y != 0 {
 		return 0, false
 	}
@@ -43,7 +43,7 @@ func (m mockShellModel) tabAtMouse(event tea.MouseEvent, layout mockShellLayout)
 // whether the click landed on that row's close affordance rather than its
 // name. The affordance is only drawn on the focused, highlighted row, so a
 // click can only close what the user can see is closable.
-func (m mockShellModel) sidebarRowAtMouse(event tea.MouseEvent, layout mockShellLayout) (index int, closeHit bool, ok bool) {
+func (m shellModel) sidebarRowAtMouse(event tea.MouseEvent, layout shellLayout) (index int, closeHit bool, ok bool) {
 	if layout.sidebarWidth <= 0 || event.X < 0 || event.X >= layout.sidebarWidth {
 		return 0, false, false
 	}
@@ -58,7 +58,7 @@ func (m mockShellModel) sidebarRowAtMouse(event tea.MouseEvent, layout mockShell
 	// The affordance occupies the last two content cells of the row, inside
 	// the pane border.
 	closeStart := layout.sidebarWidth - 1 - uniseg.StringWidth(sidebarCloseAffordance)
-	focused := m.focus == mockFocusSidebar && !m.anyOverlayOpen()
+	focused := m.focus == focusSidebar && !m.anyOverlayOpen()
 	closeHit = focused && index == m.sidebarSelected && event.X >= closeStart
 	return index, closeHit, true
 }
@@ -86,14 +86,14 @@ func overlayRowAtMouse(event tea.MouseEvent, top, height, contentHeight int, fra
 // overlayTop returns the first screen row of the bottom overlay stack. Only
 // one overlay is ever open at a time (closeOtherOverlays enforces it), so
 // they all start directly below the chat pane.
-func (m mockShellModel) overlayTop(layout mockShellLayout) int {
+func (m shellModel) overlayTop(layout shellLayout) int {
 	return layout.tabBarHeight + layout.statusHeight + layout.chatHeight
 }
 
 // handleOverlayMouse routes a click inside an open bottom overlay to that
 // overlay's selection, then runs it - matching the keyboard flow where
 // moving the selection and pressing enter are one gesture with a mouse.
-func (m mockShellModel) handleOverlayMouse(event tea.MouseEvent, layout mockShellLayout) (tea.Model, tea.Cmd, bool) {
+func (m shellModel) handleOverlayMouse(event tea.MouseEvent, layout shellLayout) (tea.Model, tea.Cmd, bool) {
 	top := m.overlayTop(layout)
 	switch {
 	case m.palette.open && layout.paletteHeight > 0:

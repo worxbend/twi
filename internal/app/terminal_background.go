@@ -22,7 +22,7 @@ import (
 //
 // Returns "" outside an interactive session (terminalOutput is only set by
 // RunMockWithOptions/RunClientWithOptions) so piped/test output stays clean.
-func (m mockShellModel) themeBackgroundSequence() string {
+func (m shellModel) themeBackgroundSequence() string {
 	canvas := m.canvasBackground()
 	if m.terminalOutput == nil || strings.TrimSpace(canvas) == "" {
 		return ""

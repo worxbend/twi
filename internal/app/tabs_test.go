@@ -12,7 +12,7 @@ func TestTabBarShowsConfiguredUsernameAndActiveChat(t *testing.T) {
 	cfg := config.Default()
 	cfg.Twitch.Username = "viewer"
 	cfg.DefaultChannels = []string{"alpha", "beta"}
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 
 	line := model.tabBarLine(88)
 	if !strings.Contains(line, "@viewer  #alpha") {
@@ -27,7 +27,7 @@ func TestTabBarShowsConfiguredUsernameAndActiveChat(t *testing.T) {
 }
 
 func TestTabBarShowsChatWithoutConfiguredUsername(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 
 	line := model.tabBarLine(88)
 	if !strings.Contains(line, "#example") {
@@ -41,7 +41,7 @@ func TestTabBarShowsChatWithoutConfiguredUsername(t *testing.T) {
 func TestTabBarKeepsExactWidthAndUnicodeContextAtNarrowWidth(t *testing.T) {
 	cfg := config.Default()
 	cfg.Twitch.Username = "視聴者"
-	model := newMockShellModel("配信", cfg)
+	model := newMockModel("配信", cfg)
 
 	const width = 36
 	line := model.tabBarLine(width)
@@ -61,7 +61,7 @@ func TestTabBarKeepsExactWidthAndUnicodeContextAtNarrowWidth(t *testing.T) {
 func TestTabBarPrioritizesActiveChatAtVeryNarrowWidths(t *testing.T) {
 	cfg := config.Default()
 	cfg.Twitch.Username = "long_viewer_name"
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 
 	line := model.tabBarLine(15)
 	if !strings.Contains(line, "*1") || !strings.Contains(line, "#example") {
@@ -75,7 +75,7 @@ func TestTabBarPrioritizesActiveChatAtVeryNarrowWidths(t *testing.T) {
 func TestTabBarContextSanitizesTerminalControlCharacters(t *testing.T) {
 	cfg := config.Default()
 	cfg.Twitch.Username = "view\x1b[31mer\nname"
-	model := newMockShellModel("room\r\nname", cfg)
+	model := newMockModel("room\r\nname", cfg)
 
 	username, channel := model.tabBarContextParts()
 	context := username + channel

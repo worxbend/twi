@@ -100,7 +100,7 @@ func TestStatusLineShowsDroppedMessages(t *testing.T) {
 	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
-	model := newMockShellModelWithClock("example", cfg, &appFakeClock{now: time.Now()})
+	model := newMockModelWithClock("example", cfg, &appFakeClock{now: time.Now()})
 	model.client = &fakeDropCounter{dropped: 143}
 
 	status := ansi.Strip(model.statusLine(120))
@@ -113,7 +113,7 @@ func TestStatusLineOmitsDropCounterWhenNothingDropped(t *testing.T) {
 	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
-	model := newMockShellModelWithClock("example", cfg, &appFakeClock{now: time.Now()})
+	model := newMockModelWithClock("example", cfg, &appFakeClock{now: time.Now()})
 	model.client = &fakeDropCounter{dropped: 0}
 
 	if status := ansi.Strip(model.statusLine(120)); strings.Contains(status, "dropped=") {
@@ -127,7 +127,7 @@ func TestStatusLineHandlesSourcesThatCannotDrop(t *testing.T) {
 	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
-	model := newMockShellModelWithClock("example", cfg, &appFakeClock{now: time.Now()})
+	model := newMockModelWithClock("example", cfg, &appFakeClock{now: time.Now()})
 
 	if got := model.droppedMessageCount(); got != 0 {
 		t.Fatalf("droppedMessageCount = %d for a source with no counter, want 0", got)

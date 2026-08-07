@@ -9,7 +9,7 @@ import (
 )
 
 func TestRecordActivityFromMessageClassifiesRaidsAndSubs(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 
 	model.recordActivityFromMessage(twitch.ChatMessage{
 		Channel:       "example",
@@ -40,7 +40,7 @@ func TestRecordActivityFromMessageClassifiesRaidsAndSubs(t *testing.T) {
 }
 
 func TestRecordActivityFromMessageClassifiesCheers(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 
 	model.recordActivityFromMessage(twitch.ChatMessage{
 		Channel:     "example",
@@ -66,7 +66,7 @@ func TestRecordActivityFromMessageClassifiesCheers(t *testing.T) {
 }
 
 func TestRecordActivityFromMessageCheerUsesSingularBit(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 	model.recordActivityFromMessage(twitch.ChatMessage{Channel: "example", Type: twitch.MessageTypeChat, DisplayName: "Cheerer", Bits: 1})
 	if len(model.activityLog) != 1 || model.activityLog[0].Text != "Cheerer cheered 1 bit" {
 		t.Fatalf("activityLog = %#v, want singular \"1 bit\"", model.activityLog)
@@ -74,7 +74,7 @@ func TestRecordActivityFromMessageCheerUsesSingularBit(t *testing.T) {
 }
 
 func TestApplyNewFollowerActivityEstablishesBaselineSilently(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 	model.applyNewFollowerActivity([]twitch.Follower{
 		{UserID: "1", UserName: "First"},
 		{UserID: "2", UserName: "Second"},
@@ -88,7 +88,7 @@ func TestApplyNewFollowerActivityEstablishesBaselineSilently(t *testing.T) {
 }
 
 func TestApplyNewFollowerActivityDetectsNewFollowersAfterBaseline(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 	model.applyNewFollowerActivity([]twitch.Follower{{UserID: "1", UserName: "First"}})
 
 	model.applyNewFollowerActivity([]twitch.Follower{
@@ -113,7 +113,7 @@ func TestApplyNewFollowerActivityDetectsNewFollowersAfterBaseline(t *testing.T) 
 }
 
 func TestAppendActivityBoundsLogSize(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 	for i := 0; i < maxActivityEntries+10; i++ {
 		model.appendActivity(activityEntry{Kind: activityIRCEvent, Text: "entry"})
 	}

@@ -45,9 +45,9 @@ type miscMarkerCreatedMsg struct {
 
 // scheduleMiscLoad fetches the logged-in broadcaster's stream markers the
 // first time the Misc tab opens (or after a failed load), reusing the
-// already-resolved broadcaster ID from mockShellModel.selfBroadcasterID
+// already-resolved broadcaster ID from shellModel.selfBroadcasterID
 // when Stream Info already resolved it.
-func (m *mockShellModel) scheduleMiscLoad() tea.Cmd {
+func (m *shellModel) scheduleMiscLoad() tea.Cmd {
 	if m.markerManager == nil {
 		m.misc.loadErr = "Misc requires Twitch API credentials (client ID + OAuth token); run `twi login`."
 		return nil
@@ -84,7 +84,7 @@ func (m *mockShellModel) scheduleMiscLoad() tea.Cmd {
 	}
 }
 
-func (m mockShellModel) applyMiscLoaded(msg miscMarkersLoadedMsg) mockShellModel {
+func (m shellModel) applyMiscLoaded(msg miscMarkersLoadedMsg) shellModel {
 	m.misc.loading = false
 	if msg.broadcasterID != "" {
 		m.selfBroadcasterID = msg.broadcasterID
@@ -105,7 +105,7 @@ func (m mockShellModel) applyMiscLoaded(msg miscMarkersLoadedMsg) mockShellModel
 // scheduleCreateMarker marks the current moment in the broadcaster's active
 // stream with an optional description. Twitch rejects this when the
 // broadcaster isn't currently live; that error surfaces as-is in createErr.
-func (m *mockShellModel) scheduleCreateMarker(description string) tea.Cmd {
+func (m *shellModel) scheduleCreateMarker(description string) tea.Cmd {
 	if m.markerManager == nil || m.misc.creating {
 		return nil
 	}
@@ -138,7 +138,7 @@ func (m *mockShellModel) scheduleCreateMarker(description string) tea.Cmd {
 	}
 }
 
-func (m mockShellModel) applyMiscMarkerCreated(msg miscMarkerCreatedMsg) mockShellModel {
+func (m shellModel) applyMiscMarkerCreated(msg miscMarkerCreatedMsg) shellModel {
 	m.misc.creating = false
 	if msg.err != nil {
 		m.misc.createErr = miscErrorMessage(msg.err)
@@ -169,7 +169,7 @@ func miscErrorMessage(err error) string {
 	}
 }
 
-func (m mockShellModel) handleMiscKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m shellModel) handleMiscKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.misc.editing {
 		switch msg.Type {
 		case tea.KeyEsc:
@@ -213,7 +213,7 @@ func (m mockShellModel) handleMiscKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *mockShellModel) moveMiscSelection(delta int) {
+func (m *shellModel) moveMiscSelection(delta int) {
 	if len(m.misc.markers) == 0 {
 		m.misc.selected = 0
 		return
@@ -227,7 +227,7 @@ func (m *mockShellModel) moveMiscSelection(delta int) {
 	}
 }
 
-func (m mockShellModel) miscView(layout mockShellLayout) string {
+func (m shellModel) miscView(layout shellLayout) string {
 	contentWidth := layout.width
 	if layout.miscFramed {
 		contentWidth = clampMin(layout.width-4, 1)
@@ -249,7 +249,7 @@ func (m mockShellModel) miscView(layout mockShellLayout) string {
 	})
 }
 
-func (m mockShellModel) miscLines(width, height int) []string {
+func (m shellModel) miscLines(width, height int) []string {
 	if height <= 0 {
 		return nil
 	}
@@ -282,7 +282,7 @@ func (m mockShellModel) miscLines(width, height int) []string {
 	return out
 }
 
-func (m mockShellModel) miscMarkerLines(width int) []string {
+func (m shellModel) miscMarkerLines(width int) []string {
 	var header string
 	switch {
 	case m.misc.editing:

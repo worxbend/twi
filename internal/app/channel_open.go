@@ -12,7 +12,7 @@ import (
 // (the mock source, or one that is momentarily disconnected) is not an
 // error: the channel is still tracked locally and the next reconnect picks
 // it up, so opening never fails in a way the user has to recover from.
-func (m mockShellModel) openChannel(channel string) (tea.Model, tea.Cmd) {
+func (m shellModel) openChannel(channel string) (tea.Model, tea.Cmd) {
 	name := normalizeChannelName(channel)
 	if name == "" {
 		return m, nil
@@ -36,7 +36,7 @@ func (m mockShellModel) openChannel(channel string) (tea.Model, tea.Cmd) {
 // closeChannel leaves a channel and drops its buffered messages. Closing the
 // last open channel is allowed and lands on the empty state rather than
 // quitting: the session still has a connection, a composer, and a picker.
-func (m mockShellModel) closeChannel(channel string) (tea.Model, tea.Cmd) {
+func (m shellModel) closeChannel(channel string) (tea.Model, tea.Cmd) {
 	name := normalizeChannelName(channel)
 	if name == "" || !m.channelIsOpen(name) {
 		return m, nil
@@ -55,7 +55,7 @@ func (m mockShellModel) closeChannel(channel string) (tea.Model, tea.Cmd) {
 	return m.withAsyncAssetCommands(nil)
 }
 
-func (m mockShellModel) channelIsOpen(channel string) bool {
+func (m shellModel) channelIsOpen(channel string) bool {
 	if m.channels == nil {
 		return false
 	}
@@ -63,7 +63,7 @@ func (m mockShellModel) channelIsOpen(channel string) bool {
 	return ok
 }
 
-func (m mockShellModel) joinChannelOnTransport(channel string) {
+func (m shellModel) joinChannelOnTransport(channel string) {
 	joiner, ok := m.client.(ChannelJoiner)
 	if !ok {
 		return
@@ -73,7 +73,7 @@ func (m mockShellModel) joinChannelOnTransport(channel string) {
 	}
 }
 
-func (m mockShellModel) partChannelOnTransport(channel string) {
+func (m shellModel) partChannelOnTransport(channel string) {
 	joiner, ok := m.client.(ChannelJoiner)
 	if !ok {
 		return

@@ -65,7 +65,7 @@ type reconnectingChatClient interface {
 	Reconnect(context.Context) error
 }
 
-func (m *mockShellModel) toggleCommandPalette() {
+func (m *shellModel) toggleCommandPalette() {
 	if m.palette.open {
 		m.palette = commandPaletteState{}
 		return
@@ -79,7 +79,7 @@ func (m *mockShellModel) toggleCommandPalette() {
 // whenever the visible result lines change (query edits, selection moves,
 // resize) and advances it when the content is unchanged. Reuses the same
 // internal/animation Sequence machinery that reveals chat rows.
-func (m *mockShellModel) refreshPaletteReveal(now time.Time) {
+func (m *shellModel) refreshPaletteReveal(now time.Time) {
 	if !m.palette.open || m.animationMode == string(animation.ModeOff) {
 		m.paletteRevealSeq = animation.Sequence{}
 		m.paletteRevealKey = ""
@@ -100,7 +100,7 @@ func (m *mockShellModel) refreshPaletteReveal(now time.Time) {
 		return
 	}
 	m.paletteRevealKey = key
-	m.paletteRevealSeq = animation.NewSequence(paletteLinesToRows(lines), mockAnimationConfig(m.animationMode), now)
+	m.paletteRevealSeq = animation.NewSequence(paletteLinesToRows(lines), animationConfigFor(m.animationMode), now)
 }
 
 func paletteLinesToRows(lines []string) []render.Row {
@@ -119,7 +119,7 @@ func paletteLinesToRows(lines []string) []render.Row {
 // current content; otherwise it falls back to the fully rendered lines
 // (animation off, or a resize/content change the reveal hasn't caught up to
 // yet, which self-heals on the next tick).
-func (m mockShellModel) paletteRevealedLines(lines []string, width int) []string {
+func (m shellModel) paletteRevealedLines(lines []string, width int) []string {
 	if m.animationMode == string(animation.ModeOff) {
 		return lines
 	}
@@ -134,7 +134,7 @@ func (m mockShellModel) paletteRevealedLines(lines []string, width int) []string
 	return out
 }
 
-func (m mockShellModel) handleCommandPaletteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m shellModel) handleCommandPaletteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
 		m.palette = commandPaletteState{}
@@ -162,7 +162,7 @@ func (m mockShellModel) handleCommandPaletteKey(msg tea.KeyMsg) (tea.Model, tea.
 	return m, nil
 }
 
-func (m *mockShellModel) movePaletteSelection(delta int) {
+func (m *shellModel) movePaletteSelection(delta int) {
 	commands := m.visibleCommandPaletteCommands()
 	if len(commands) == 0 {
 		m.palette.selected = 0
@@ -177,7 +177,7 @@ func (m *mockShellModel) movePaletteSelection(delta int) {
 	}
 }
 
-func (m *mockShellModel) deletePaletteRune() {
+func (m *shellModel) deletePaletteRune() {
 	if m.palette.query == "" {
 		return
 	}
@@ -186,7 +186,7 @@ func (m *mockShellModel) deletePaletteRune() {
 	m.palette.selected = 0
 }
 
-func (m *mockShellModel) clampPaletteSelection() {
+func (m *shellModel) clampPaletteSelection() {
 	commands := m.visibleCommandPaletteCommands()
 	if len(commands) == 0 {
 		m.palette.selected = 0
@@ -200,7 +200,7 @@ func (m *mockShellModel) clampPaletteSelection() {
 	}
 }
 
-func (m mockShellModel) executeCommandPaletteSelection() (tea.Model, tea.Cmd) {
+func (m shellModel) executeCommandPaletteSelection() (tea.Model, tea.Cmd) {
 	commands := m.visibleCommandPaletteCommands()
 	if len(commands) == 0 {
 		m.palette = commandPaletteState{}
@@ -218,12 +218,12 @@ func (m mockShellModel) executeCommandPaletteSelection() (tea.Model, tea.Cmd) {
 	return m.executeCommandPaletteCommand(command)
 }
 
-func (m mockShellModel) executeCommandPaletteCommand(command commandPaletteCommand) (tea.Model, tea.Cmd) {
+func (m shellModel) executeCommandPaletteCommand(command commandPaletteCommand) (tea.Model, tea.Cmd) {
 	switch command.action {
 	case commandPaletteFocusChat:
-		m.focus = mockFocusChat
+		m.focus = focusChat
 	case commandPaletteFocusComposer:
-		m.focus = mockFocusComposer
+		m.focus = focusComposer
 	case commandPaletteToggleHelp:
 		m.helpExpanded = !m.helpExpanded
 		m.clampScroll()
@@ -276,7 +276,7 @@ func (m mockShellModel) executeCommandPaletteCommand(command commandPaletteComma
 	return m, nil
 }
 
-func (m mockShellModel) visibleCommandPaletteCommands() []commandPaletteCommand {
+func (m shellModel) visibleCommandPaletteCommands() []commandPaletteCommand {
 	commands := m.commandPaletteCommands()
 	query := strings.TrimSpace(strings.ToLower(m.palette.query))
 	if query == "" {
@@ -309,7 +309,7 @@ func commandPaletteCommandMatches(command commandPaletteCommand, tokens []string
 	return true
 }
 
-func (m mockShellModel) commandPaletteCommands() []commandPaletteCommand {
+func (m shellModel) commandPaletteCommands() []commandPaletteCommand {
 	commands := []commandPaletteCommand{
 		{action: commandPaletteFocusComposer, title: "Focus composer", shortcut: "tab", keywords: []string{"message", "input", "draft"}},
 		{action: commandPaletteFocusChat, title: "Focus chat", shortcut: "tab", keywords: []string{"messages", "timeline"}},
@@ -371,7 +371,7 @@ func (m mockShellModel) commandPaletteCommands() []commandPaletteCommand {
 	return commands
 }
 
-func (m mockShellModel) commandPaletteView(layout mockShellLayout) string {
+func (m shellModel) commandPaletteView(layout shellLayout) string {
 	contentWidth := layout.width
 	if layout.paletteFramed {
 		contentWidth = clampMin(layout.width-4, 1)
@@ -394,7 +394,7 @@ func (m mockShellModel) commandPaletteView(layout mockShellLayout) string {
 	})
 }
 
-func (m mockShellModel) commandPaletteLines(width, height int) []string {
+func (m shellModel) commandPaletteLines(width, height int) []string {
 	if height <= 0 {
 		return nil
 	}
@@ -450,7 +450,7 @@ func paletteWindowStart(selected, total, height int) int {
 	return start
 }
 
-func (m *mockShellModel) switchChannelBy(delta int) tea.Cmd {
+func (m *shellModel) switchChannelBy(delta int) tea.Cmd {
 	if m.channels.switchBy(delta) {
 		m.clampScroll()
 		return m.asyncAssetCommand()
@@ -458,7 +458,7 @@ func (m *mockShellModel) switchChannelBy(delta int) tea.Cmd {
 	return nil
 }
 
-func (m *mockShellModel) switchChannel(channel string) tea.Cmd {
+func (m *shellModel) switchChannel(channel string) tea.Cmd {
 	if m.channels.setActive(channel) {
 		m.clampScroll()
 		return m.asyncAssetCommand()
@@ -466,12 +466,12 @@ func (m *mockShellModel) switchChannel(channel string) tea.Cmd {
 	return nil
 }
 
-func (m *mockShellModel) asyncAssetCommand() tea.Cmd {
+func (m *shellModel) asyncAssetCommand() tea.Cmd {
 	_, cmd := m.withAsyncAssetCommands(nil)
 	return cmd
 }
 
-func (m *mockShellModel) clearLocalChat() {
+func (m *shellModel) clearLocalChat() {
 	state := m.activeChannelState()
 	state.messages = nil
 	state.scrollOffset = 0
@@ -483,7 +483,7 @@ func (m *mockShellModel) clearLocalChat() {
 	}
 }
 
-func (m *mockShellModel) requestReconnect() tea.Cmd {
+func (m *shellModel) requestReconnect() tea.Cmd {
 	channel := m.activeChannelName()
 	if m.reconnectInFlight {
 		state := ConnectionState{
@@ -526,7 +526,7 @@ func (m *mockShellModel) requestReconnect() tea.Cmd {
 	}
 }
 
-func (m *mockShellModel) completeReconnect(msg reconnectCompletedMsg) {
+func (m *shellModel) completeReconnect(msg reconnectCompletedMsg) {
 	m.reconnectInFlight = false
 	channel := msg.channel
 	if channel == "" {

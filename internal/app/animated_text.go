@@ -12,7 +12,7 @@ import (
 // label. Callers override Step, Width, Offset, and Bold for their surface;
 // the colors and the app-wide animation mode come from the model so a theme
 // change or animation=off applies everywhere without per-call plumbing.
-func (m mockShellModel) textEffectConfig(effect animation.TextEffect) animation.TextConfig {
+func (m shellModel) textEffectConfig(effect animation.TextEffect) animation.TextConfig {
 	return animation.TextConfig{
 		Effect: effect,
 		Mode:   animation.Mode(m.animationMode),
@@ -25,7 +25,7 @@ func (m mockShellModel) textEffectConfig(effect animation.TextEffect) animation.
 // frameElapsed is the elapsed value the continuous text effects read. It
 // comes from the shared animation clock's last tick, never the wall clock, so
 // View() stays pure and every frame is reproducible in tests.
-func (m mockShellModel) frameElapsed() time.Duration {
+func (m shellModel) frameElapsed() time.Duration {
 	return animation.FrameElapsed(m.lastFrameAt)
 }
 

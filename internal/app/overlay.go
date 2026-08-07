@@ -4,7 +4,7 @@ package app
 // panel, theme settings, emote picker, channel picker, or category picker)
 // currently covers the chat/composer view. Widgets use this instead of checking each overlay
 // flag individually.
-func (m mockShellModel) anyOverlayOpen() bool {
+func (m shellModel) anyOverlayOpen() bool {
 	return m.palette.open || m.inspectOpen || m.themeSettings.open || m.emotePicker.open ||
 		m.channelPicker.open || m.categoryPicker.open
 }
@@ -13,7 +13,7 @@ func (m mockShellModel) anyOverlayOpen() bool {
 // ("palette", "inspect", "theme", "emotes", "channels", "category", or ""
 // to close all).
 // Overlays are mutually exclusive: opening one always closes the others.
-func (m *mockShellModel) closeOtherOverlays(keep string) {
+func (m *shellModel) closeOtherOverlays(keep string) {
 	if keep != "palette" {
 		m.palette = commandPaletteState{}
 	}

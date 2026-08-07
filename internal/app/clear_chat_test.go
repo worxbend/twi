@@ -11,12 +11,12 @@ import (
 	"github.com/worxbend/twi/internal/twitch"
 )
 
-func clearTestModel(t *testing.T) mockShellModel {
+func clearTestModel(t *testing.T) shellModel {
 	t.Helper()
 	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
-	model := newMockShellModelWithClock("example", cfg, &appFakeClock{now: time.Now()})
+	model := newMockModelWithClock("example", cfg, &appFakeClock{now: time.Now()})
 	state := model.activeChannelState()
 	state.messages = []twitch.ChatMessage{
 		{ID: "a", Channel: "example", AuthorLogin: "alice", Text: "hello", Type: twitch.MessageTypeChat},
@@ -25,9 +25,9 @@ func clearTestModel(t *testing.T) mockShellModel {
 	return model
 }
 
-func pressKey(model mockShellModel, key tea.KeyMsg) mockShellModel {
+func pressKey(model shellModel, key tea.KeyMsg) shellModel {
 	updated, _ := model.Update(key)
-	return updated.(mockShellModel)
+	return updated.(shellModel)
 }
 
 // TestClearChatAsksBeforeDiscardingHistory guards a one-keystroke,

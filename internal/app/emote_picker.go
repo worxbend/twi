@@ -16,7 +16,7 @@ type emotePickerState struct {
 	selected int
 }
 
-func (m *mockShellModel) toggleEmotePicker() {
+func (m *shellModel) toggleEmotePicker() {
 	if m.emotePicker.open {
 		m.emotePicker = emotePickerState{}
 		return
@@ -25,7 +25,7 @@ func (m *mockShellModel) toggleEmotePicker() {
 	m.emotePicker = emotePickerState{open: true}
 }
 
-func (m mockShellModel) handleEmotePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m shellModel) handleEmotePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
 		m.emotePicker = emotePickerState{}
@@ -52,7 +52,7 @@ func (m mockShellModel) handleEmotePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd
 	return m, nil
 }
 
-func (m *mockShellModel) moveEmotePickerSelection(delta int) {
+func (m *shellModel) moveEmotePickerSelection(delta int) {
 	entries := m.visibleEmotePickerEntries()
 	if len(entries) == 0 {
 		m.emotePicker.selected = 0
@@ -67,7 +67,7 @@ func (m *mockShellModel) moveEmotePickerSelection(delta int) {
 	}
 }
 
-func (m *mockShellModel) deleteEmotePickerRune() {
+func (m *shellModel) deleteEmotePickerRune() {
 	if m.emotePicker.query == "" {
 		return
 	}
@@ -76,7 +76,7 @@ func (m *mockShellModel) deleteEmotePickerRune() {
 	m.emotePicker.selected = 0
 }
 
-func (m *mockShellModel) clampEmotePickerSelection() {
+func (m *shellModel) clampEmotePickerSelection() {
 	entries := m.visibleEmotePickerEntries()
 	if len(entries) == 0 {
 		m.emotePicker.selected = 0
@@ -93,7 +93,7 @@ func (m *mockShellModel) clampEmotePickerSelection() {
 // visibleEmotePickerEntries filters the active channel's resolved emote set
 // by substring match on name (case-insensitive), same filtering style as
 // the command palette.
-func (m mockShellModel) visibleEmotePickerEntries() []assets.EmoteEntry {
+func (m shellModel) visibleEmotePickerEntries() []assets.EmoteEntry {
 	all := m.activeEmoteEntries()
 	query := strings.TrimSpace(strings.ToLower(m.emotePicker.query))
 	if query == "" {
@@ -111,7 +111,7 @@ func (m mockShellModel) visibleEmotePickerEntries() []assets.EmoteEntry {
 // executeEmotePickerSelection appends the selected emote's name plus a
 // trailing space to the composer (matching the composer's append-only text
 // model) and closes the picker.
-func (m mockShellModel) executeEmotePickerSelection() (tea.Model, tea.Cmd) {
+func (m shellModel) executeEmotePickerSelection() (tea.Model, tea.Cmd) {
 	entries := m.visibleEmotePickerEntries()
 	if len(entries) == 0 {
 		m.emotePicker = emotePickerState{}
@@ -129,7 +129,7 @@ func (m mockShellModel) executeEmotePickerSelection() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m mockShellModel) emotePickerView(layout mockShellLayout) string {
+func (m shellModel) emotePickerView(layout shellLayout) string {
 	contentWidth := layout.width
 	if layout.emotePickerFramed {
 		contentWidth = clampMin(layout.width-4, 1)
@@ -151,7 +151,7 @@ func (m mockShellModel) emotePickerView(layout mockShellLayout) string {
 	})
 }
 
-func (m mockShellModel) emotePickerLines(width, height int) []string {
+func (m shellModel) emotePickerLines(width, height int) []string {
 	if height <= 0 {
 		return nil
 	}

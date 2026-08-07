@@ -77,7 +77,7 @@ func TestRunMockRendersInitialShellForNonInteractiveOutput(t *testing.T) {
 }
 
 func TestMockShellQuitsOnQAndCtrlC(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 
 	for name, msg := range map[string]tea.KeyMsg{
 		"q":      {Type: tea.KeyRunes, Runes: []rune{'q'}},
@@ -96,7 +96,7 @@ func TestMockShellQuitsOnQAndCtrlC(t *testing.T) {
 }
 
 func TestMockShellWindowSizeKeepsViewWithinHeight(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 64, Height: 12})
 	view := updated.View()
@@ -107,11 +107,11 @@ func TestMockShellWindowSizeKeepsViewWithinHeight(t *testing.T) {
 }
 
 func TestMockShellFocusHelpAndComposerInput(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
-	model = updated.(mockShellModel)
-	if got, want := model.focus, mockFocusComposer; got != want {
+	model = updated.(shellModel)
+	if got, want := model.focus, focusComposer; got != want {
 		t.Fatalf("focus after tab = %v, want %v", got, want)
 	}
 	if !strings.Contains(model.View(), "focus=composer") {
@@ -127,7 +127,7 @@ func TestMockShellFocusHelpAndComposerInput(t *testing.T) {
 		if cmd != nil {
 			t.Fatalf("composer input returned command for %#v", msg)
 		}
-		model = updated.(mockShellModel)
+		model = updated.(shellModel)
 	}
 	if got, want := model.activeChannelState().composerText, "hi q"; got != want {
 		t.Fatalf("composer text = %q, want %q", got, want)
@@ -139,7 +139,7 @@ func TestMockShellFocusHelpAndComposerInput(t *testing.T) {
 	// "?" is a literal character while the composer has focus, not the help
 	// hotkey - otherwise it could never be typed into a message.
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.helpExpanded {
 		t.Fatal("? toggled help while typing a message, want it inserted as text")
 	}
@@ -148,14 +148,14 @@ func TestMockShellFocusHelpAndComposerInput(t *testing.T) {
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
-	model = updated.(mockShellModel)
-	if got, want := model.focus, mockFocusChat; got != want {
+	model = updated.(shellModel)
+	if got, want := model.focus, focusChat; got != want {
 		t.Fatalf("focus after second tab = %v, want %v", got, want)
 	}
 
 	// Away from the composer it is the help hotkey again.
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if !model.helpExpanded {
 		t.Fatal("helpExpanded = false after ? outside the composer, want true")
 	}
@@ -169,11 +169,11 @@ func TestMockShellFocusHelpAndComposerInput(t *testing.T) {
 }
 
 func TestMockShellPageKeysScrollViewport(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 	model.activeChannelState().messages = numberedMockMessages("example", 12)
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 13})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	bottom := model.View()
 	if !strings.Contains(bottom, "message-11") {
 		t.Fatalf("bottom viewport missing latest message:\n%s", bottom)
@@ -183,7 +183,7 @@ func TestMockShellPageKeysScrollViewport(t *testing.T) {
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	scrolled := model.View()
 	if !strings.Contains(scrolled, "message-04") {
 		t.Fatalf("page up viewport missing previous page message:\n%s", scrolled)
@@ -193,18 +193,18 @@ func TestMockShellPageKeysScrollViewport(t *testing.T) {
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if !strings.Contains(model.View(), "message-00") {
 		t.Fatalf("second page up viewport missing oldest message:\n%s", model.View())
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgDown})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.activeChannelState().scrollOffset == 0 {
 		t.Fatal("scrollOffset after one page down = 0, want still scrolled")
 	}
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgDown})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.activeChannelState().scrollOffset != 0 {
 		t.Fatalf("scrollOffset after second page down = %d, want 0", model.activeChannelState().scrollOffset)
 	}
@@ -217,12 +217,12 @@ func TestMockShellMouseEventsWhenEnabled(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	cfg.DefaultChannels = []string{"alpha", "beta"}
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.channels.ensure("alpha").messages = numberedMockMessages("alpha", 12)
 	model.channels.ensure("beta").messages = numberedMockMessages("beta", 3)
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 88, Height: 16})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	layout := model.layout()
 	chatX := layout.sidebarWidth + 2
 	contentY := layout.tabBarHeight + layout.statusHeight + 1
@@ -233,7 +233,7 @@ func TestMockShellMouseEventsWhenEnabled(t *testing.T) {
 		Button: tea.MouseButtonWheelUp,
 		Action: tea.MouseActionPress,
 	})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("mouse wheel returned command %#v, want nil", cmd)
 	}
@@ -259,7 +259,7 @@ func TestMockShellMouseEventsWhenEnabled(t *testing.T) {
 		Button: tea.MouseButtonLeft,
 		Action: tea.MouseActionPress,
 	})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		if msg := cmd(); msg != nil {
 			t.Fatalf("channel click command produced %T, want nil or no-op", msg)
@@ -270,7 +270,7 @@ func TestMockShellMouseEventsWhenEnabled(t *testing.T) {
 	}
 	// Clicking a channel also focuses the channel list, so the close
 	// affordance appears and j/k keep working on the list.
-	if got, want := model.focus, mockFocusSidebar; got != want {
+	if got, want := model.focus, focusSidebar; got != want {
 		t.Fatalf("focus after sidebar click = %v, want %v", got, want)
 	}
 	if got, want := model.sidebarSelected, 1; got != want {
@@ -284,8 +284,8 @@ func TestMockShellMouseEventsWhenEnabled(t *testing.T) {
 		Button: tea.MouseButtonLeft,
 		Action: tea.MouseActionPress,
 	})
-	model = updated.(mockShellModel)
-	if got, want := model.focus, mockFocusComposer; got != want {
+	model = updated.(shellModel)
+	if got, want := model.focus, focusComposer; got != want {
 		t.Fatalf("focus after composer click = %v, want %v", got, want)
 	}
 
@@ -301,11 +301,11 @@ func TestMockShellMouseEventsWhenEnabled(t *testing.T) {
 		Button: tea.MouseButtonLeft,
 		Action: tea.MouseActionPress,
 	})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.activeChannelState().replyTo == nil || model.activeChannelState().replyTo.MessageID != "mock-11" {
 		t.Fatalf("replyTo after message click = %#v, want mock-11", model.activeChannelState().replyTo)
 	}
-	if got, want := model.focus, mockFocusChat; got != want {
+	if got, want := model.focus, focusChat; got != want {
 		t.Fatalf("focus after message click = %v, want %v", got, want)
 	}
 }
@@ -314,11 +314,11 @@ func TestMockShellMouseEventsIgnoredWhenDisabled(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.EnableMouse = false
 	cfg.DefaultChannels = []string{"alpha", "beta"}
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.channels.ensure("alpha").messages = numberedMockMessages("alpha", 12)
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 88, Height: 12})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	layout := model.layout()
 
 	events := []tea.MouseMsg{
@@ -332,7 +332,7 @@ func TestMockShellMouseEventsIgnoredWhenDisabled(t *testing.T) {
 		if cmd != nil {
 			t.Fatalf("disabled mouse event returned command %#v, want nil", cmd)
 		}
-		model = updated.(mockShellModel)
+		model = updated.(shellModel)
 	}
 
 	if got, want := model.activeChannelName(), "alpha"; got != want {
@@ -341,7 +341,7 @@ func TestMockShellMouseEventsIgnoredWhenDisabled(t *testing.T) {
 	if got := model.activeChannelState().scrollOffset; got != 0 {
 		t.Fatalf("scrollOffset after disabled mouse events = %d, want 0", got)
 	}
-	if got, want := model.focus, mockFocusChat; got != want {
+	if got, want := model.focus, focusChat; got != want {
 		t.Fatalf("focus after disabled mouse events = %v, want %v", got, want)
 	}
 	if model.activeChannelState().replyTo != nil {
@@ -350,7 +350,7 @@ func TestMockShellMouseEventsIgnoredWhenDisabled(t *testing.T) {
 }
 
 func TestInspectPanelShowsSelectedMessageMetadataAndRedactsDiagnostics(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 	secretToken := "oauth" + ":" + "secret-token"
 	clientSecretKey := strings.Join([]string{"client", "secret"}, "_")
 	clientSecretValue := "client" + "SecretValue"
@@ -385,7 +385,7 @@ func TestInspectPanelShowsSelectedMessageMetadataAndRedactsDiagnostics(t *testin
 	model.activeChannelState().replyTo = replyContextFromMessage(message)
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("inspect toggle returned command %#v, want nil", cmd)
 	}
@@ -421,7 +421,7 @@ func TestInspectPanelShowsSelectedMessageMetadataAndRedactsDiagnostics(t *testin
 }
 
 func TestInspectPanelOpenClosePreservesComposerSelectionReplyAndScroll(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 	model.activeChannelState().messages = numberedMockMessages("example", 18)
 	model.width = 88
 	model.height = 18
@@ -429,11 +429,11 @@ func TestInspectPanelOpenClosePreservesComposerSelectionReplyAndScroll(t *testin
 	state.composerText = "draft text"
 	state.replyTo = replyContextFromMessage(state.messages[12])
 	state.scrollOffset = 3
-	model.focus = mockFocusChat
+	model.focus = focusChat
 
 	beforeReply := *state.replyTo
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("open inspect returned command %#v, want nil", cmd)
 	}
@@ -451,7 +451,7 @@ func TestInspectPanelOpenClosePreservesComposerSelectionReplyAndScroll(t *testin
 	}
 
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("close inspect returned command %#v, want nil", cmd)
 	}
@@ -467,7 +467,7 @@ func TestInspectPanelOpenClosePreservesComposerSelectionReplyAndScroll(t *testin
 	if model.activeChannelState().replyTo == nil || *model.activeChannelState().replyTo != beforeReply {
 		t.Fatalf("replyTo after close = %#v, want %#v", model.activeChannelState().replyTo, beforeReply)
 	}
-	if got, want := model.focus, mockFocusChat; got != want {
+	if got, want := model.focus, focusChat; got != want {
 		t.Fatalf("focus after close = %v, want %v", got, want)
 	}
 }
@@ -480,12 +480,12 @@ func TestLiveShellEnterQueuesComposerSendAndSuccessKeepsComposerCleared(t *testi
 	}
 	cfg := config.Default()
 	cfg.Twitch.Username = "self_user"
-	model := newLiveShellModelWithClock("example", cfg, client, nil)
-	model.focus = mockFocusComposer
+	model := newLiveModelWithClock("example", cfg, client, nil)
+	model.focus = focusComposer
 	model.activeChannelState().composerText = " hello chat "
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("Enter returned nil command, want send command")
 	}
@@ -505,7 +505,7 @@ func TestLiveShellEnterQueuesComposerSendAndSuccessKeepsComposerCleared(t *testi
 		t.Fatalf("send command returned %T, want composerSendCompletedMsg", sendMsg)
 	}
 	updated, cmd = model.Update(completed)
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("successful single send returned extra command %#v", cmd)
 	}
@@ -547,14 +547,14 @@ func TestLiveShellIncomingEchoReplacesLocalSentMessage(t *testing.T) {
 	if err := client.QueueSendResult(SendResult{MessageID: "sent-echo", AcceptedAt: acceptedAt}, nil); err != nil {
 		t.Fatalf("QueueSendResult returned error: %v", err)
 	}
-	model := newLiveShellModelWithClock("example", cfg, client, nil)
-	model.focus = mockFocusComposer
+	model := newLiveModelWithClock("example", cfg, client, nil)
+	model.focus = focusComposer
 	model.activeChannelState().composerText = "hello chat"
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, _ = model.Update(cmd().(composerSendCompletedMsg))
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got := len(model.activeChannelState().messages); got != 1 {
 		t.Fatalf("messages after local echo = %d, want 1", got)
 	}
@@ -569,7 +569,7 @@ func TestLiveShellIncomingEchoReplacesLocalSentMessage(t *testing.T) {
 		Type:        twitch.MessageTypeChat,
 	}
 	updated, _ = model.Update(chatClientMessageMsg{message: serverEcho, ok: true})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	messages := model.activeChannelState().messages
 	if len(messages) != 1 {
@@ -582,12 +582,12 @@ func TestLiveShellIncomingEchoReplacesLocalSentMessage(t *testing.T) {
 
 func TestLiveShellEnterIgnoresEmptyComposer(t *testing.T) {
 	client := NewFakeChatClient(1)
-	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
-	model.focus = mockFocusComposer
+	model := newLiveModelWithClock("example", config.Default(), client, nil)
+	model.focus = focusComposer
 	model.activeChannelState().composerText = "   "
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("empty composer returned command %#v, want nil", cmd)
 	}
@@ -604,15 +604,15 @@ func TestLiveShellFailedSendShowsReasonAndRestoresComposer(t *testing.T) {
 	if err := client.QueueSendResult(SendResult{}, fmt.Errorf("network unavailable")); err != nil {
 		t.Fatalf("QueueSendResult returned error: %v", err)
 	}
-	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
-	model.focus = mockFocusComposer
+	model := newLiveModelWithClock("example", config.Default(), client, nil)
+	model.focus = focusComposer
 	model.activeChannelState().composerText = "please send"
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	completed := cmd().(composerSendCompletedMsg)
 	updated, _ = model.Update(completed)
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	if got, want := model.activeChannelState().composerText, "please send"; got != want {
 		t.Fatalf("composerText after failed send = %q, want %q", got, want)
@@ -632,15 +632,15 @@ func TestLiveShellSendFailureUsesSendScopeGuidance(t *testing.T) {
 	if err := client.QueueSendResult(SendResult{}, errors.Join(twitch.ErrAuthFailed, fmt.Errorf("missing scope for oauth:secret-token"))); err != nil {
 		t.Fatalf("QueueSendResult returned error: %v", err)
 	}
-	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
-	model.focus = mockFocusComposer
+	model := newLiveModelWithClock("example", config.Default(), client, nil)
+	model.focus = focusComposer
 	model.activeChannelState().composerText = "please send"
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	completed := cmd().(composerSendCompletedMsg)
 	updated, _ = model.Update(completed)
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	if strings.Contains(model.activeChannelState().sendFeedback, "oauth:secret-token") {
 		t.Fatalf("sendFeedback leaked token: %q", model.activeChannelState().sendFeedback)
@@ -660,19 +660,19 @@ func TestLiveShellFailedSendRestoresQueuedFollowupText(t *testing.T) {
 	if err := client.QueueSendResult(SendResult{}, fmt.Errorf("network unavailable")); err != nil {
 		t.Fatalf("QueueSendResult returned error: %v", err)
 	}
-	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
-	model.focus = mockFocusComposer
+	model := newLiveModelWithClock("example", config.Default(), client, nil)
+	model.focus = focusComposer
 	model.activeChannelState().composerText = "first message"
 
 	updated, firstCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if firstCmd == nil {
 		t.Fatal("first Enter returned nil command, want send command")
 	}
 
 	model.activeChannelState().composerText = "second message"
 	updated, secondCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if secondCmd != nil {
 		t.Fatalf("queued follow-up returned command %#v while first send active, want nil", secondCmd)
 	}
@@ -685,7 +685,7 @@ func TestLiveShellFailedSendRestoresQueuedFollowupText(t *testing.T) {
 
 	completed := firstCmd().(composerSendCompletedMsg)
 	updated, cmd := model.Update(completed)
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("failed send returned next queued command %#v, want queue stopped", cmd)
 	}
@@ -716,15 +716,15 @@ func TestLiveShellRateLimitedSendShowsReasonAndRestoresComposer(t *testing.T) {
 	}, nil); err != nil {
 		t.Fatalf("QueueSendResult returned error: %v", err)
 	}
-	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
-	model.focus = mockFocusComposer
+	model := newLiveModelWithClock("example", config.Default(), client, nil)
+	model.focus = focusComposer
 	model.activeChannelState().composerText = "slow down?"
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	completed := cmd().(composerSendCompletedMsg)
 	updated, _ = model.Update(completed)
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	if got, want := model.activeChannelState().composerText, "slow down?"; got != want {
 		t.Fatalf("composerText after rate limit = %q, want %q", got, want)
@@ -756,7 +756,7 @@ func TestLiveShellKeepsComposerSendStatePerChannel(t *testing.T) {
 			t.Fatalf("QueueSendResult returned error: %v", err)
 		}
 	}
-	model := newLiveShellModelWithClock("alpha", cfg, client, nil)
+	model := newLiveModelWithClock("alpha", cfg, client, nil)
 	alpha := model.channels.ensure("alpha")
 	beta := model.channels.ensure("beta")
 	alpha.messages = []twitch.ChatMessage{
@@ -768,7 +768,7 @@ func TestLiveShellKeepsComposerSendStatePerChannel(t *testing.T) {
 
 	alpha.composerText = "alpha draft"
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyUp})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("alpha reply selection returned command %#v, want nil", cmd)
 	}
@@ -777,7 +777,7 @@ func TestLiveShellKeepsComposerSendStatePerChannel(t *testing.T) {
 	}
 
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("switch to beta returned command %#v, want nil", cmd)
 	}
@@ -792,14 +792,14 @@ func TestLiveShellKeepsComposerSendStatePerChannel(t *testing.T) {
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if beta.replyTo == nil || beta.replyTo.MessageID != "beta-parent" {
 		t.Fatalf("beta replyTo = %#v, want beta-parent", beta.replyTo)
 	}
-	model.focus = mockFocusComposer
+	model.focus = focusComposer
 	beta.composerText = " /me beta waves "
 	updated, betaActionCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if betaActionCmd == nil {
 		t.Fatal("beta /me Enter returned nil command, want send command")
 	}
@@ -807,9 +807,9 @@ func TestLiveShellKeepsComposerSendStatePerChannel(t *testing.T) {
 		t.Fatalf("beta composer after queue = text %q reply %#v, want cleared", beta.composerText, beta.replyTo)
 	}
 
-	model.focus = mockFocusChat
+	model.focus = focusChat
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got, want := model.activeChannelName(), "alpha"; got != want {
 		t.Fatalf("active channel = %q, want %q", got, want)
 	}
@@ -817,7 +817,7 @@ func TestLiveShellKeepsComposerSendStatePerChannel(t *testing.T) {
 		t.Fatalf("alpha state after beta queue = text %q reply %#v, want preserved", alpha.composerText, alpha.replyTo)
 	}
 	updated, _ = model.Update(betaActionCmd().(composerSendCompletedMsg))
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got, want := alpha.composerText, "alpha draft"; got != want {
 		t.Fatalf("alpha draft after off-channel beta completion = %q, want %q", got, want)
 	}
@@ -825,15 +825,15 @@ func TestLiveShellKeepsComposerSendStatePerChannel(t *testing.T) {
 		t.Fatalf("beta sendState after action success = %q, want %q", got, want)
 	}
 
-	model.focus = mockFocusComposer
+	model.focus = focusComposer
 	alpha.composerText = "alpha reply body"
 	updated, alphaRateLimitCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if alphaRateLimitCmd == nil {
 		t.Fatal("alpha reply Enter returned nil command, want send command")
 	}
 	updated, _ = model.Update(alphaRateLimitCmd().(composerSendCompletedMsg))
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got, want := alpha.composerText, "alpha reply body"; got != want {
 		t.Fatalf("alpha draft after rate limit = %q, want %q", got, want)
 	}
@@ -847,29 +847,29 @@ func TestLiveShellKeepsComposerSendStatePerChannel(t *testing.T) {
 		t.Fatalf("alpha sendFeedback = %q, want rate-limit detail", alpha.sendFeedback)
 	}
 
-	model.focus = mockFocusChat
+	model.focus = focusChat
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got, want := model.activeChannelName(), "beta"; got != want {
 		t.Fatalf("active channel = %q, want %q", got, want)
 	}
 	if strings.Contains(model.View(), "alpha cooldown") {
 		t.Fatalf("beta view leaked alpha rate-limit feedback:\n%s", model.View())
 	}
-	model.focus = mockFocusComposer
+	model.focus = focusComposer
 	beta.composerText = "beta failed send"
 	updated, betaFailureCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if betaFailureCmd == nil {
 		t.Fatal("beta failed-send Enter returned nil command, want send command")
 	}
 
-	model.focus = mockFocusChat
+	model.focus = focusChat
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	alpha.composerText = "alpha fresh draft"
 	updated, _ = model.Update(betaFailureCmd().(composerSendCompletedMsg))
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got, want := beta.composerText, "beta failed send"; got != want {
 		t.Fatalf("beta draft after off-channel failure = %q, want %q", got, want)
 	}
@@ -903,7 +903,7 @@ func TestLiveShellSidebarSwitchesChannelsAndPreservesDrafts(t *testing.T) {
 	cfg.Features.AnimationMode = "off"
 	cfg.DefaultChannels = []string{"alpha", "beta"}
 	client := NewFakeChatClient(1)
-	model := newLiveShellModelWithClock("alpha", cfg, client, nil)
+	model := newLiveModelWithClock("alpha", cfg, client, nil)
 	model.width = 88
 	model.height = 15
 
@@ -914,7 +914,7 @@ func TestLiveShellSidebarSwitchesChannelsAndPreservesDrafts(t *testing.T) {
 	alpha.composerText = "alpha draft"
 	beta.composerText = "beta draft"
 	beta.unread = 2
-	model.focus = mockFocusChat
+	model.focus = focusChat
 
 	view := model.View()
 	for _, want := range []string{"Channels", "> * #alpha", "! #beta 2", "alpha draft"} {
@@ -924,7 +924,7 @@ func TestLiveShellSidebarSwitchesChannelsAndPreservesDrafts(t *testing.T) {
 	}
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("channel switch returned command %#v, want nil", cmd)
 	}
@@ -948,7 +948,7 @@ func TestLiveShellSidebarSwitchesChannelsAndPreservesDrafts(t *testing.T) {
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got, want := model.activeChannelName(), "alpha"; got != want {
 		t.Fatalf("active channel after switch back = %q, want %q", got, want)
 	}
@@ -961,12 +961,12 @@ func TestLiveShellNotifiesSystemEventWhenComposerFocused(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	notifier := &appFakeSystemNotifier{}
-	model := newLiveShellModelWithClockAndOptions("example", cfg, nil, nil, ClientOptions{SystemNotifier: notifier})
+	model := newLiveModelWithClockAndOptions("example", cfg, nil, nil, ClientOptions{SystemNotifier: notifier})
 	model.width = 120
-	model.focus = mockFocusComposer
+	model.focus = focusComposer
 
 	updated, cmd := model.Update(chatClientMessageMsg{message: raidSystemEventMessage("example"), ok: true})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("composer-focused live system event returned nil command, want notification command")
 	}
@@ -989,13 +989,13 @@ func TestLiveShellNotifiesSystemEventWhenTerminalBlurred(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	notifier := &appFakeSystemNotifier{}
-	model := newLiveShellModelWithClockAndOptions("example", cfg, nil, nil, ClientOptions{SystemNotifier: notifier})
-	model.focus = mockFocusChat
+	model := newLiveModelWithClockAndOptions("example", cfg, nil, nil, ClientOptions{SystemNotifier: notifier})
+	model.focus = focusChat
 
 	updated, _ := model.Update(tea.BlurMsg{})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, cmd := model.Update(mockIncomingMessageMsg{message: raidSystemEventMessage("example")})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("blurred system event returned nil command, want notification command")
 	}
@@ -1005,7 +1005,7 @@ func TestLiveShellNotifiesSystemEventWhenTerminalBlurred(t *testing.T) {
 	}
 
 	updated, _ = model.Update(tea.FocusMsg{})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if !model.terminalFocused {
 		t.Fatal("terminalFocused = false after FocusMsg, want true")
 	}
@@ -1016,11 +1016,11 @@ func TestLiveShellNotifiesSystemEventForInactiveChannel(t *testing.T) {
 	cfg.Features.AnimationMode = "off"
 	cfg.DefaultChannels = []string{"alpha", "beta"}
 	notifier := &appFakeSystemNotifier{}
-	model := newLiveShellModelWithClockAndOptions("alpha", cfg, nil, nil, ClientOptions{SystemNotifier: notifier})
-	model.focus = mockFocusChat
+	model := newLiveModelWithClockAndOptions("alpha", cfg, nil, nil, ClientOptions{SystemNotifier: notifier})
+	model.focus = focusChat
 
 	updated, cmd := model.Update(mockIncomingMessageMsg{message: raidSystemEventMessage("beta")})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("inactive-channel system event returned nil command, want notification command")
 	}
@@ -1040,11 +1040,11 @@ func TestLiveShellDoesNotNotifyActiveSystemEventWhenChatFocused(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	notifier := &appFakeSystemNotifier{}
-	model := newLiveShellModelWithClockAndOptions("example", cfg, nil, nil, ClientOptions{SystemNotifier: notifier})
-	model.focus = mockFocusChat
+	model := newLiveModelWithClockAndOptions("example", cfg, nil, nil, ClientOptions{SystemNotifier: notifier})
+	model.focus = focusChat
 
 	updated, cmd := model.Update(mockIncomingMessageMsg{message: raidSystemEventMessage("example")})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("active focused system event returned command %#v, want nil", cmd)
 	}
@@ -1060,8 +1060,8 @@ func TestLiveShellDoesNotNotifyPlainNoticeWhenComposerFocused(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	notifier := &appFakeSystemNotifier{}
-	model := newLiveShellModelWithClockAndOptions("example", cfg, nil, nil, ClientOptions{SystemNotifier: notifier})
-	model.focus = mockFocusComposer
+	model := newLiveModelWithClockAndOptions("example", cfg, nil, nil, ClientOptions{SystemNotifier: notifier})
+	model.focus = focusComposer
 
 	updated, cmd := model.Update(mockIncomingMessageMsg{message: twitch.ChatMessage{
 		ID:      "notice-1",
@@ -1069,7 +1069,7 @@ func TestLiveShellDoesNotNotifyPlainNoticeWhenComposerFocused(t *testing.T) {
 		Text:    "routine Twitch notice",
 		Type:    twitch.MessageTypeNotice,
 	}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("plain notice returned command %#v, want nil", cmd)
 	}
@@ -1080,7 +1080,7 @@ func TestLiveShellDoesNotNotifyPlainNoticeWhenComposerFocused(t *testing.T) {
 
 func TestLiveShellSelectsReplyContextAndEscCancelsWithoutLosingDraft(t *testing.T) {
 	client := NewFakeChatClient(1)
-	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
+	model := newLiveModelWithClock("example", config.Default(), client, nil)
 	model.activeChannelState().messages = []twitch.ChatMessage{
 		{
 			ID:          "",
@@ -1102,7 +1102,7 @@ func TestLiveShellSelectsReplyContextAndEscCancelsWithoutLosingDraft(t *testing.
 	model.activeChannelState().composerText = "draft reply"
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyUp})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("select reply returned command %#v, want nil", cmd)
 	}
@@ -1116,7 +1116,7 @@ func TestLiveShellSelectsReplyContextAndEscCancelsWithoutLosingDraft(t *testing.
 	}
 
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("esc returned command %#v, want nil", cmd)
 	}
@@ -1136,7 +1136,7 @@ func TestLiveShellRStartsReplyModeAndReplySendUsesParentID(t *testing.T) {
 	if err := client.QueueSendResult(SendResult{AcceptedAt: time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)}, nil); err != nil {
 		t.Fatalf("QueueSendResult returned error: %v", err)
 	}
-	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
+	model := newLiveModelWithClock("example", config.Default(), client, nil)
 	model.activeChannelState().messages = []twitch.ChatMessage{
 		{
 			ID:          "parent-1",
@@ -1157,23 +1157,23 @@ func TestLiveShellRStartsReplyModeAndReplySendUsesParentID(t *testing.T) {
 	}
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("r returned command %#v, want nil", cmd)
 	}
-	if model.activeChannelState().replyTo == nil || model.activeChannelState().replyTo.MessageID != "parent-2" || model.focus != mockFocusComposer {
+	if model.activeChannelState().replyTo == nil || model.activeChannelState().replyTo.MessageID != "parent-2" || model.focus != focusComposer {
 		t.Fatalf("reply mode = replyTo %#v focus %v, want latest parent and composer focus", model.activeChannelState().replyTo, model.focus)
 	}
 
 	model.activeChannelState().composerText = " thanks "
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("reply Enter returned nil command, want send command")
 	}
 	completed := cmd().(composerSendCompletedMsg)
 	updated, _ = model.Update(completed)
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	sent := client.SentRequests()
 	if len(sent) != 1 {
@@ -1206,18 +1206,18 @@ func TestLiveShellMeInputQueuesActionSend(t *testing.T) {
 	if err := client.QueueSendResult(SendResult{AcceptedAt: time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)}, nil); err != nil {
 		t.Fatalf("QueueSendResult returned error: %v", err)
 	}
-	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
-	model.focus = mockFocusComposer
+	model := newLiveModelWithClock("example", config.Default(), client, nil)
+	model.focus = focusComposer
 	model.activeChannelState().composerText = " /me waves at chat "
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("/me Enter returned nil command, want send command")
 	}
 	completed := cmd().(composerSendCompletedMsg)
 	updated, _ = model.Update(completed)
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	sent := client.SentRequests()
 	if len(sent) != 1 {
@@ -1243,16 +1243,16 @@ func TestLiveShellFailedReplyRestoresReplyContext(t *testing.T) {
 	if err := client.QueueSendResult(SendResult{}, fmt.Errorf("network unavailable")); err != nil {
 		t.Fatalf("QueueSendResult returned error: %v", err)
 	}
-	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
-	model.focus = mockFocusComposer
+	model := newLiveModelWithClock("example", config.Default(), client, nil)
+	model.focus = focusComposer
 	model.activeChannelState().replyTo = &composerReplyContext{MessageID: "parent-1", Author: "viewer", Text: "original"}
 	model.activeChannelState().composerText = "reply body"
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	completed := cmd().(composerSendCompletedMsg)
 	updated, _ = model.Update(completed)
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	if got, want := model.activeChannelState().composerText, "reply body"; got != want {
 		t.Fatalf("composerText after failed reply = %q, want %q", got, want)
@@ -1267,27 +1267,27 @@ func TestLiveShellFailedMixedQueueDoesNotMisapplyReplyContext(t *testing.T) {
 	if err := client.QueueSendResult(SendResult{}, fmt.Errorf("network unavailable")); err != nil {
 		t.Fatalf("QueueSendResult returned error: %v", err)
 	}
-	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
-	model.focus = mockFocusComposer
+	model := newLiveModelWithClock("example", config.Default(), client, nil)
+	model.focus = focusComposer
 	model.activeChannelState().replyTo = &composerReplyContext{MessageID: "parent-1", Author: "viewer", Text: "original"}
 	model.activeChannelState().composerText = "reply body"
 
 	updated, firstCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if firstCmd == nil {
 		t.Fatal("first reply Enter returned nil command, want send command")
 	}
 
 	model.activeChannelState().composerText = "plain followup"
 	updated, secondCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if secondCmd != nil {
 		t.Fatalf("queued follow-up returned command %#v while first send active, want nil", secondCmd)
 	}
 
 	completed := firstCmd().(composerSendCompletedMsg)
 	updated, _ = model.Update(completed)
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	for _, want := range []string{"reply body", "plain followup"} {
 		if !strings.Contains(model.activeChannelState().composerText, want) {
@@ -1301,11 +1301,11 @@ func TestLiveShellFailedMixedQueueDoesNotMisapplyReplyContext(t *testing.T) {
 
 func TestMockShellFastModeRevealsIncomingMessage(t *testing.T) {
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
-	model := newMockShellModelWithClock("example", config.Default(), clock)
+	model := newMockModelWithClock("example", config.Default(), clock)
 	message := mockIncomingMessage("example", "animated-fast", "animated text arrives")
 
 	updated, cmd := model.Update(mockIncomingMessageMsg{message: message})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("incoming fast message returned nil command, want reveal tick")
 	}
@@ -1319,7 +1319,7 @@ func TestMockShellFastModeRevealsIncomingMessage(t *testing.T) {
 	initial := model.View()
 	clock.Add(mockRevealDelay)
 	updated, _ = model.Update(mockAnimationTickMsg{})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got := model.View(); got == initial {
 		t.Fatalf("first animation tick did not change view:\n%s", got)
 	}
@@ -1337,11 +1337,11 @@ func TestMockShellOffModeRendersIncomingMessageWithoutRevealTick(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
-	model := newMockShellModelWithClock("example", cfg, clock)
+	model := newMockModelWithClock("example", cfg, clock)
 	message := mockIncomingMessage("example", "animated-off", "off mode is immediate")
 
 	updated, cmd := model.Update(mockIncomingMessageMsg{message: message})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("off mode incoming message returned command %#v, want nil reveal tick", cmd)
 	}
@@ -1365,29 +1365,29 @@ func TestMockShellReducedModeUsesFewerChangedFramesThanFastMode(t *testing.T) {
 
 func TestMockShellInputAndScrollRemainResponsiveDuringAnimation(t *testing.T) {
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
-	model := newMockShellModelWithClock("example", config.Default(), clock)
+	model := newMockModelWithClock("example", config.Default(), clock)
 	model.activeChannelState().messages = numberedMockMessages("example", 12)
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 12})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	updated, _ = model.Update(mockIncomingMessageMsg{
 		message: mockIncomingMessage("example", "active-reveal", "animation keeps running"),
 	})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got := model.activeChannelState().revealQueue.Len(); got != 1 {
 		t.Fatalf("reveal queue len = %d, want 1", got)
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.activeChannelState().scrollOffset == 0 {
 		t.Fatal("page up during animation left scrollOffset at 0")
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o', 'k'}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("composer input during animation returned command %#v, want nil", cmd)
 	}
@@ -1405,10 +1405,10 @@ func TestLiveShellHighThroughputChatStressHarness(t *testing.T) {
 	if err := client.QueueSendResult(SendResult{AcceptedAt: clock.Now(), Detail: "accepted during burst"}, nil); err != nil {
 		t.Fatalf("QueueSendResult returned error: %v", err)
 	}
-	model := newLiveShellModelWithClock("example", config.Default(), client, clock)
+	model := newLiveModelWithClock("example", config.Default(), client, clock)
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 12})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	maxQueued := animation.DefaultConfig().MaxQueued
 	burstSize := maxQueued + 8
 	burst := highThroughputBurstMessages("example", burstSize, clock.Now())
@@ -1418,7 +1418,7 @@ func TestLiveShellHighThroughputChatStressHarness(t *testing.T) {
 			message: burst[i],
 			ok:      true,
 		})
-		model = updated.(mockShellModel)
+		model = updated.(shellModel)
 		if model.activeChannelState().revealQueue.Len() > maxQueued {
 			t.Fatalf("after burst message %02d reveal queue len = %d, want <= %d", i, model.activeChannelState().revealQueue.Len(), maxQueued)
 		}
@@ -1446,7 +1446,7 @@ func TestLiveShellHighThroughputChatStressHarness(t *testing.T) {
 	}
 
 	updated, _ = model.Update(tea.WindowSizeMsg{Width: 36, Height: 9})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	view := model.View()
 	if got, want := lineCount(view), 9; got != want {
 		t.Fatalf("burst resized view line count = %d, want %d:\n%s", got, want, view)
@@ -1458,15 +1458,15 @@ func TestLiveShellHighThroughputChatStressHarness(t *testing.T) {
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.activeChannelState().scrollOffset == 0 {
 		t.Fatal("page up during burst left scrollOffset at 0")
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("still responsive")})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("composer input during burst returned command %#v, want nil", cmd)
 	}
@@ -1474,13 +1474,13 @@ func TestLiveShellHighThroughputChatStressHarness(t *testing.T) {
 		t.Fatalf("composer text during burst = %q, want %q", got, want)
 	}
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("Enter during burst returned nil command, want send command")
 	}
 	completed := cmd().(composerSendCompletedMsg)
 	updated, _ = model.Update(completed)
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got, want := model.activeChannelState().sendState, composerSendSucceeded; got != want {
 		t.Fatalf("sendState after burst send = %q, want %q", got, want)
 	}
@@ -1491,13 +1491,13 @@ func TestLiveShellHighThroughputChatStressHarness(t *testing.T) {
 
 func TestMockShellScrolledBurstRendersStaticallyWithoutRevealBacklog(t *testing.T) {
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
-	model := newMockShellModelWithClock("example", config.Default(), clock)
+	model := newMockModelWithClock("example", config.Default(), clock)
 	model.activeChannelState().messages = numberedMockMessages("example", 30)
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 12})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.activeChannelState().scrollOffset == 0 {
 		t.Fatal("test setup failed: scrollOffset = 0 after page up")
 	}
@@ -1511,7 +1511,7 @@ func TestMockShellScrolledBurstRendersStaticallyWithoutRevealBacklog(t *testing.
 		updated, cmd := model.Update(mockIncomingMessageMsg{
 			message: mockIncomingMessage("example", fmt.Sprintf("offscreen-%02d", i), fmt.Sprintf("offscreen burst %02d", i)),
 		})
-		model = updated.(mockShellModel)
+		model = updated.(shellModel)
 		if cmd != nil {
 			t.Fatalf("off-screen burst message %02d returned command %#v, want no reveal tick", i, cmd)
 		}
@@ -1540,20 +1540,20 @@ func TestMockShellScrolledBurstRendersStaticallyWithoutRevealBacklog(t *testing.
 
 func TestMockShellCompletingActiveRevealPreservesScrolledViewport(t *testing.T) {
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
-	model := newMockShellModelWithClock("example", config.Default(), clock)
+	model := newMockModelWithClock("example", config.Default(), clock)
 	model.activeChannelState().messages = numberedMockMessages("example", 30)
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 12})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, _ = model.Update(mockIncomingMessageMsg{
 		message: mockIncomingMessage("example", "active-while-scrolled", "active reveal finishes while scrolled"),
 	})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got := model.activeChannelState().revealQueue.Len(); got != 1 {
 		t.Fatalf("reveal queue len = %d, want 1", got)
 	}
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.activeChannelState().scrollOffset == 0 {
 		t.Fatal("test setup failed: scrollOffset = 0 after page up")
 	}
@@ -1578,13 +1578,13 @@ func TestMockShellCompletingActiveRevealPreservesScrolledViewport(t *testing.T) 
 
 func TestMockShellDuplicateIncomingMessageIDsCompleteIndependently(t *testing.T) {
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
-	model := newMockShellModelWithClock("example", config.Default(), clock)
+	model := newMockModelWithClock("example", config.Default(), clock)
 
 	for _, text := range []string{"first duplicate", "second duplicate"} {
 		updated, _ := model.Update(mockIncomingMessageMsg{
 			message: mockIncomingMessage("example", "duplicate-id", text),
 		})
-		model = updated.(mockShellModel)
+		model = updated.(shellModel)
 	}
 	if got := model.activeChannelState().revealQueue.Len(); got != 2 {
 		t.Fatalf("reveal queue len = %d, want 2", got)
@@ -1601,15 +1601,15 @@ func TestMockShellDuplicateIncomingMessageIDsCompleteIndependently(t *testing.T)
 
 func TestMockShellResizeDuringAnimationStaysWithinBounds(t *testing.T) {
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
-	model := newMockShellModelWithClock("example", config.Default(), clock)
+	model := newMockModelWithClock("example", config.Default(), clock)
 	updated, _ := model.Update(mockIncomingMessageMsg{
 		message: mockIncomingMessage("example", "resize-active", "active reveal survives a narrow resize without overflowing"),
 	})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	clock.Add(mockRevealDelay)
 	updated, _ = model.Update(mockAnimationTickMsg{})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, _ = model.Update(tea.WindowSizeMsg{Width: 24, Height: 8})
 	view := updated.View()
 
@@ -1625,28 +1625,28 @@ func TestMockShellResizeDuringAnimationStaysWithinBounds(t *testing.T) {
 
 func TestMockShellResizeReflowsActiveRevealInBothDirections(t *testing.T) {
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
-	model := newMockShellModelWithClock("example", config.Default(), clock)
+	model := newMockModelWithClock("example", config.Default(), clock)
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 16})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, _ = model.Update(mockIncomingMessageMsg{
 		message: mockIncomingMessage("example", "resize-reflow", strings.Repeat("active reveal wraps responsively ", 8)),
 	})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	clock.Add(45 * mockRevealDelay)
 	updated, _ = model.Update(mockAnimationTickMsg{})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	revealID := model.activeChannelState().activeOrder[0]
 
 	wideRows := len(model.activeChannelState().revealQueue.Frames()[revealID])
 	updated, _ = model.Update(tea.WindowSizeMsg{Width: 24, Height: 8})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	narrowRows := len(model.activeChannelState().revealQueue.Frames()[revealID])
 	if narrowRows <= wideRows {
 		t.Fatalf("narrow active rows = %d, want more than wide rows %d", narrowRows, wideRows)
 	}
 
 	updated, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 16})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	restoredRows := len(model.activeChannelState().revealQueue.Frames()[revealID])
 	if restoredRows != wideRows {
 		t.Fatalf("restored active rows = %d, want original wide rows %d", restoredRows, wideRows)
@@ -1654,7 +1654,7 @@ func TestMockShellResizeReflowsActiveRevealInBothDirections(t *testing.T) {
 }
 
 func TestMockShellNarrowLayoutStaysWithinBounds(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 	model.activeChannelState().composerText = "hello 😀 表"
 	model.activeChannelState().messages = append(model.activeChannelState().messages, twitch.ChatMessage{
 		ID:          "wide",
@@ -1693,7 +1693,7 @@ func TestMockShellChannelSidebarResponsiveLayouts(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	cfg.DefaultChannels = []string{"alpha", "beta", "gamma"}
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.channels.ensure("alpha").status = ConnectionState{Status: ConnectionConnected, Channel: "alpha"}
 	model.channels.ensure("beta").status = ConnectionState{Status: ConnectionDisconnected, Channel: "beta"}
 	model.channels.ensure("gamma").status = ConnectionState{Status: ConnectionReconnecting, Channel: "gamma"}
@@ -1713,7 +1713,7 @@ func TestMockShellChannelSidebarResponsiveLayouts(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			updated, _ := model.Update(tea.WindowSizeMsg{Width: tt.width, Height: tt.height})
-			rendered := updated.(mockShellModel)
+			rendered := updated.(shellModel)
 			layout := rendered.layout()
 			view := rendered.View()
 
@@ -1755,12 +1755,12 @@ func TestThemeSettingsOpensPreviewsAndPersists(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	cfg.Path = filepath.Join(t.TempDir(), "config.toml")
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 18
 	originalTheme := model.theme
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("open theme settings returned command %#v, want nil", cmd)
 	}
@@ -1783,7 +1783,7 @@ func TestThemeSettingsOpensPreviewsAndPersists(t *testing.T) {
 	}
 	for model.themeSettings.selected != nordIndex {
 		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
-		model = updated.(mockShellModel)
+		model = updated.(shellModel)
 	}
 	if model.theme != theme.Presets()["nord"] {
 		t.Fatalf("live preview theme = %+v, want nord preset", model.theme)
@@ -1793,7 +1793,7 @@ func TestThemeSettingsOpensPreviewsAndPersists(t *testing.T) {
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.themeSettings.open {
 		t.Fatal("themeSettings.open after enter = true, want false")
 	}
@@ -1816,21 +1816,21 @@ func TestThemeSettingsEscRevertsPreviewWithoutPersisting(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	cfg.Path = filepath.Join(t.TempDir(), "config.toml")
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 18
 	originalTheme := model.theme
 	originalThemeName := model.effectiveConfig.Features.ThemeName
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.theme == originalTheme {
 		t.Fatal("moving selection did not change live preview theme")
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.themeSettings.open {
 		t.Fatal("themeSettings.open after esc = true, want false")
 	}
@@ -1848,13 +1848,13 @@ func TestThemeSettingsEscRevertsPreviewWithoutPersisting(t *testing.T) {
 func TestThemeSettingsAndCommandPaletteAreMutuallyExclusive(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 18
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if !model.themeSettings.open || model.palette.open {
 		t.Fatalf("expected theme settings open and palette closed; theme=%v palette=%v", model.themeSettings.open, model.palette.open)
 	}
@@ -1863,7 +1863,7 @@ func TestThemeSettingsAndCommandPaletteAreMutuallyExclusive(t *testing.T) {
 func TestThemeSettingsRendersAsFullScreenPage(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 24
 
 	dashboard := ansi.Strip(model.View())
@@ -1872,7 +1872,7 @@ func TestThemeSettingsRendersAsFullScreenPage(t *testing.T) {
 	}
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	page := ansi.Strip(model.View())
 	if strings.Contains(page, "Chat · #alpha") {
@@ -1903,7 +1903,7 @@ func TestThemeSettingsRendersAsFullScreenPage(t *testing.T) {
 
 	// Every entry is reachable: End scrolls the window to the far end.
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnd})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if end := ansi.Strip(model.View()); !strings.Contains(end, names[len(names)-1]) {
 		t.Fatalf("theme page after end missing the last entry %q:\n%s", names[len(names)-1], end)
 	}
@@ -1912,14 +1912,14 @@ func TestThemeSettingsRendersAsFullScreenPage(t *testing.T) {
 func TestThemeSettingsHomeEndJumpToListEnds(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 24
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnd})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	names := themeSettingsNames()
 	if model.themeSettings.selected != len(names)-1 {
 		t.Fatalf("selected after end = %d, want %d", model.themeSettings.selected, len(names)-1)
@@ -1930,7 +1930,7 @@ func TestThemeSettingsHomeEndJumpToListEnds(t *testing.T) {
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyHome})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.themeSettings.selected != 0 {
 		t.Fatalf("selected after home = %d, want 0", model.themeSettings.selected)
 	}
@@ -1939,11 +1939,11 @@ func TestThemeSettingsHomeEndJumpToListEnds(t *testing.T) {
 func TestEmotePickerOpensFiltersExecutesAndCloses(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 18
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("open emote picker returned command %#v, want nil", cmd)
 	}
@@ -1958,7 +1958,7 @@ func TestEmotePickerOpensFiltersExecutesAndCloses(t *testing.T) {
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("champ")})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got, want := model.emotePicker.query, "champ"; got != want {
 		t.Fatalf("emote picker query = %q, want %q", got, want)
 	}
@@ -1968,7 +1968,7 @@ func TestEmotePickerOpensFiltersExecutesAndCloses(t *testing.T) {
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.emotePicker.open {
 		t.Fatal("emotePicker.open after enter = true, want false")
 	}
@@ -1980,13 +1980,13 @@ func TestEmotePickerOpensFiltersExecutesAndCloses(t *testing.T) {
 func TestEmotePickerEscCancelsWithoutInserting(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 18
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.emotePicker.open {
 		t.Fatal("emotePicker.open after esc = true, want false")
 	}
@@ -1998,23 +1998,23 @@ func TestEmotePickerEscCancelsWithoutInserting(t *testing.T) {
 func TestEmotePickerAndCommandPaletteAreMutuallyExclusive(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 18
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if !model.palette.open {
 		t.Fatal("palette.open = false after ctrl+p, want true")
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if !model.emotePicker.open || model.palette.open {
 		t.Fatalf("expected emote picker open and palette closed; emotePicker=%v palette=%v", model.emotePicker.open, model.palette.open)
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if !model.palette.open || model.emotePicker.open {
 		t.Fatalf("expected palette open and emote picker closed; palette=%v emotePicker=%v", model.palette.open, model.emotePicker.open)
 	}
@@ -2024,12 +2024,12 @@ func TestCommandPaletteOpensFiltersExecutesAndCloses(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	cfg.DefaultChannels = []string{"alpha", "beta", "gamma"}
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width = 88
 	model.height = 15
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("open palette returned command %#v, want nil", cmd)
 	}
@@ -2047,7 +2047,7 @@ func TestCommandPaletteOpensFiltersExecutesAndCloses(t *testing.T) {
 	}
 
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("gamma")})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("palette filter returned command %#v, want nil", cmd)
 	}
@@ -2060,7 +2060,7 @@ func TestCommandPaletteOpensFiltersExecutesAndCloses(t *testing.T) {
 	}
 
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("palette channel switch returned command %#v, want nil without visible assets", cmd)
 	}
@@ -2073,17 +2073,17 @@ func TestCommandPaletteOpensFiltersExecutesAndCloses(t *testing.T) {
 }
 
 func TestCommandPaletteFilteringDoesNotMutateComposerReplyOrSelection(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 	model.activeChannelState().messages = numberedMockMessages("example", 4)
-	model.focus = mockFocusComposer
+	model.focus = focusComposer
 	model.activeChannelState().composerText = "draft text"
 	model.activeChannelState().replyTo = replyContextFromMessage(model.activeChannelState().messages[2])
 	beforeReply := *model.activeChannelState().replyTo
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("help")})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("palette filter returned command %#v, want nil", cmd)
 	}
@@ -2094,14 +2094,14 @@ func TestCommandPaletteFilteringDoesNotMutateComposerReplyOrSelection(t *testing
 		t.Fatalf("palette query = %q, want %q", got, want)
 	}
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("palette escape returned command %#v, want nil", cmd)
 	}
 	if model.palette.open {
 		t.Fatal("palette open after esc = true, want false")
 	}
-	if got, want := model.focus, mockFocusComposer; got != want {
+	if got, want := model.focus, focusComposer; got != want {
 		t.Fatalf("focus after palette esc = %v, want %v", got, want)
 	}
 	if got, want := model.activeChannelState().composerText, "draft text"; got != want {
@@ -2112,15 +2112,15 @@ func TestCommandPaletteFilteringDoesNotMutateComposerReplyOrSelection(t *testing
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("focus chat")})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("focus chat command returned command %#v, want nil", cmd)
 	}
-	if got, want := model.focus, mockFocusChat; got != want {
+	if got, want := model.focus, focusChat; got != want {
 		t.Fatalf("focus after palette focus command = %v, want %v", got, want)
 	}
 	if got, want := model.activeChannelState().composerText, "draft text"; got != want {
@@ -2133,20 +2133,20 @@ func TestCommandPaletteFilteringDoesNotMutateComposerReplyOrSelection(t *testing
 
 func TestCommandPaletteAndKeyboardShortcutsClearAndReconnect(t *testing.T) {
 	client := NewFakeChatClient(1)
-	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
+	model := newLiveModelWithClock("example", config.Default(), client, nil)
 	state := model.activeChannelState()
 	state.messages = numberedMockMessages("example", 3)
 	state.composerText = "draft text"
 	state.replyTo = replyContextFromMessage(state.messages[1])
 	beforeReply := *state.replyTo
-	model.focus = mockFocusComposer
+	model.focus = focusComposer
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("clear local")})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("clear local command returned command %#v, want nil", cmd)
 	}
@@ -2165,12 +2165,12 @@ func TestCommandPaletteAndKeyboardShortcutsClearAndReconnect(t *testing.T) {
 	// not, because choosing it from a list is already deliberate.
 	model.activeChannelState().messages = numberedMockMessages("example", 2)
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("ctrl+l returned command %#v, want nil", cmd)
 	}
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("confirming ctrl+l returned command %#v, want nil", cmd)
 	}
@@ -2179,11 +2179,11 @@ func TestCommandPaletteAndKeyboardShortcutsClearAndReconnect(t *testing.T) {
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("reconnect")})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("palette reconnect returned nil command, want reconnect command")
 	}
@@ -2194,7 +2194,7 @@ func TestCommandPaletteAndKeyboardShortcutsClearAndReconnect(t *testing.T) {
 		t.Fatalf("status after reconnect request = %q, want %q", got, want)
 	}
 	updated, _ = model.Update(cmd().(reconnectCompletedMsg))
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got, want := client.ReconnectCount(), 1; got != want {
 		t.Fatalf("reconnect count = %d, want %d", got, want)
 	}
@@ -2206,12 +2206,12 @@ func TestCommandPaletteAndKeyboardShortcutsClearAndReconnect(t *testing.T) {
 	}
 
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("ctrl+r returned nil command, want reconnect command")
 	}
 	updated, _ = model.Update(cmd().(reconnectCompletedMsg))
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got, want := client.ReconnectCount(), 2; got != want {
 		t.Fatalf("reconnect count after ctrl+r = %d, want %d", got, want)
 	}
@@ -2222,9 +2222,9 @@ func TestCommandPaletteAndKeyboardShortcutsClearAndReconnect(t *testing.T) {
 		t.Fatalf("replyTo after reconnect = %#v, want %#v", model.activeChannelState().replyTo, beforeReply)
 	}
 
-	mockModel := newMockShellModel("example", config.Default())
+	mockModel := newMockModel("example", config.Default())
 	updated, cmd = mockModel.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
-	mockModel = updated.(mockShellModel)
+	mockModel = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("unsupported ctrl+r returned command %#v, want nil", cmd)
 	}
@@ -2239,7 +2239,7 @@ func TestCommandPaletteAndKeyboardShortcutsClearAndReconnect(t *testing.T) {
 func TestMockShellKeyboardMessageFiltersPreserveChannelState(t *testing.T) {
 	cfg := config.Default()
 	cfg.Twitch.Username = "twi_bot"
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 	state := model.activeChannelState()
 	state.messages = filterTestMessages("example")
 	state.unread = 4
@@ -2248,7 +2248,7 @@ func TestMockShellKeyboardMessageFiltersPreserveChannelState(t *testing.T) {
 	beforeReply := *state.replyTo
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("mention filter toggle returned command %#v, want nil without asset services", cmd)
 	}
@@ -2282,7 +2282,7 @@ func TestMockShellKeyboardMessageFiltersPreserveChannelState(t *testing.T) {
 	}
 
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("mention filter toggle-off returned command %#v, want nil without asset services", cmd)
 	}
@@ -2295,12 +2295,12 @@ func TestMockShellKeyboardMessageFiltersPreserveChannelState(t *testing.T) {
 }
 
 func TestMockShellComposerFocusedNumbersDoNotToggleMessageFilters(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
-	model.focus = mockFocusComposer
+	model := newMockModel("example", config.Default())
+	model.focus = focusComposer
 
 	for _, r := range []rune{'1', '2', '3', '4', '0'} {
 		updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-		model = updated.(mockShellModel)
+		model = updated.(shellModel)
 		if cmd != nil {
 			t.Fatalf("composer numeric key %q returned command %#v, want nil", r, cmd)
 		}
@@ -2315,18 +2315,18 @@ func TestMockShellComposerFocusedNumbersDoNotToggleMessageFilters(t *testing.T) 
 }
 
 func TestCommandPaletteTogglesAndResetsMessageFilters(t *testing.T) {
-	model := newMockShellModel("example", config.Default())
+	model := newMockModel("example", config.Default())
 	model.activeChannelState().messages = filterTestMessages("example")
 	model.activeChannelState().composerText = "draft"
 	model.activeChannelState().replyTo = replyContextFromMessage(model.activeChannelState().messages[0])
 	beforeReply := *model.activeChannelState().replyTo
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("roles")})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("palette role filter returned command %#v, want nil without asset services", cmd)
 	}
@@ -2344,11 +2344,11 @@ func TestCommandPaletteTogglesAndResetsMessageFilters(t *testing.T) {
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("reset filters")})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("palette reset filters returned command %#v, want nil without asset services", cmd)
 	}
@@ -2371,19 +2371,19 @@ func TestCommandPaletteTogglesAndResetsMessageFilters(t *testing.T) {
 
 func TestMessageFilterTogglesPreserveActiveSendQueueAndFeedback(t *testing.T) {
 	client := NewFakeChatClient(2)
-	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
+	model := newLiveModelWithClock("example", config.Default(), client, nil)
 	model.activeChannelState().messages = filterTestMessages("example")
-	model.focus = mockFocusComposer
+	model.focus = focusComposer
 	model.activeChannelState().composerText = "first message"
 
 	updated, firstCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if firstCmd == nil {
 		t.Fatal("first Enter returned nil command, want active send command")
 	}
 	model.activeChannelState().composerText = "second message"
 	updated, secondCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if secondCmd != nil {
 		t.Fatalf("second Enter returned command %#v while first send active, want queued only", secondCmd)
 	}
@@ -2399,10 +2399,10 @@ func TestMessageFilterTogglesPreserveActiveSendQueueAndFeedback(t *testing.T) {
 	sendState := before.sendState
 	sendFeedback := before.sendFeedback
 
-	model.focus = mockFocusChat
+	model.focus = focusChat
 	for _, r := range []rune{'1', '1'} {
 		updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-		model = updated.(mockShellModel)
+		model = updated.(shellModel)
 		if cmd != nil {
 			t.Fatalf("filter toggle %q returned command %#v without asset services, want nil", r, cmd)
 		}
@@ -2423,7 +2423,7 @@ func TestMessageFiltersArePerChannelAcrossSwitching(t *testing.T) {
 	cfg := config.Default()
 	cfg.Twitch.Username = "twi_bot"
 	cfg.DefaultChannels = []string{"alpha", "beta"}
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	alpha := model.channels.ensure("alpha")
 	beta := model.channels.ensure("beta")
 	alpha.messages = filterTestMessages("alpha")
@@ -2434,7 +2434,7 @@ func TestMessageFiltersArePerChannelAcrossSwitching(t *testing.T) {
 	beta.messages[2].Text = "beta vip update"
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if !alpha.messageFilters.enabled(messageFilterMentions) {
 		t.Fatal("alpha mention filter is not active")
 	}
@@ -2443,7 +2443,7 @@ func TestMessageFiltersArePerChannelAcrossSwitching(t *testing.T) {
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got, want := model.activeChannelName(), "beta"; got != want {
 		t.Fatalf("active channel = %q, want %q", got, want)
 	}
@@ -2455,7 +2455,7 @@ func TestMessageFiltersArePerChannelAcrossSwitching(t *testing.T) {
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if !beta.messageFilters.enabled(messageFilterRoles) {
 		t.Fatal("beta role filter is not active")
 	}
@@ -2464,7 +2464,7 @@ func TestMessageFiltersArePerChannelAcrossSwitching(t *testing.T) {
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got, want := model.activeChannelName(), "alpha"; got != want {
 		t.Fatalf("active channel = %q, want %q", got, want)
 	}
@@ -2476,12 +2476,12 @@ func TestMessageFiltersArePerChannelAcrossSwitching(t *testing.T) {
 	}
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'0'}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.activeChannelState().messageFilters.active() {
 		t.Fatalf("alpha filters after reset = %q, want none", model.activeChannelState().messageFilters.summary())
 	}
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if !model.activeChannelState().messageFilters.enabled(messageFilterRoles) {
 		t.Fatalf("beta filters after alpha reset = %q, want roles still active", model.activeChannelState().messageFilters.summary())
 	}
@@ -2490,7 +2490,7 @@ func TestMessageFiltersArePerChannelAcrossSwitching(t *testing.T) {
 func TestMessageFiltersAllowKeyboardSelectionOfActiveReveal(t *testing.T) {
 	cfg := config.Default()
 	cfg.Twitch.Username = "twi_bot"
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 	state := model.activeChannelState()
 	state.messages = []twitch.ChatMessage{filterTestMessages("example")[0]}
 	state.messageFilters.toggle(messageFilterMentions)
@@ -2508,14 +2508,14 @@ func TestMessageFiltersAllowKeyboardSelectionOfActiveReveal(t *testing.T) {
 	}
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("reply shortcut returned command %#v, want nil", cmd)
 	}
 	if model.activeChannelState().replyTo == nil || model.activeChannelState().replyTo.MessageID != "active-mention" {
 		t.Fatalf("replyTo after selecting active reveal = %#v, want active-mention", model.activeChannelState().replyTo)
 	}
-	if got, want := model.focus, mockFocusComposer; got != want {
+	if got, want := model.focus, focusComposer; got != want {
 		t.Fatalf("focus after reply shortcut = %v, want %v", got, want)
 	}
 }
@@ -2530,7 +2530,7 @@ func TestMessageFiltersKeepNarrowAndWideLayoutsCoherent(t *testing.T) {
 		{name: "wide", width: 120, height: 24},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			model := newMockShellModel("example", config.Default())
+			model := newMockModel("example", config.Default())
 			model.activeChannelState().messages = filterTestMessages("example")
 			model.activeChannelState().messageFilters.toggle(messageFilterMentions)
 
@@ -2557,7 +2557,7 @@ func TestReconnectPreservesChannelStateAndReportsFailureAndRepeatedRequests(t *t
 	if err := client.QueueReconnectError(errors.New("dial failed for oauth:secret-token")); err != nil {
 		t.Fatalf("QueueReconnectError returned error: %v", err)
 	}
-	model := newLiveShellModelWithClock("alpha", cfg, client, nil)
+	model := newLiveModelWithClock("alpha", cfg, client, nil)
 	alpha := model.channels.ensure("alpha")
 	beta := model.channels.ensure("beta")
 
@@ -2571,7 +2571,7 @@ func TestReconnectPreservesChannelStateAndReportsFailureAndRepeatedRequests(t *t
 	beta.unread = 2
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("ctrl+r returned nil command, want reconnect command")
 	}
@@ -2583,7 +2583,7 @@ func TestReconnectPreservesChannelStateAndReportsFailureAndRepeatedRequests(t *t
 	}
 
 	updated, repeatedCmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if repeatedCmd != nil {
 		t.Fatalf("repeated reconnect returned command %#v, want nil", repeatedCmd)
 	}
@@ -2595,7 +2595,7 @@ func TestReconnectPreservesChannelStateAndReportsFailureAndRepeatedRequests(t *t
 	}
 
 	updated, _ = model.Update(cmd().(reconnectCompletedMsg))
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.reconnectInFlight {
 		t.Fatal("reconnectInFlight after completion = true, want false")
 	}
@@ -2613,12 +2613,12 @@ func TestReconnectPreservesChannelStateAndReportsFailureAndRepeatedRequests(t *t
 	assertReconnectPreservedChannelState(t, model, beforeReply)
 
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("second ctrl+r returned nil command, want reconnect command")
 	}
 	updated, _ = model.Update(cmd().(reconnectCompletedMsg))
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got, want := client.ReconnectCount(), 2; got != want {
 		t.Fatalf("reconnect count after retry = %d, want %d", got, want)
 	}
@@ -2634,7 +2634,7 @@ func TestReconnectPreservesChannelStateAndReportsFailureAndRepeatedRequests(t *t
 func TestMockShellTinyWidthsDoNotExceedWindowWidth(t *testing.T) {
 	for width := 1; width <= 5; width++ {
 		t.Run(fmt.Sprintf("width-%d", width), func(t *testing.T) {
-			model := newMockShellModel("example", config.Default())
+			model := newMockModel("example", config.Default())
 			model.activeChannelState().composerText = "😀表"
 
 			updated, _ := model.Update(tea.WindowSizeMsg{Width: width, Height: 8})
@@ -2736,7 +2736,7 @@ func highThroughputBurstMessages(channel string, count int, startedAt time.Time)
 	return messages
 }
 
-func assertHighThroughputFallbackRendering(t *testing.T, model mockShellModel, messages []twitch.ChatMessage) {
+func assertHighThroughputFallbackRendering(t *testing.T, model shellModel, messages []twitch.ChatMessage) {
 	t.Helper()
 
 	seenKinds := map[render.FragmentKind]bool{}
@@ -2792,18 +2792,18 @@ func changedRevealFrames(t *testing.T, mode, text string) int {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = mode
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
-	model := newMockShellModelWithClock("example", cfg, clock)
+	model := newMockModelWithClock("example", cfg, clock)
 	updated, _ := model.Update(mockIncomingMessageMsg{
 		message: mockIncomingMessage("example", "animated-"+mode, text),
 	})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	changed := 0
 	for model.activeChannelState().revealQueue.Len() > 0 {
 		before := model.View()
 		clock.Add(mockRevealDelay)
 		updated, _ = model.Update(mockAnimationTickMsg{})
-		model = updated.(mockShellModel)
+		model = updated.(shellModel)
 		if after := model.View(); after != before {
 			changed++
 		}
@@ -2814,7 +2814,7 @@ func changedRevealFrames(t *testing.T, mode, text string) int {
 	return changed
 }
 
-func driveRevealToCompletion(t *testing.T, model *mockShellModel, clock *appFakeClock) {
+func driveRevealToCompletion(t *testing.T, model *shellModel, clock *appFakeClock) {
 	t.Helper()
 
 	for i := 0; model.activeChannelState().revealQueue.Len() > 0; i++ {
@@ -2823,11 +2823,11 @@ func driveRevealToCompletion(t *testing.T, model *mockShellModel, clock *appFake
 		}
 		clock.Add(mockRevealDelay)
 		updated, _ := model.Update(mockAnimationTickMsg{})
-		*model = updated.(mockShellModel)
+		*model = updated.(shellModel)
 	}
 }
 
-func assertReconnectPreservedChannelState(t *testing.T, model mockShellModel, beforeReply composerReplyContext) {
+func assertReconnectPreservedChannelState(t *testing.T, model shellModel, beforeReply composerReplyContext) {
 	t.Helper()
 
 	alpha := model.channels.states[channelKey("alpha")]
@@ -2952,7 +2952,7 @@ func lipglossWidth(value string) int {
 func TestScheduleFrameTickRunsContinuouslyWhenAnimationEnabled(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "fast"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 
 	cmd := model.scheduleFrameTick()
 	if cmd == nil {
@@ -2969,7 +2969,7 @@ func TestScheduleFrameTickRunsContinuouslyWhenAnimationEnabled(t *testing.T) {
 func TestScheduleFrameTickDisabledWhenAnimationOff(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 
 	if cmd := model.scheduleFrameTick(); cmd != nil {
 		t.Fatal("scheduleFrameTick() with animation off returned non-nil, want nil")
@@ -2979,11 +2979,11 @@ func TestScheduleFrameTickDisabledWhenAnimationOff(t *testing.T) {
 func TestCommandPaletteRevealProgressesThenSettles(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "fast"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 18
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if !model.palette.open {
 		t.Fatal("palette open = false, want true")
 	}
@@ -2997,7 +2997,7 @@ func TestCommandPaletteRevealProgressesThenSettles(t *testing.T) {
 	for i := 0; i < 200 && !model.paletteRevealSeq.Done(); i++ {
 		now = now.Add(50 * time.Millisecond)
 		updated, _ = model.Update(animation.FrameMsg{At: now})
-		model = updated.(mockShellModel)
+		model = updated.(shellModel)
 	}
 	settled := model.View()
 	if !strings.Contains(settled, "Focus composer") {
@@ -3008,11 +3008,11 @@ func TestCommandPaletteRevealProgressesThenSettles(t *testing.T) {
 func TestCommandPaletteFullyRevealedImmediatelyWhenAnimationOff(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 18
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if !strings.Contains(model.View(), "Focus composer") {
 		t.Fatalf("palette view not fully revealed with animation off:\n%s", model.View())
 	}
@@ -3021,7 +3021,7 @@ func TestCommandPaletteFullyRevealedImmediatelyWhenAnimationOff(t *testing.T) {
 func TestSplashCoversViewUntilDeadlineOrKeypress(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "fast"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 22
 	model.splashUntil = time.Now().Add(splashDuration)
 
@@ -3034,7 +3034,7 @@ func TestSplashCoversViewUntilDeadlineOrKeypress(t *testing.T) {
 	}
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if model.splashActive() {
 		t.Fatal("splashActive() = true after keypress, want false")
 	}
@@ -3046,7 +3046,7 @@ func TestSplashCoversViewUntilDeadlineOrKeypress(t *testing.T) {
 func TestSplashClearsAfterDeadlineWithoutKeypress(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "fast"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 22
 	model.splashUntil = time.Now().Add(-time.Millisecond)
 
@@ -3059,16 +3059,16 @@ func TestSplashClearsAfterDeadlineWithoutKeypress(t *testing.T) {
 }
 
 func TestCycleFocusAlternatesChatAndComposer(t *testing.T) {
-	model := newMockShellModel("alpha", config.Default())
-	if model.focus != mockFocusChat {
+	model := newMockModel("alpha", config.Default())
+	if model.focus != focusChat {
 		t.Fatalf("initial focus = %v, want chat", model.focus)
 	}
 	model.cycleFocus()
-	if model.focus != mockFocusComposer {
+	if model.focus != focusComposer {
 		t.Fatalf("focus after 1 cycle = %v, want composer", model.focus)
 	}
 	model.cycleFocus()
-	if model.focus != mockFocusChat {
+	if model.focus != focusChat {
 		t.Fatalf("focus after 2 cycles = %v, want chat", model.focus)
 	}
 }
@@ -3076,7 +3076,7 @@ func TestCycleFocusAlternatesChatAndComposer(t *testing.T) {
 // The emotes quick-select strip was removed from the dashboard; Ctrl+E is the
 // only surface for browsing emotes, so the main screen must stay clear of them.
 func TestMainScreenHasNoPermanentEmotesSection(t *testing.T) {
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 88, 22
 
 	view := model.View()
@@ -3089,7 +3089,7 @@ func TestScheduleBroadcasterIDLookupResolvesAndCaches(t *testing.T) {
 	lookup := &appFakeUserLookup{users: []twitch.UserIdentity{
 		{UserID: "100", Login: "alpha"},
 	}}
-	model := newLiveShellModelWithClockAndOptions("alpha", config.Default(), NewFakeChatClient(1), nil, ClientOptions{
+	model := newLiveModelWithClockAndOptions("alpha", config.Default(), NewFakeChatClient(1), nil, ClientOptions{
 		UserLookup: lookup,
 	})
 
@@ -3112,7 +3112,7 @@ func TestScheduleBroadcasterIDLookupResolvesAndCaches(t *testing.T) {
 }
 
 func TestScheduleBroadcasterIDLookupNoAvatarResolver(t *testing.T) {
-	model := newLiveShellModelWithClockAndOptions("alpha", config.Default(), NewFakeChatClient(1), nil, ClientOptions{})
+	model := newLiveModelWithClockAndOptions("alpha", config.Default(), NewFakeChatClient(1), nil, ClientOptions{})
 	if cmd := model.scheduleBroadcasterIDLookup(); cmd != nil {
 		t.Fatal("scheduleBroadcasterIDLookup() without UserLookup returned non-nil, want nil")
 	}
@@ -3132,7 +3132,7 @@ func (f *fakeEmoteListerForApp) GetChannelEmotes(context.Context, string) ([]twi
 
 func TestScheduleEmoteIndexLookupResolvesAndSkipsWhenCached(t *testing.T) {
 	lister := &fakeEmoteListerForApp{global: []twitch.EmoteMetadata{{ID: "1", Name: "Kappa"}}}
-	model := newLiveShellModelWithClockAndOptions("alpha", config.Default(), NewFakeChatClient(1), nil, ClientOptions{
+	model := newLiveModelWithClockAndOptions("alpha", config.Default(), NewFakeChatClient(1), nil, ClientOptions{
 		EmoteIndex: assets.NewEmoteIndex(lister),
 	})
 
@@ -3153,7 +3153,7 @@ func TestScheduleEmoteIndexLookupResolvesAndSkipsWhenCached(t *testing.T) {
 }
 
 func TestApplyEmoteIndexResultPreservesVisibleSelectionsByName(t *testing.T) {
-	model := newLiveShellModelWithClockAndOptions("alpha", config.Default(), NewFakeChatClient(1), nil, ClientOptions{})
+	model := newLiveModelWithClockAndOptions("alpha", config.Default(), NewFakeChatClient(1), nil, ClientOptions{})
 	model.emotePicker = emotePickerState{open: true, selected: 4}
 
 	model.applyEmoteIndexResult(emoteIndexResolvedMsg{
@@ -3171,7 +3171,7 @@ func TestApplyEmoteIndexResultPreservesVisibleSelectionsByName(t *testing.T) {
 }
 
 func TestScheduleEmoteIndexLookupNoIndex(t *testing.T) {
-	model := newLiveShellModelWithClockAndOptions("alpha", config.Default(), NewFakeChatClient(1), nil, ClientOptions{})
+	model := newLiveModelWithClockAndOptions("alpha", config.Default(), NewFakeChatClient(1), nil, ClientOptions{})
 	if cmd := model.scheduleEmoteIndexLookup(); cmd != nil {
 		t.Fatal("scheduleEmoteIndexLookup() without EmoteIndex returned non-nil, want nil")
 	}
@@ -3183,7 +3183,7 @@ func TestScheduleEmoteIndexLookupNoIndex(t *testing.T) {
 func TestApplyStreamStatusResultsUpdatesLiveOfflineAndViewers(t *testing.T) {
 	cfg := config.Default()
 	cfg.DefaultChannels = []string{"alpha", "beta"}
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 
 	startedAt := time.Date(2026, 7, 12, 18, 0, 0, 0, time.UTC)
 	model.applyStreamStatusResults([]twitch.StreamInfo{
@@ -3207,7 +3207,7 @@ func TestApplyStreamStatusResultsUpdatesLiveOfflineAndViewers(t *testing.T) {
 func TestApplyStreamStatusResultsLogsLiveOfflineTransitionsAfterBaseline(t *testing.T) {
 	cfg := config.Default()
 	cfg.DefaultChannels = []string{"alpha"}
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 
 	model.applyStreamStatusResults([]twitch.StreamInfo{{UserLogin: "alpha", Live: false}})
 	if len(model.activityLog) != 0 {
@@ -3233,7 +3233,7 @@ func TestApplyStreamStatusResultsLogsLiveOfflineTransitionsAfterBaseline(t *test
 
 func TestStatusLineShowsLiveOrOfflineAtSufficientWidth(t *testing.T) {
 	cfg := config.Default()
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.channels.ensure("alpha").live = false
 
 	offline := model.statusLine(100)
@@ -3251,7 +3251,7 @@ func TestStatusLineShowsLiveOrOfflineAtSufficientWidth(t *testing.T) {
 
 func TestStatusLineOmitsMetricsWhenNarrow(t *testing.T) {
 	cfg := config.Default()
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	narrow := model.statusLine(40)
 	if strings.Contains(narrow, "OFFLINE") || strings.Contains(narrow, "LIVE") {
 		t.Fatalf("narrow status line unexpectedly includes metrics:\n%s", narrow)
@@ -3278,12 +3278,12 @@ func TestFormatElapsedRendersHoursOnlyWhenPresent(t *testing.T) {
 func TestUpdateFrameMsgAdvancesAndReschedules(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "fast"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.frameTickScheduled = true
 
 	now := time.Now()
 	updated, cmd := model.Update(animation.FrameMsg{At: now})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	if model.lastFrameAt != now {
 		t.Fatalf("lastFrameAt = %v, want %v", model.lastFrameAt, now)

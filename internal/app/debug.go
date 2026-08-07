@@ -8,7 +8,7 @@ import (
 	"github.com/worxbend/twi/internal/twitch"
 )
 
-func (m mockShellModel) debugAppStart(source string, channels int) {
+func (m shellModel) debugAppStart(source string, channels int) {
 	m.debugLogger.Log(context.Background(), "app.start",
 		slog.String("source", source),
 		slog.Int("channels", channels),
@@ -17,50 +17,50 @@ func (m mockShellModel) debugAppStart(source string, channels int) {
 	)
 }
 
-func (m mockShellModel) debugChatMessage(event string, msg twitch.ChatMessage) {
+func (m shellModel) debugChatMessage(event string, msg twitch.ChatMessage) {
 	m.debugLogger.Log(context.Background(), event, chatMessageDebugAttrs(msg)...)
 }
 
-func (m mockShellModel) debugConnectionState(event string, state ConnectionState) {
+func (m shellModel) debugConnectionState(event string, state ConnectionState) {
 	m.debugLogger.Log(context.Background(), event, connectionStateDebugAttrs(state)...)
 }
 
-func (m mockShellModel) debugSendQueued(send queuedComposerSend) {
+func (m shellModel) debugSendQueued(send queuedComposerSend) {
 	m.debugLogger.Log(context.Background(), "app.send.queued", queuedSendDebugAttrs(send)...)
 }
 
-func (m mockShellModel) debugSendStart(send queuedComposerSend) {
+func (m shellModel) debugSendStart(send queuedComposerSend) {
 	m.debugLogger.Log(context.Background(), "app.send.start", queuedSendDebugAttrs(send)...)
 }
 
-func (m mockShellModel) debugSendComplete(send queuedComposerSend, result SendResult, err error) {
+func (m shellModel) debugSendComplete(send queuedComposerSend, result SendResult, err error) {
 	attrs := queuedSendDebugAttrs(send)
 	attrs = append(attrs, sendResultDebugAttrs(result, err)...)
 	m.debugLogger.Log(context.Background(), "app.send.complete", attrs...)
 }
 
-func (m mockShellModel) debugChannelOpened(channel string) {
+func (m shellModel) debugChannelOpened(channel string) {
 	m.debugLogger.Log(context.Background(), "app.channel.opened",
 		slog.String("channel", channel),
 		slog.Int("open_channels", len(m.channels.channelNames())),
 	)
 }
 
-func (m mockShellModel) debugChannelClosed(channel string) {
+func (m shellModel) debugChannelClosed(channel string) {
 	m.debugLogger.Log(context.Background(), "app.channel.closed",
 		slog.String("channel", channel),
 		slog.Int("open_channels", len(m.channels.channelNames())),
 	)
 }
 
-func (m mockShellModel) debugChannelJoinFailed(channel string, err error) {
+func (m shellModel) debugChannelJoinFailed(channel string, err error) {
 	m.debugLogger.Log(context.Background(), "app.channel.join_failed",
 		slog.String("channel", channel),
 		slog.String("error", err.Error()),
 	)
 }
 
-func (m mockShellModel) debugChannelPartFailed(channel string, err error) {
+func (m shellModel) debugChannelPartFailed(channel string, err error) {
 	m.debugLogger.Log(context.Background(), "app.channel.part_failed",
 		slog.String("channel", channel),
 		slog.String("error", err.Error()),

@@ -11,7 +11,7 @@ import (
 )
 
 func TestSplashTaglineTypesInWithoutMovingSideways(t *testing.T) {
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 88, 22
 	started := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	model.splashUntil = started.Add(splashDuration)
@@ -43,7 +43,7 @@ func TestSplashTaglineFinishesBeforeTheSplashLifts(t *testing.T) {
 	for _, mode := range []animation.Mode{animation.ModeFast, animation.ModeReduced} {
 		cfg := config.Default()
 		cfg.Features.AnimationMode = string(mode)
-		model := newMockShellModel("alpha", cfg)
+		model := newMockModel("alpha", cfg)
 
 		textCfg := model.textEffectConfig(animation.EffectTypewriter)
 		textCfg.Step = splashTaglineStep(model.animationMode)
@@ -56,7 +56,7 @@ func TestSplashTaglineFinishesBeforeTheSplashLifts(t *testing.T) {
 
 func TestSplashLinesAnimateBetweenFrames(t *testing.T) {
 	forceColorProfile(t)
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 88, 22
 	started := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	model.splashUntil = started.Add(splashDuration)
@@ -75,7 +75,7 @@ func TestSplashLinesAnimateBetweenFrames(t *testing.T) {
 
 func TestEmptyStateAnimatesOnTheSharedFrameClock(t *testing.T) {
 	forceColorProfile(t)
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 
 	model.lastFrameAt = time.UnixMilli(1000)
 	first := strings.Join(model.noChannelRows(60), "\n")
@@ -98,7 +98,7 @@ func TestEmptyStateHoldsStillWhenAnimationIsOff(t *testing.T) {
 	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = string(animation.ModeOff)
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 
 	model.lastFrameAt = time.UnixMilli(1000)
 	first := strings.Join(model.noChannelRows(60), "\n")
@@ -117,7 +117,7 @@ func TestEmptyStateHoldsStillWhenAnimationIsOff(t *testing.T) {
 
 func TestEmptyStateRowsStayInsideTheirWidth(t *testing.T) {
 	forceColorProfile(t)
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	model.lastFrameAt = time.UnixMilli(1400)
 
 	for _, width := range []int{1, 6, 12, 24, 60, 120} {
@@ -131,7 +131,7 @@ func TestEmptyStateRowsStayInsideTheirWidth(t *testing.T) {
 
 func TestCenteredEffectLinePaintsPaddingWithBackground(t *testing.T) {
 	forceColorProfile(t)
-	background := newMockShellModel("alpha", config.Default()).canvasBackground()
+	background := newMockModel("alpha", config.Default()).canvasBackground()
 	backgroundCode := backgroundOnlySGRCode(t, background)
 
 	cfg := animation.TextConfig{Effect: animation.EffectNone, Base: "#ffffff"}

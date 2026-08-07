@@ -88,10 +88,10 @@ func TestBackgroundStyledLineWrapsPlainTextOnly(t *testing.T) {
 func TestSplashViewWordmarkAndTaglineCarryExplicitBackground(t *testing.T) {
 	forceColorProfile(t)
 	cfg := config.Default()
-	background := newMockShellModel("alpha", cfg).canvasBackground()
+	background := newMockModel("alpha", cfg).canvasBackground()
 	backgroundCode := backgroundOnlySGRCode(t, background)
 
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 22
 	model.splashUntil = time.Now().Add(splashDuration)
 
@@ -108,7 +108,7 @@ func TestSplashViewWordmarkAndTaglineCarryExplicitBackground(t *testing.T) {
 func TestSplashViewWordmarkLineHasNoUnstyledGapBetweenResets(t *testing.T) {
 	forceColorProfile(t)
 	cfg := config.Default()
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 22
 	model.splashUntil = time.Now().Add(splashDuration)
 
@@ -164,10 +164,10 @@ func TestCenteredPlainLineStyledAsOneUnstyledFreeSpan(t *testing.T) {
 func TestBorderedFramesApplyBackgroundToBorderCharacters(t *testing.T) {
 	forceColorProfile(t)
 	cfg := config.Default()
-	background := newMockShellModel("alpha", cfg).canvasBackground()
+	background := newMockModel("alpha", cfg).canvasBackground()
 	backgroundCode := backgroundOnlySGRCode(t, background)
 
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 22
 	layout := model.layout()
 
@@ -184,7 +184,7 @@ func TestBorderedFramesApplyBackgroundToBorderCharacters(t *testing.T) {
 }
 
 func TestThemeBackgroundSequenceOnlyWhenInteractive(t *testing.T) {
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	if got := model.themeBackgroundSequence(); got != "" {
 		t.Fatalf("themeBackgroundSequence() without terminalOutput = %q, want empty", got)
 	}
@@ -199,7 +199,7 @@ func TestThemeBackgroundSequenceOnlyWhenInteractive(t *testing.T) {
 
 func TestViewEmbedsThemeBackgroundSequenceWhenInteractive(t *testing.T) {
 	var buf bytes.Buffer
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 88, 22
 	model.terminalOutput = &buf
 
@@ -211,7 +211,7 @@ func TestViewEmbedsThemeBackgroundSequenceWhenInteractive(t *testing.T) {
 }
 
 func TestViewOmitsThemeBackgroundSequenceWhenNotInteractive(t *testing.T) {
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 88, 22
 
 	view := model.View()
@@ -222,7 +222,7 @@ func TestViewOmitsThemeBackgroundSequenceWhenNotInteractive(t *testing.T) {
 
 func TestViewEmbedsThemeBackgroundSequenceDuringSplash(t *testing.T) {
 	var buf bytes.Buffer
-	model := newMockShellModel("alpha", config.Default())
+	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 88, 22
 	model.terminalOutput = &buf
 	model.splashUntil = time.Now().Add(splashDuration)

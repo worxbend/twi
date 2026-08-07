@@ -40,7 +40,7 @@ type chatRowCacheEntry struct {
 // anything still animating actually change. Without this, frame time grows
 // linearly with retained history.
 //
-// mockShellModel is copied by value on every Update, so the cache is held
+// shellModel is copied by value on every Update, so the cache is held
 // behind a pointer that every copy shares; it would otherwise be discarded on
 // each keystroke. Sharing is safe because Bubble Tea runs Update and View on
 // a single goroutine.

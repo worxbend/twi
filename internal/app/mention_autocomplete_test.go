@@ -37,13 +37,13 @@ func TestComposerMentionPrefixOnlyMatchesWordLeadingAt(t *testing.T) {
 
 // mentionTestModel returns a composer-focused model whose roster holds three
 // chatters sharing a "stream" prefix, most recently seen first.
-func mentionTestModel(t *testing.T) mockShellModel {
+func mentionTestModel(t *testing.T) shellModel {
 	t.Helper()
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
-	model := newMockShellModel("alpha", cfg)
+	model := newMockModel("alpha", cfg)
 	model.width, model.height = 90, 22
-	model.focus = mockFocusComposer
+	model.focus = focusComposer
 
 	now := time.Now()
 	roster := model.activeChannelState().roster
@@ -60,10 +60,10 @@ func mentionTestModel(t *testing.T) mockShellModel {
 	return model
 }
 
-func typeInComposer(model mockShellModel, text string) mockShellModel {
+func typeInComposer(model shellModel, text string) shellModel {
 	for _, r := range text {
 		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-		model = updated.(mockShellModel)
+		model = updated.(shellModel)
 	}
 	return model
 }
@@ -83,7 +83,7 @@ func TestMentionAutocompleteSuggestsAndCompletesWithTab(t *testing.T) {
 	}
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got, want := model.activeChannelState().composerText, "hey @StreamerGuy "; got != want {
 		t.Fatalf("draft after tab = %q, want %q", got, want)
 	}
@@ -96,9 +96,9 @@ func TestMentionAutocompleteArrowsMoveSelection(t *testing.T) {
 	model := typeInComposer(mentionTestModel(t), "@stream")
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got, want := model.activeChannelState().composerText, "@StreamFan99 "; got != want {
 		t.Fatalf("draft after down+tab = %q, want %q", got, want)
 	}
@@ -106,9 +106,9 @@ func TestMentionAutocompleteArrowsMoveSelection(t *testing.T) {
 	// Selection wraps, so up from the first entry reaches the last.
 	model = typeInComposer(mentionTestModel(t), "@stream")
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got, want := model.activeChannelState().composerText, "@StreamFan99 "; got != want {
 		t.Fatalf("draft after up+tab = %q, want %q (selection should wrap)", got, want)
 	}
@@ -118,7 +118,7 @@ func TestMentionAutocompleteEscDismissesOnlyCurrentWord(t *testing.T) {
 	model := typeInComposer(mentionTestModel(t), "@stream")
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if got := model.mentionSuggestions(); len(got) != 0 {
 		t.Fatalf("suggestions = %d after esc, want 0", len(got))
 	}
@@ -133,20 +133,20 @@ func TestMentionAutocompleteEscDismissesOnlyCurrentWord(t *testing.T) {
 
 func TestMentionAutocompleteLeavesKeysAloneWhenClosed(t *testing.T) {
 	model := mentionTestModel(t)
-	model.focus = mockFocusChat
+	model.focus = focusChat
 
 	// With no completion in flight, tab must still cycle focus.
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
-	model = updated.(mockShellModel)
-	if model.focus != mockFocusComposer {
+	model = updated.(shellModel)
+	if model.focus != focusComposer {
 		t.Fatalf("focus after tab = %v, want composer; tab was swallowed", model.focus)
 	}
 
 	// A draft with no @ offers nothing, so tab keeps cycling.
 	model = typeInComposer(model, "plain text")
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
-	model = updated.(mockShellModel)
-	if model.focus != mockFocusChat {
+	model = updated.(shellModel)
+	if model.focus != focusChat {
 		t.Fatalf("focus after second tab = %v, want chat", model.focus)
 	}
 }
@@ -169,7 +169,7 @@ func TestMentionAutocompleteEnterStillSends(t *testing.T) {
 	// This model has no chat client, so reaching the send path shows up as a
 	// send failure rather than a cleared draft.
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	state := model.activeChannelState()
 	if state.sendState != composerSendFailed {
 		t.Fatalf("send state after enter = %v, want the send path to have run", state.sendState)

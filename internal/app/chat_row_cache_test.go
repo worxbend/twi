@@ -11,7 +11,7 @@ import (
 	"github.com/worxbend/twi/internal/twitch"
 )
 
-func chatModelWithMessages(t *testing.T, count int, mutate func(*config.Config)) mockShellModel {
+func chatModelWithMessages(t *testing.T, count int, mutate func(*config.Config)) shellModel {
 	t.Helper()
 	forceColorProfile(t)
 	cfg := config.Default()
@@ -21,9 +21,9 @@ func chatModelWithMessages(t *testing.T, count int, mutate func(*config.Config))
 		mutate(&cfg)
 	}
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
-	model := newMockShellModelWithClock("example", cfg, clock)
+	model := newMockModelWithClock("example", cfg, clock)
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	state := model.activeChannelState()
 	state.messages = nil
@@ -106,7 +106,7 @@ func TestChatRowCacheInvalidatesOnResize(t *testing.T) {
 	before := strings.Join(model.chatRows(model.layout()), "\n")
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	after := strings.Join(model.chatRows(model.layout()), "\n")
 
 	if before == after {
@@ -148,7 +148,7 @@ func TestTrimScrollbackIsNoOpWhenUnlimitedOrUnderLimit(t *testing.T) {
 // TestApplyMessageTrimsInactiveChannel covers the buffer that grows without
 // anyone looking at it: an inactive channel still accumulates every message.
 func TestApplyMessageTrimsInactiveChannel(t *testing.T) {
-	set := newChannelStateSet([]string{"first", "second"}, mockAnimationConfig("off"), nil, 3)
+	set := newChannelStateSet([]string{"first", "second"}, animationConfigFor("off"), nil, 3)
 	for i := range 12 {
 		set.applyMessage(twitch.ChatMessage{
 			ID:      fmt.Sprintf("m-%d", i),

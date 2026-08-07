@@ -58,7 +58,7 @@ type activityEntry struct {
 // a "bits" tag, which systemNotificationFromMessage never classifies since
 // it isn't a USERNOTICE). Any other plain chat message produces no activity
 // entry.
-func (m *mockShellModel) recordActivityFromMessage(message twitch.ChatMessage) {
+func (m *shellModel) recordActivityFromMessage(message twitch.ChatMessage) {
 	at := message.Timestamp
 	if at.IsZero() {
 		at = time.Now()
@@ -112,7 +112,7 @@ func cheerActivityText(message twitch.ChatMessage) string {
 // channel immediately after connecting, so the first few are logged
 // individually and the remainder of the burst becomes one rolling
 // "N more joined" row that is rewritten in place.
-func (m *mockShellModel) applyMembershipEvent(event twitch.MembershipEvent) {
+func (m *shellModel) applyMembershipEvent(event twitch.MembershipEvent) {
 	state := m.channels.applyMembership(event)
 	if state == nil {
 		return
@@ -165,7 +165,7 @@ func (m *mockShellModel) applyMembershipEvent(event twitch.MembershipEvent) {
 	m.membershipBurstIndex = len(m.activityLog) - 1
 }
 
-func (m *mockShellModel) appendActivity(entry activityEntry) {
+func (m *shellModel) appendActivity(entry activityEntry) {
 	if entry.At.IsZero() {
 		entry.At = time.Now()
 	}
@@ -187,7 +187,7 @@ func (m *mockShellModel) appendActivity(entry activityEntry) {
 // per newly seen follower, oldest first. The very first poll only
 // establishes the seen-set as a baseline; it never floods the log by
 // treating every existing follower as "new".
-func (m *mockShellModel) applyNewFollowerActivity(page []twitch.Follower) {
+func (m *shellModel) applyNewFollowerActivity(page []twitch.Follower) {
 	hadBaseline := m.seenFollowerIDs != nil
 	if m.seenFollowerIDs == nil {
 		m.seenFollowerIDs = make(map[string]bool, len(page))

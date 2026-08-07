@@ -75,14 +75,14 @@ func TestParseClipCommandRecognizesVariants(t *testing.T) {
 
 func TestLiveShellClipInputCreatesClip(t *testing.T) {
 	fake := &appFakeClipManager{clip: twitch.Clip{ID: "abc", EditURL: "https://clips.twitch.tv/abc/edit"}}
-	model := newLiveShellModelWithClock("example", config.Default(), NewFakeChatClient(1), nil)
-	model.focus = mockFocusComposer
+	model := newLiveModelWithClock("example", config.Default(), NewFakeChatClient(1), nil)
+	model.focus = focusComposer
 	model.clipManager = fake
 	model.selfBroadcasterID = "123"
 	model.activeChannelState().composerText = "/clip T-5m"
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("/clip Enter returned nil command, want clip-create command")
 	}
@@ -95,7 +95,7 @@ func TestLiveShellClipInputCreatesClip(t *testing.T) {
 		t.Fatalf("clipCreatedMsg.err = %v, want nil", msg.err)
 	}
 	updated, _ = model.Update(msg)
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 
 	if fake.calls != 1 || fake.lastID != "123" {
 		t.Fatalf("CreateClip calls = %d lastID = %q, want 1 call for broadcaster 123", fake.calls, fake.lastID)
@@ -113,13 +113,13 @@ func TestLiveShellClipInputCreatesClip(t *testing.T) {
 }
 
 func TestLiveShellClipInputSurfacesParseError(t *testing.T) {
-	model := newLiveShellModelWithClock("example", config.Default(), NewFakeChatClient(1), nil)
-	model.focus = mockFocusComposer
+	model := newLiveModelWithClock("example", config.Default(), NewFakeChatClient(1), nil)
+	model.focus = focusComposer
 	model.clipManager = &appFakeClipManager{}
 	model.activeChannelState().composerText = "/clip T-2m T-4m"
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatal("/clip with invalid offsets returned a command, want nil (no network call)")
 	}
@@ -129,12 +129,12 @@ func TestLiveShellClipInputSurfacesParseError(t *testing.T) {
 }
 
 func TestLiveShellClipInputUnavailableWithoutClipManager(t *testing.T) {
-	model := newLiveShellModelWithClock("example", config.Default(), NewFakeChatClient(1), nil)
-	model.focus = mockFocusComposer
+	model := newLiveModelWithClock("example", config.Default(), NewFakeChatClient(1), nil)
+	model.focus = focusComposer
 	model.activeChannelState().composerText = "/clip"
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(mockShellModel)
+	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatal("/clip with no clipManager returned a command, want nil")
 	}
@@ -151,7 +151,7 @@ func TestClipCreateFailureIsUserFriendlyOnMissingScope(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.Default()
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 	model.clipManager = twitch.NewHelixClipsClient(twitch.HelixClipsClientConfig{Endpoint: server.URL})
 	model.selfBroadcasterID = "123"
 	state := model.channels.ensure("example")
@@ -176,7 +176,7 @@ func TestClipCreateFailureIsUserFriendlyOnNotLive(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.Default()
-	model := newMockShellModel("example", cfg)
+	model := newMockModel("example", cfg)
 	model.clipManager = twitch.NewHelixClipsClient(twitch.HelixClipsClientConfig{Endpoint: server.URL})
 	model.selfBroadcasterID = "123"
 	state := model.channels.ensure("example")

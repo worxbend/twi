@@ -73,7 +73,7 @@ type streamInfoSavedMsg struct {
 // info the first time the Stream Info tab opens (or after a failed load).
 // Repeat opens reuse the already-resolved broadcaster ID instead of looking
 // it up again.
-func (m *mockShellModel) scheduleStreamInfoLoad() tea.Cmd {
+func (m *shellModel) scheduleStreamInfoLoad() tea.Cmd {
 	if m.channelManager == nil {
 		m.streamInfo.loadErr = "Stream Info requires Twitch API credentials (client ID + OAuth token); run `twi login`."
 		return nil
@@ -110,7 +110,7 @@ func (m *mockShellModel) scheduleStreamInfoLoad() tea.Cmd {
 	}
 }
 
-func (m mockShellModel) applyStreamInfoLoaded(msg streamInfoLoadedMsg) mockShellModel {
+func (m shellModel) applyStreamInfoLoaded(msg streamInfoLoadedMsg) shellModel {
 	m.streamInfo.loading = false
 	if msg.broadcasterID != "" {
 		m.selfBroadcasterID = msg.broadcasterID
@@ -135,7 +135,7 @@ func (m mockShellModel) applyStreamInfoLoaded(msg streamInfoLoadedMsg) mockShell
 // category's Twitch game ID is always already known - it's only ever set by
 // picking a real category in the category picker (category_picker.go), never
 // typed - so no name->ID resolution is needed here.
-func (m *mockShellModel) scheduleStreamInfoSave() tea.Cmd {
+func (m *shellModel) scheduleStreamInfoSave() tea.Cmd {
 	if m.channelManager == nil || m.selfBroadcasterID == "" || m.streamInfo.saving {
 		return nil
 	}
@@ -189,7 +189,7 @@ func (m *mockShellModel) scheduleStreamInfoSave() tea.Cmd {
 	}
 }
 
-func (m mockShellModel) applyStreamInfoSaved(msg streamInfoSavedMsg) mockShellModel {
+func (m shellModel) applyStreamInfoSaved(msg streamInfoSavedMsg) shellModel {
 	m.streamInfo.saving = false
 	if msg.err != nil {
 		m.streamInfo.saveErr = streamInfoErrorMessage(msg.err)
@@ -265,7 +265,7 @@ func parseStreamInfoTags(raw string) []string {
 // handleStreamInfoKey handles all keys while the Stream Info tab is active
 // and no overlay (palette/inspect/theme/emotes) is open; see the KeyMsg
 // dispatch order in Update.
-func (m mockShellModel) handleStreamInfoKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m shellModel) handleStreamInfoKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.streamInfo.editing {
 		switch msg.Type {
 		case tea.KeyEsc:
@@ -310,12 +310,12 @@ func (m mockShellModel) handleStreamInfoKey(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 	return m, nil
 }
 
-func (m *mockShellModel) moveStreamInfoSelection(delta int) {
+func (m *shellModel) moveStreamInfoSelection(delta int) {
 	selected := (int(m.streamInfo.selected) + delta + int(streamInfoFieldCount)) % int(streamInfoFieldCount)
 	m.streamInfo.selected = streamInfoField(selected)
 }
 
-func (m *mockShellModel) startStreamInfoEdit() {
+func (m *shellModel) startStreamInfoEdit() {
 	if !m.streamInfo.loaded || m.streamInfo.loading {
 		return
 	}
@@ -323,13 +323,13 @@ func (m *mockShellModel) startStreamInfoEdit() {
 	m.streamInfo.editBuffer = m.streamInfoFieldValue(m.streamInfo.selected)
 }
 
-func (m *mockShellModel) commitStreamInfoEdit() {
+func (m *shellModel) commitStreamInfoEdit() {
 	m.setStreamInfoFieldValue(m.streamInfo.selected, m.streamInfo.editBuffer)
 	m.streamInfo.editing = false
 	m.streamInfo.editBuffer = ""
 }
 
-func (m mockShellModel) streamInfoFieldValue(field streamInfoField) string {
+func (m shellModel) streamInfoFieldValue(field streamInfoField) string {
 	switch field {
 	case streamInfoFieldTitle:
 		return m.streamInfo.title
@@ -344,7 +344,7 @@ func (m mockShellModel) streamInfoFieldValue(field streamInfoField) string {
 	}
 }
 
-func (m *mockShellModel) setStreamInfoFieldValue(field streamInfoField, value string) {
+func (m *shellModel) setStreamInfoFieldValue(field streamInfoField, value string) {
 	switch field {
 	case streamInfoFieldTitle:
 		m.streamInfo.title = value
@@ -357,7 +357,7 @@ func (m *mockShellModel) setStreamInfoFieldValue(field streamInfoField, value st
 	}
 }
 
-func (m mockShellModel) streamInfoView(layout mockShellLayout) string {
+func (m shellModel) streamInfoView(layout shellLayout) string {
 	contentWidth := layout.width
 	if layout.streamInfoFramed {
 		contentWidth = clampMin(layout.width-4, 1)
@@ -379,7 +379,7 @@ func (m mockShellModel) streamInfoView(layout mockShellLayout) string {
 	})
 }
 
-func (m mockShellModel) streamInfoLines(width, height int) []string {
+func (m shellModel) streamInfoLines(width, height int) []string {
 	if height <= 0 {
 		return nil
 	}
@@ -412,7 +412,7 @@ func (m mockShellModel) streamInfoLines(width, height int) []string {
 	return out
 }
 
-func (m mockShellModel) streamInfoFieldLines(width int) []string {
+func (m shellModel) streamInfoFieldLines(width int) []string {
 	var lines []string
 	switch {
 	case m.streamInfo.saving:
