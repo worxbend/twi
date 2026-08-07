@@ -65,6 +65,20 @@ When live Twitch IRC login fails with an authentication error, `twi` tries one O
 - Client ID.
 - Client secret.
 
+> **The client secret is the one `twi login` does not save.** The credential
+> store deliberately holds no secrets beyond the tokens themselves, so a
+> login-only setup has a refresh token it cannot redeem. Twitch access tokens
+> last roughly four hours, which means live chat will disconnect partway
+> through a long session and will not recover on its own.
+>
+> To get unattended refresh, set `TWI_TWITCH_CLIENT_SECRET` (or
+> `twitch_client_secret` in the flat config) to the secret from your Twitch
+> application. Otherwise, re-run `twi login` when chat drops.
+>
+> `twi chat` prints a warning at startup when a refresh token is present
+> without a secret, and `twi doctor`'s **client secret** check reports the
+> same thing.
+
 The refresh request is sent to Twitch's OAuth token endpoint. On supported
 platforms, the refreshed access token and refresh token are saved through the
 private credential store. If the credential store is unavailable or saving

@@ -17,6 +17,17 @@ constant in the source tree.
   Caps retained messages per channel. Set `0` to keep everything, at the cost
   of a repaint that slows down as the buffer grows.
 
+### Changed
+
+- **`twi chat` and `twi doctor` now warn when OAuth refresh cannot run.**
+  `twi login` saves a refresh token and client ID but no client secret, and
+  the refresh flow needs all three — so the documented setup held a refresh
+  token it could never redeem, and live chat simply stopped when the access
+  token expired (about 4 hours) with nothing having warned about it. Doctor's
+  **client secret** check now names the consequence instead of calling the
+  flow "optional", and reports which credential is missing rather than a bare
+  "unavailable".
+
 ### Fixed
 
 - **Chat no longer slows down over a long stream.** Every repaint re-rendered

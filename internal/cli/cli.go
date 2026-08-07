@@ -415,6 +415,10 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "could not determine the Twitch login for this token; run `twi doctor`, or set TWI_TWITCH_USERNAME to the account the token belongs to")
 		return 2
 	}
+	if notice := refreshCapabilityWarning(cfg.Twitch); notice != "" {
+		logger.Log(context.Background(), "cli.chat.refresh_unavailable")
+		fmt.Fprintln(stderr, notice)
+	}
 
 	client, err := newLiveChatClient(context.Background(), cfg, logger, status)
 	if err != nil {
@@ -801,6 +805,26 @@ func applyStoredCredentials(ctx context.Context, cfg *config.Config) (credential
 		applyCredentialRecord(cfg, record)
 	}
 	return status, nil
+}
+
+// refreshCapabilityWarning names the gap that ends a long session.
+//
+// Twitch access tokens last about four hours. twi refreshes on auth failure,
+// but the refresh flow needs the client secret alongside the refresh token and
+// client ID, and `twi login` deliberately does not save a secret. The usual
+// setup therefore holds a refresh token it can never redeem: chat simply stops
+// partway through a stream, having warned about nothing. Saying so at startup
+// costs one line and turns a mystery disconnect into a known limitation.
+func refreshCapabilityWarning(cfg config.TwitchConfig) string {
+	if strings.TrimSpace(cfg.RefreshToken) == "" || strings.TrimSpace(cfg.ClientSecret) != "" {
+		return ""
+	}
+	if strings.TrimSpace(cfg.ClientID) == "" {
+		return ""
+	}
+	return "warning: no client secret is configured, so the saved refresh token cannot be redeemed. " +
+		"Live chat will disconnect when this token expires (about 4 hours) and will not reconnect on its own. " +
+		"Set TWI_TWITCH_CLIENT_SECRET to your Twitch application's secret, or re-run `twi login` if chat drops."
 }
 
 func credentialPrecedenceHint(status credentialLoadStatus) string {

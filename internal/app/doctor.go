@@ -70,7 +70,7 @@ func DoctorWithOptions(ctx context.Context, cfg config.Config, opts DoctorOption
 		credentialCheck("oauth token", cfg.Twitch.OAuthToken, "live chat unavailable until TWI_TWITCH_OAUTH_TOKEN or TWITCH_ACCESS_TOKEN is set"),
 		credentialCheck("refresh token", cfg.Twitch.RefreshToken, "auth refresh unavailable until TWI_TWITCH_REFRESH_TOKEN or TWITCH_REFRESH_TOKEN is set"),
 		credentialCheck("client id", cfg.Twitch.ClientID, "optional Helix/API features unavailable"),
-		credentialCheck("client secret", cfg.Twitch.ClientSecret, "optional OAuth client-secret flow unavailable"),
+		clientSecretCheck(cfg.Twitch),
 		channelsCheck(cfg.DefaultChannels),
 		tokenValidationCheck(ctx, cfg, opts.TokenValidator),
 		reachabilityCheck(ctx, opts.ReachabilityProbe),
@@ -173,13 +173,13 @@ func tokenValidationCheck(ctx context.Context, cfg config.Config, validator twit
 	case twitch.TokenValidationMalformed:
 		return warnCheck("token validation", joinTokenValidationDetails(
 			tokenValidationDetail(validation, "malformed OAuth token"),
-			refreshAvailabilityDetail(validation.RefreshAvailable),
+			refreshAvailabilityDetail(validation.RefreshAvailable, cfg.Twitch),
 		))
 	case twitch.TokenValidationExpired:
 		return warnCheck("token validation", joinTokenValidationDetails(
 			tokenValidationDetail(validation, "OAuth token expired"),
 			tokenExpiryDetail(validation.ExpiresAt),
-			refreshAvailabilityDetail(validation.RefreshAvailable),
+			refreshAvailabilityDetail(validation.RefreshAvailable, cfg.Twitch),
 		))
 	case twitch.TokenValidationWrongUser:
 		// Not a blocker: live chat authenticates as the token's own account
@@ -190,7 +190,7 @@ func tokenValidationCheck(ctx context.Context, cfg config.Config, validator twit
 			tokenIdentityDetail(validation.Identity),
 			tokenScopeDetail("granted scopes", validation.Scopes),
 			tokenExpiryDetail(validation.ExpiresAt),
-			refreshAvailabilityDetail(validation.RefreshAvailable),
+			refreshAvailabilityDetail(validation.RefreshAvailable, cfg.Twitch),
 		))
 	case twitch.TokenValidationMissingScope:
 		if len(missing) > 0 {
@@ -199,7 +199,7 @@ func tokenValidationCheck(ctx context.Context, cfg config.Config, validator twit
 				tokenIdentityDetail(validation.Identity),
 				tokenScopeDetail("granted scopes", validation.Scopes),
 				tokenExpiryDetail(validation.ExpiresAt),
-				refreshAvailabilityDetail(validation.RefreshAvailable),
+				refreshAvailabilityDetail(validation.RefreshAvailable, cfg.Twitch),
 			))
 		}
 		return warnCheck("token validation", joinTokenValidationDetails(
@@ -207,7 +207,7 @@ func tokenValidationCheck(ctx context.Context, cfg config.Config, validator twit
 			tokenIdentityDetail(validation.Identity),
 			tokenScopeDetail("granted scopes", validation.Scopes),
 			tokenExpiryDetail(validation.ExpiresAt),
-			refreshAvailabilityDetail(validation.RefreshAvailable),
+			refreshAvailabilityDetail(validation.RefreshAvailable, cfg.Twitch),
 		))
 	default:
 		return warnCheck("token validation", tokenValidationDetail(validation, "token validation returned unknown state"))
@@ -219,7 +219,7 @@ func tokenValidationCheck(ctx context.Context, cfg config.Config, validator twit
 			tokenIdentityDetail(validation.Identity),
 			tokenScopeDetail("granted scopes", validation.Scopes),
 			tokenExpiryDetail(validation.ExpiresAt),
-			refreshAvailabilityDetail(validation.RefreshAvailable),
+			refreshAvailabilityDetail(validation.RefreshAvailable, cfg.Twitch),
 		))
 	}
 	return okCheck("token validation", joinTokenValidationDetails(
@@ -227,7 +227,7 @@ func tokenValidationCheck(ctx context.Context, cfg config.Config, validator twit
 		"required scopes present: "+tokenScopesCSV(twitch.RequiredIRCScopes()),
 		tokenScopeDetail("granted scopes", validation.Scopes),
 		tokenExpiryDetail(validation.ExpiresAt),
-		refreshAvailabilityDetail(validation.RefreshAvailable),
+		refreshAvailabilityDetail(validation.RefreshAvailable, cfg.Twitch),
 	))
 }
 
@@ -426,11 +426,52 @@ func tokenValidationDetail(validation twitch.TokenValidationResult, fallback str
 	return fallback
 }
 
-func refreshAvailabilityDetail(available bool) string {
+// clientSecretCheck reports whether unattended token refresh can actually
+// run, which is not the same question as whether a secret is configured.
+//
+// Twitch access tokens expire after roughly four hours. twi refreshes on auth
+// failure, but the refresh flow needs the client secret, and `twi login` does
+// not save one: the credential store holds the refresh token and client ID
+// and nothing else. So the common setup -- log in, start chatting -- has a
+// refresh token that can never be redeemed, and chat drops mid-session with
+// nothing having warned about it. That deserves a warning here rather than
+// the old "optional OAuth client-secret flow unavailable".
+func clientSecretCheck(cfg config.TwitchConfig) DoctorCheck {
+	if strings.TrimSpace(cfg.ClientSecret) != "" {
+		return okCheck("client secret", "set; unattended token refresh can run")
+	}
+	if strings.TrimSpace(cfg.RefreshToken) == "" {
+		return warnCheck("client secret", "not set; optional OAuth client-secret flow unavailable")
+	}
+	return warnCheck("client secret", "not set, so the saved refresh token cannot be redeemed: "+
+		"live chat will disconnect when the access token expires (about 4 hours) and will not recover on its own. "+
+		"Set TWI_TWITCH_CLIENT_SECRET to the secret from your Twitch application, or re-run `twi login` when chat drops")
+}
+
+// refreshAvailabilityDetail names which credential is missing rather than
+// reporting a bare "unavailable", because the three inputs come from three
+// different places (login, config, the Twitch developer console) and knowing
+// which one is absent is the whole difference between an actionable warning
+// and a shrug. The validator is the authority on whether refresh works, since
+// it saw the credentials actually used.
+func refreshAvailabilityDetail(available bool, cfg config.TwitchConfig) string {
 	if available {
 		return "refresh credentials are available"
 	}
-	return "refresh credentials are unavailable"
+	var missing []string
+	if strings.TrimSpace(cfg.RefreshToken) == "" {
+		missing = append(missing, "refresh token")
+	}
+	if strings.TrimSpace(cfg.ClientID) == "" {
+		missing = append(missing, "client id")
+	}
+	if strings.TrimSpace(cfg.ClientSecret) == "" {
+		missing = append(missing, "client secret")
+	}
+	if len(missing) == 0 {
+		return "refresh credentials are unavailable"
+	}
+	return "refresh credentials are unavailable (missing " + strings.Join(missing, ", ") + ")"
 }
 
 func tokenIdentityDetail(identity twitch.TokenIdentity) string {

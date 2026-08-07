@@ -75,11 +75,17 @@ func TestDoctorReportsCredentialPresenceAndValidationWithoutSecrets(t *testing.T
 		TokenValidator: validator,
 	})
 
-	for _, name := range []string{"twitch username", "oauth token", "refresh token", "client id", "client secret"} {
+	for _, name := range []string{"twitch username", "oauth token", "refresh token", "client id"} {
 		check := doctorCheck(t, report, name)
 		if check.Status != DoctorStatusOK || check.Detail != "present" {
 			t.Fatalf("%s = (%q, %q), want ok present", name, check.Status, check.Detail)
 		}
+	}
+	// The client secret check reports refresh capability rather than bare
+	// presence, because a saved refresh token without a secret cannot be
+	// redeemed. See TestDoctorWarnsWhenRefreshTokenCannotBeRedeemed.
+	if secret := doctorCheck(t, report, "client secret"); secret.Status != DoctorStatusOK {
+		t.Fatalf("client secret = (%q, %q), want ok when a secret is configured", secret.Status, secret.Detail)
 	}
 	validation := doctorCheck(t, report, "token validation")
 	if validation.Status != DoctorStatusWarn || !strings.Contains(validation.Detail, "chat:edit") {
@@ -458,5 +464,87 @@ func TestDoctorAcceptsEveryValidLayoutAndBadgeMode(t *testing.T) {
 				t.Errorf("layout=%s badges=%s reported %v: %s", layout, badges, check.Status, check.Detail)
 			}
 		}
+	}
+}
+
+// TestDoctorWarnsWhenRefreshTokenCannotBeRedeemed covers the setup twi's own
+// documented happy path produces: `twi login` saves a refresh token and client
+// ID but never a client secret, and the refresh flow requires all three. The
+// access token then expires after about four hours, chat drops, and nothing
+// had warned that recovery was impossible. Doctor previously called this
+// "optional OAuth client-secret flow unavailable".
+func TestDoctorWarnsWhenRefreshTokenCannotBeRedeemed(t *testing.T) {
+	cfg := config.Default()
+	cfg.Path = filepath.Join(t.TempDir(), "missing.toml")
+	cfg.Twitch.Username = "viewer"
+	cfg.Twitch.OAuthToken = "oauth:secret-token"
+	cfg.Twitch.RefreshToken = "refresh-secret"
+	cfg.Twitch.ClientID = "client-id"
+	cfg.Twitch.ClientSecret = ""
+
+	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+		Environ:           []string{"TERM=xterm-256color"},
+		CacheDir:          filepath.Join(t.TempDir(), "cache"),
+		ReachabilityProbe: func(context.Context) error { return nil },
+	})
+
+	check := doctorCheck(t, report, "client secret")
+	if check.Status != DoctorStatusWarn {
+		t.Fatalf("client secret = (%q, %q), want a warning", check.Status, check.Detail)
+	}
+	for _, want := range []string{"refresh token cannot be redeemed", "disconnect", "TWI_TWITCH_CLIENT_SECRET"} {
+		if !strings.Contains(check.Detail, want) {
+			t.Errorf("client secret detail = %q, want it to mention %q", check.Detail, want)
+		}
+	}
+}
+
+// TestDoctorNamesMissingRefreshCredential keeps the warning actionable: the
+// three inputs come from three different places, so "unavailable" alone does
+// not tell anyone what to go and fix.
+func TestDoctorNamesMissingRefreshCredential(t *testing.T) {
+	cfg := config.Default()
+	cfg.Path = filepath.Join(t.TempDir(), "missing.toml")
+	cfg.Twitch.Username = "viewer"
+	cfg.Twitch.OAuthToken = "oauth:secret-token"
+	cfg.Twitch.RefreshToken = "refresh-secret"
+	cfg.Twitch.ClientID = "client-id"
+
+	validator := twitch.NewFakeTokenValidator(twitch.FakeTokenValidationOutcome{
+		Result: twitch.TokenValidationResult{
+			Status:           twitch.TokenValidationExpired,
+			RefreshAvailable: false,
+		},
+	})
+
+	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+		Environ:           []string{"TERM=xterm-256color"},
+		CacheDir:          filepath.Join(t.TempDir(), "cache"),
+		ReachabilityProbe: func(context.Context) error { return nil },
+		TokenValidator:    validator,
+	})
+
+	check := doctorCheck(t, report, "token validation")
+	if !strings.Contains(check.Detail, "missing client secret") {
+		t.Fatalf("token validation detail = %q, want it to name the missing client secret", check.Detail)
+	}
+}
+
+// TestDoctorClientSecretStaysSoftWithoutRefreshToken keeps the warning
+// proportionate: with no refresh token there is nothing to redeem, so the
+// missing secret only costs the optional client-credentials flow.
+func TestDoctorClientSecretStaysSoftWithoutRefreshToken(t *testing.T) {
+	cfg := config.Default()
+	cfg.Path = filepath.Join(t.TempDir(), "missing.toml")
+
+	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+		Environ:           []string{"TERM=xterm-256color"},
+		CacheDir:          filepath.Join(t.TempDir(), "cache"),
+		ReachabilityProbe: func(context.Context) error { return nil },
+	})
+
+	check := doctorCheck(t, report, "client secret")
+	if strings.Contains(check.Detail, "disconnect") {
+		t.Fatalf("client secret detail = %q, want no disconnection warning without a refresh token", check.Detail)
 	}
 }

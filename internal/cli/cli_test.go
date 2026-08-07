@@ -2294,3 +2294,61 @@ func TestChatWithoutChannelsDoesNotExitEarly(t *testing.T) {
 		t.Fatalf("stderr still reports the removed no-channel guard: %q", stderr.String())
 	}
 }
+
+func TestRefreshCapabilityWarning(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		cfg  config.TwitchConfig
+		want bool
+	}{
+		{
+			// The setup `twi login` produces: refresh token and client ID
+			// saved, no secret, so the refresh flow can never run.
+			name: "refresh token without secret",
+			cfg:  config.TwitchConfig{RefreshToken: "r", ClientID: "c"},
+			want: true,
+		},
+		{
+			name: "secret present",
+			cfg:  config.TwitchConfig{RefreshToken: "r", ClientID: "c", ClientSecret: "s"},
+			want: false,
+		},
+		{
+			// Nothing to redeem, so nothing to warn about.
+			name: "no refresh token",
+			cfg:  config.TwitchConfig{ClientID: "c"},
+			want: false,
+		},
+		{
+			// Without a client ID the refresh flow is out of reach for a
+			// second reason; the client id doctor check already covers it.
+			name: "no client id",
+			cfg:  config.TwitchConfig{RefreshToken: "r"},
+			want: false,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := refreshCapabilityWarning(tt.cfg)
+			if (got != "") != tt.want {
+				t.Fatalf("refreshCapabilityWarning = %q, want warning=%v", got, tt.want)
+			}
+			if tt.want && !strings.Contains(got, "4 hours") {
+				t.Errorf("warning = %q, want it to name the expiry window", got)
+			}
+		})
+	}
+}
+
+// TestRefreshCapabilityWarningKeepsSecretsOut guards the obvious hazard: this
+// string is printed to a terminal that is often on stream.
+func TestRefreshCapabilityWarningKeepsSecretsOut(t *testing.T) {
+	got := refreshCapabilityWarning(config.TwitchConfig{
+		RefreshToken: "super-secret-refresh",
+		ClientID:     "client-id-value",
+	})
+	for _, secret := range []string{"super-secret-refresh", "client-id-value"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("warning leaked %q: %q", secret, got)
+		}
+	}
+}
