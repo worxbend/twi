@@ -41,6 +41,15 @@ const (
 	commandPaletteResetFilters  commandPaletteAction = "reset_filters"
 	commandPaletteClearLocal    commandPaletteAction = "clear_local"
 	commandPaletteQuit          commandPaletteAction = "quit"
+	// These reach keys that were previously in no discoverable surface: the
+	// emote picker, the theme page, and the four display toggles were
+	// reachable only by already knowing the key.
+	commandPaletteOpenEmotes      commandPaletteAction = "open_emotes"
+	commandPaletteOpenTheme       commandPaletteAction = "open_theme"
+	commandPaletteCycleLayout     commandPaletteAction = "cycle_layout"
+	commandPaletteCycleBadges     commandPaletteAction = "cycle_badges"
+	commandPaletteToggleHighlight commandPaletteAction = "toggle_emote_highlight"
+	commandPaletteToggleFullNames commandPaletteAction = "toggle_full_names"
 )
 
 type commandPaletteCommand struct {
@@ -221,6 +230,18 @@ func (m mockShellModel) executeCommandPaletteCommand(command commandPaletteComma
 	case commandPaletteToggleInspect:
 		m.inspectOpen = !m.inspectOpen
 		m.clampScroll()
+	case commandPaletteOpenEmotes:
+		m.toggleEmotePicker()
+	case commandPaletteOpenTheme:
+		m.toggleThemeSettings()
+	case commandPaletteCycleLayout:
+		m.cycleMessageLayout()
+	case commandPaletteCycleBadges:
+		m.cycleBadgeMode()
+	case commandPaletteToggleHighlight:
+		m.toggleEmoteHighlight()
+	case commandPaletteToggleFullNames:
+		m.toggleFullUsername()
 	case commandPaletteStartReply:
 		m.startReplyMode()
 	case commandPaletteCancelReply:
@@ -306,6 +327,12 @@ func (m mockShellModel) commandPaletteCommands() []commandPaletteCommand {
 		{action: commandPaletteClearLocal, title: "Clear local chat", shortcut: "ctrl+l", keywords: []string{"history", "messages", "local"}},
 		{action: commandPalettePageUp, title: "Scroll page up", shortcut: "pgup", keywords: []string{"scroll", "history"}},
 		{action: commandPalettePageDown, title: "Scroll page down", shortcut: "pgdn", keywords: []string{"scroll", "latest"}},
+		{action: commandPaletteOpenEmotes, title: "Open emote picker", shortcut: "ctrl+e", keywords: []string{"emote", "emotes", "emoji", "picker", "insert"}},
+		{action: commandPaletteOpenTheme, title: "Choose a theme", shortcut: "ctrl+t", keywords: []string{"theme", "themes", "colors", "colour", "palette", "appearance"}},
+		{action: commandPaletteCycleLayout, title: "Change message layout", shortcut: "ctrl+g", keywords: []string{"layout", "grouped", "inline", "compact", "display"}},
+		{action: commandPaletteCycleBadges, title: "Change badge display", shortcut: "ctrl+b", keywords: []string{"badge", "badges", "glyph", "text", "display"}},
+		{action: commandPaletteToggleHighlight, title: "Toggle emote highlighting", shortcut: "ctrl+y", keywords: []string{"emote", "highlight", "chip", "display"}},
+		{action: commandPaletteToggleFullNames, title: "Toggle full usernames", shortcut: "ctrl+n", keywords: []string{"username", "login", "display", "names"}},
 		{action: commandPaletteQuit, title: "Quit", shortcut: "q / ctrl+c", keywords: []string{"exit"}},
 	}
 

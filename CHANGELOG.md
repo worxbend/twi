@@ -25,6 +25,13 @@ constant in the source tree.
 
 ### Changed
 
+- **`ctrl+e` (emote picker) is finally discoverable.** Key handling, the
+  compact footer, the expanded help and the command palette were four
+  separately maintained lists, and the emote picker — used dozens of times a
+  session — had fallen out of every one of them. Help is now generated from a
+  single keymap table, `ctrl+e`, `ctrl+t` and the four display toggles have
+  command palette entries, and a test fails when a key is handled without
+  appearing in the table.
 - **`ctrl+l` now asks before clearing chat.** It discards the whole retained
   backlog for the channel and cannot be undone, from one keystroke, next to
   keys used constantly, on a tool that is often running during a broadcast.

@@ -3426,20 +3426,24 @@ func (m mockShellModel) helpLines(width, height int) []string {
 		if width < 38 {
 			return []string{" ctrl+p palette | tab focus"}
 		}
-		line := " ctrl+p | i/esc | jk | space e/c | [] | 1-4/0 | ? | r/K | q quit/ctrl+c quit"
+		line := compactHelpLine()
 		if width >= 112 {
 			line += " | " + source
 		}
 		return []string{line}
 	}
 
+	// Generated from keyBindings so help cannot drift from the keymap. The
+	// three surfaces that document keys used to be three hand-maintained
+	// lists, and ctrl+e had already fallen out of all of them.
 	lines := []string{
-		" i/o: compose | esc: back to chat | j/k: select message | pgup/pgdn: scroll | r: reply | K: inspect",
-		" space e: channel sidebar | space c: open channel | space x: close channel | [/]: switch | 1-4 filters, 0 reset",
-		" alt+1/2/3: tabs | tab: focus chat/composer/channels | ctrl+p: commands | ctrl+l: clear | ctrl+r: reconnect | q: quit | " + source,
+		helpGroupLine(keyGroupChat),
+		helpGroupLine(keyGroupChannels),
+		helpGroupLine(keyGroupView),
+		helpGroupLine(keyGroupSession) + " | " + source,
 		// Display toggles go last: when a short terminal truncates the help,
 		// the navigation keys are the ones that must survive.
-		" ctrl+t: theme | ctrl+g: layout | ctrl+b: badges | ctrl+y: emote highlight | ctrl+n: full names | @+tab: complete name",
+		helpGroupLine(keyGroupDisplay),
 	}
 	if width < 38 {
 		lines = []string{
