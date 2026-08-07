@@ -926,6 +926,20 @@ func appendWrappedFragments(rows []Row, current Row, used int, fragments []Fragm
 				used = indentWidth
 			}
 			if used+fragmentWidth > width && used == indentWidth && used > 0 && fragmentWidth <= width {
+				// The fragment cannot fit beside the indent but would fit on
+				// a full-width row, so give up the indent.
+				//
+				// The row being abandoned must be emitted first if it holds
+				// anything real. On the content pass, indentWidth is exactly
+				// the prefix width, so `used == indentWidth` is also true on
+				// the very first row -- where `current` holds the timestamp,
+				// badges and author name. Discarding it unconditionally
+				// dropped the whole prefix whenever a message opened with a
+				// long mention or emote, leaving an unattributed line in
+				// chat at ordinary terminal widths.
+				if rowHasContent(current) {
+					rows = append(rows, current)
+				}
 				current = Row{}
 				used = 0
 			}
@@ -936,7 +950,66 @@ func appendWrappedFragments(rows []Row, current Row, used int, fragments []Fragm
 			}
 		}
 
-		for _, cluster := range graphemeStrings(fragment.Text) {
+		// Prefer a break between words. Chat is prose, and breaking mid-word
+		// makes it materially harder to read at the speed a busy channel
+		// moves. A word wider than the line still falls through to
+		// cluster-by-cluster wrapping below, so nothing becomes unrenderable.
+		for _, chunk := range wrapChunks(fragment.Text) {
+			chunkWidth := textWidth(chunk)
+			if chunkWidth > 0 && chunkWidth <= width-indentWidth &&
+				used+chunkWidth > width && used > indentWidth &&
+				strings.TrimSpace(chunk) != "" {
+				rows = append(rows, current)
+				current = continuationRow(indentWidth)
+				used = indentWidth
+			}
+			rows, current, used = appendWrappedClusters(rows, current, used, fragment, chunk, width, indentWidth)
+		}
+	}
+	return rows, current, used
+}
+
+// wrapChunks splits text into word-sized pieces, each a run of non-space
+// characters together with the spaces that follow it. Keeping the trailing
+// spaces attached means a break taken before a chunk lands between words
+// rather than stranding a space at the start of the next row.
+func wrapChunks(text string) []string {
+	if text == "" {
+		return nil
+	}
+	var chunks []string
+	var current strings.Builder
+	inTrailingSpace := false
+	for _, cluster := range graphemeStrings(text) {
+		if cluster == "\n" {
+			if current.Len() > 0 {
+				chunks = append(chunks, current.String())
+				current.Reset()
+			}
+			chunks = append(chunks, cluster)
+			inTrailingSpace = false
+			continue
+		}
+		isSpace := strings.TrimSpace(cluster) == ""
+		if !isSpace && inTrailingSpace {
+			chunks = append(chunks, current.String())
+			current.Reset()
+			inTrailingSpace = false
+		}
+		current.WriteString(cluster)
+		if isSpace {
+			inTrailingSpace = true
+		}
+	}
+	if current.Len() > 0 {
+		chunks = append(chunks, current.String())
+	}
+	return chunks
+}
+
+func appendWrappedClusters(rows []Row, current Row, used int, fragment Fragment, text string, width, indentWidth int) ([]Row, Row, int) {
+	{
+		for _, cluster := range graphemeStrings(text) {
 			if cluster == "\n" {
 				rows = append(rows, current)
 				current = continuationRow(indentWidth)
@@ -1345,4 +1418,16 @@ func emptyFallback(value, fallback string) string {
 
 func compactWhitespace(value string) string {
 	return strings.Join(strings.Fields(value), " ")
+}
+
+// rowHasContent reports whether a row holds anything other than indent
+// padding, so an abandoned continuation row can be discarded while a row
+// carrying real fragments is emitted.
+func rowHasContent(row Row) bool {
+	for _, fragment := range row.Fragments {
+		if strings.TrimSpace(fragment.Text) != "" {
+			return true
+		}
+	}
+	return false
 }

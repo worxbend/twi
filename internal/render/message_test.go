@@ -200,10 +200,14 @@ func TestRowsSnapshotNarrowWrapping(t *testing.T) {
 		Text:        "one two three four five six",
 	}
 
+	// Breaks fall between words, not through them. Chat is prose, and a
+	// message split as "one two th / ree four f / ive six" is materially
+	// harder to read at the speed a busy channel moves.
 	want := []string{
-		"20:00 longviewer: one two th",
-		"                  ree four f",
-		"                  ive six",
+		"20:00 longviewer: one two ",
+		"                  three ",
+		"                  four five ",
+		"                  six",
 	}
 
 	got := plainRows(msg, 28)

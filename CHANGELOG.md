@@ -48,6 +48,14 @@ constant in the source tree.
   keepalives — and Twitch dropped the connection. It now discards the oldest
   queued message instead, and the status bar reports `dropped=N` so the loss
   is visible rather than silent.
+- **Messages that open with a long mention or emote keep their author.** A
+  wrapping branch discarded the row it was abandoning. On the content pass
+  that row is the one holding the timestamp, badges and name, so a message
+  starting with a mention too wide to sit beside the prefix rendered with no
+  author at all — at ordinary terminal widths, not just extreme ones.
+- **Chat wraps between words instead of through them.** A long message used
+  to break mid-word (`one two th` / `ree four f` / `ive six`). Words wider
+  than the line still wrap by character, so nothing becomes unrenderable.
 - **Chat reconnects on its own.** When Twitch closed the connection — a
   server restart, a momentary blip — chat stayed dead until someone noticed
   the silence and pressed `ctrl+r`, which mid-stream can be a long time. It
