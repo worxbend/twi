@@ -92,4 +92,4 @@ var ErrRateLimited = errors.New("sending too fast; Twitch limits chat to 20 mess
 
 // ErrDuplicateMessage reports a message identical to one just sent in the
 // same channel, which Twitch rejects with msg_duplicate.
-var ErrDuplicateMessage = errors.New("Twitch rejects an identical repeat of your last message; change it slightly")
+var ErrDuplicateMessage = errors.New("identical to your last message; Twitch rejects repeats, so change it slightly")
