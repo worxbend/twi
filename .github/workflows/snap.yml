@@ -1,12 +1,27 @@
 name: Snap
 
+# Manual only, for now.
+#
+# The build and smoke steps pass; publishing fails because the snap name
+# "twi" has never been registered in the Snap Store, so every push to main
+# and every release tag reported a red Snap run for a reason unrelated to the
+# commit that triggered it. A permanently failing required-looking check is
+# worse than no check: it trains everyone to ignore the one signal that would
+# matter when something real breaks.
+#
+# To re-enable: register the name at https://snapcraft.io/register-snap
+# (or `snapcraft register twi`), confirm a manual run publishes, then restore
+# the push trigger below.
+#
+# on:
+#   workflow_dispatch:
+#   push:
+#     branches:
+#       - main
+#     tags:
+#       - "v*"
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    tags:
-      - "v*"
 
 permissions:
   contents: read
