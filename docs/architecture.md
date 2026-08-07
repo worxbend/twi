@@ -91,7 +91,20 @@ splash gradients, pulsing status-bar LIVE/REC and incoming-message rails, the st
 block-logo splash, and a command-palette typewriter reveal that reuses the same
 `Sequence`/`Queue` machinery built for chat-row reveals — instead of each
 effect running its own ad hoc ticker. The Chat pane frame and title are kept
-static even while its message content reveals. After local filtering, adjacent
+static even while its message content reveals.
+
+Chrome labels reach that clock through `animation.TextFrame`
+(`internal/animation/text.go`), which renders a label under one of four
+effects — `typewriter`, `gradient-wave`, `shimmer`, `bounce` — as a pure
+function of elapsed time. It returns styled cells rather than escape
+sequences, keeping the package free of terminal I/O; `internal/app`
+(`animated_text.go`) paints those cells over the surface background and pads
+them. Every effect preserves its label's display width on every frame, so an
+animated label cannot reflow the pane around it, and `animation_mode = "off"`
+collapses each one to its static frame with the wording and layout unchanged.
+The splash tagline and strapline and the no-channels-open empty state are
+drawn this way. Chat message text stays on `Sequence`, which keeps chat
+readable and scroll-stable. After local filtering, adjacent
 messages are grouped by normalized Twitch login (then stable author ID/display
 name fallbacks); authorless events receive separate message/event-identity
 groups instead of being conflated by event type. Consecutive messages in one author group share the same

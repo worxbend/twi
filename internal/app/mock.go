@@ -35,6 +35,11 @@ const (
 	// sidebarCloseAffordance marks the highlighted sidebar row as closable
 	// with x (keyboard) or a click on the glyph itself (mouse).
 	sidebarCloseAffordance = " ✕"
+
+	noChannelHeadline      = "No channels open."
+	emptyStateIndent       = "  "
+	emptyStateScannerGlyph = "◆"
+	emptyStateScannerWidth = 16
 )
 
 // StreamStatusResolver is the app-facing boundary for real Twitch broadcast
@@ -1100,22 +1105,65 @@ func (m mockShellModel) chatView(layout mockShellLayout) string {
 // noChannelRows renders the empty state shown when nothing is open, which is
 // where `twi chat` lands without --channel/--channels. It names the two ways
 // out rather than leaving a blank pane.
+//
+// The headline and the scanner run on the shared frame clock so an idle pane
+// still reads as a live app. Both degrade to their static frame under
+// animation=off, leaving the wording and layout untouched.
 func (m mockShellModel) noChannelRows(width int) []string {
-	lines := []string{
-		"",
-		"No channels open.",
-		"",
-		"/channels or " + channelPickerKeyHint + " to open one",
-		"ctrl+p for the command palette",
+	width = clampMin(width, 1)
+	elapsed := m.frameElapsed()
+	rows := []string{
+		m.emptyStateLine("", width),
+		m.emptyStateHeadline(noChannelHeadline, width, elapsed),
+		m.emptyStateLine("", width),
+		m.emptyStateLine("/channels or "+channelPickerKeyHint+" to open one", width),
+		m.emptyStateLine("ctrl+p for the command palette", width),
 	}
-	rows := make([]string, 0, len(lines))
-	muted := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(m.theme.Muted)).
-		Background(lipgloss.Color(m.theme.Surface))
-	for _, line := range lines {
-		rows = append(rows, muted.Render(fitLine("  "+line, clampMin(width, 1))))
+	if scanner := m.emptyStateScanner(width, elapsed); scanner != "" {
+		rows = append(rows, m.emptyStateLine("", width), scanner)
 	}
 	return rows
+}
+
+func (m mockShellModel) emptyStateLine(text string, width int) string {
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color(m.theme.Muted)).
+		Background(lipgloss.Color(m.theme.Surface)).
+		Render(fitLine(emptyStateIndent+text, width))
+}
+
+// emptyStateHeadline drifts an accent gradient through the headline. Muted is
+// the near end so the resting color stays the empty state's own muted tone
+// instead of turning the pane into an accent banner.
+func (m mockShellModel) emptyStateHeadline(text string, width int, elapsed time.Duration) string {
+	cfg := m.textEffectConfig(animation.EffectGradientWave)
+	cfg.Base = m.theme.Muted
+	cfg.Accent = m.theme.Accent
+	cfg.Bold = true
+	frame := animatedText(revealDisplayCells(emptyStateIndent+text, width), cfg, elapsed, m.theme.Surface)
+	return paddedEffectLine(frame, width, m.theme.Surface)
+}
+
+// emptyStateScanner bounces a marker across the pane as an idle indicator:
+// nothing is arriving, but the app is still ticking. The track is narrow so
+// the motion stays in the corner of the eye rather than crossing the pane.
+//
+// The row is dropped entirely rather than frozen when animation is off: a
+// stationary marker carries no meaning, unlike the headline, whose wording
+// still has to be there.
+func (m mockShellModel) emptyStateScanner(width int, elapsed time.Duration) string {
+	indentWidth := uniseg.StringWidth(emptyStateIndent)
+	track := minInt(width-indentWidth-2, emptyStateScannerWidth)
+	if track < 4 || m.animationMode == string(animation.ModeOff) {
+		return ""
+	}
+	cfg := m.textEffectConfig(animation.EffectBounce)
+	cfg.Base = m.theme.Accent
+	cfg.Trail = m.theme.Muted
+	cfg.Width = track
+	indent := backgroundSpaces(indentWidth, m.theme.Surface)
+	frame := indent + animatedText(emptyStateScannerGlyph, cfg, elapsed, m.theme.Surface)
+	return paddedEffectLine(frame, width, m.theme.Surface)
 }
 
 // activeChatterLabel renders the live count of chatters twi considers active

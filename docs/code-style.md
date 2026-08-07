@@ -22,7 +22,7 @@ This guide describes the local engineering style for `twi`. It is intentionally 
 | `internal/render` | Message fragments, wrapping, image placeholders, terminal image preparation/rendering. | Network downloads or Twitch client ownership. |
 | `internal/assets` | Asset metadata resolution, public image downloading, cache write-through, safe asset events. | UI state mutation. |
 | `internal/storage` | Disk cache, filesystem probes, Unix credential-file persistence, storage test fakes. | UI decisions or non-Unix credential backends. |
-| `internal/animation` | Grapheme-safe reveal units and bounded queues. | Raw IRC parsing or terminal I/O. |
+| `internal/animation` | Grapheme-safe reveal units, bounded queues, the shared frame clock, and time-pure chrome text effects that return styled cells. | Raw IRC parsing or terminal I/O. |
 | `internal/debuglog` | Redacted JSON-line debug records. | Raw struct dumping. |
 | `internal/theme` | Palette and contrast correction. | App state. |
 

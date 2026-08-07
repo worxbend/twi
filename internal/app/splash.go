@@ -6,9 +6,17 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rivo/uniseg"
+	"github.com/worxbend/twi/internal/animation"
 )
 
-const splashProgressWidth = 28
+const (
+	splashProgressWidth  = 28
+	splashTaglineText    = "twi // terminal Twitch chat"
+	splashDecorativeText = "✦  expressive chat, zero browser chrome  ✦"
+	// splashTaglineDelay holds the tagline blank long enough for the logo
+	// to register before the typing starts.
+	splashTaglineDelay = 240 * time.Millisecond
+)
 
 var splashLogo = []string{
 	"████████╗██╗    ██╗██╗",
@@ -64,9 +72,9 @@ func (m mockShellModel) splashViewAt(now time.Time) string {
 		))
 	}
 
-	tagline := revealDisplayCells("twi // terminal Twitch chat", int(float64(27)*clampFraction((fraction-0.12)/0.38)))
-	taglineLine := splashStyledLine(centeredFittedLine(tagline, contentWidth), m.theme.Foreground, canvas, true)
-	decorativeLine := splashStyledLine(centeredFittedLine("✦  expressive chat, zero browser chrome  ✦", contentWidth), m.theme.Muted, canvas, false)
+	elapsed := m.splashElapsed(now)
+	taglineLine := m.splashTaglineLine(contentWidth, elapsed, canvas)
+	decorativeLine := m.splashDecorativeLine(contentWidth, elapsed, canvas)
 	blankLine := splashStyledLine(centeredFittedLine("", contentWidth), m.theme.Muted, canvas, false)
 	progressWidth := minInt(splashProgressWidth, clampMin(contentWidth-2, 0))
 	progressLine := gradientForegroundText(
@@ -111,9 +119,48 @@ func splashLinesForHeight(height int, logo []string, tagline, decorative, blank,
 	return lines
 }
 
+// splashTaglineLine types the tagline in behind a caret. The label is
+// animated at its own width and centered afterward, so the words settle into
+// their final position instead of sliding left as characters land.
+//
+// The step is set explicitly rather than taken from the effect default
+// because the tagline has to finish inside splashDuration in every animation
+// mode; a reduced-motion default would still be typing when the splash lifts.
+func (m mockShellModel) splashTaglineLine(contentWidth int, elapsed time.Duration, canvas string) string {
+	cfg := m.textEffectConfig(animation.EffectTypewriter)
+	cfg.Bold = true
+	cfg.Step = splashTaglineStep(m.animationMode)
+	frame := animatedText(revealDisplayCells(splashTaglineText, contentWidth), cfg, elapsed-splashTaglineDelay, canvas)
+	return centeredEffectLine(frame, contentWidth, canvas)
+}
+
+// splashDecorativeLine sweeps a highlight across the strapline while the
+// tagline types, so the boot sequence has motion on both lines without two
+// competing reveals.
+func (m mockShellModel) splashDecorativeLine(contentWidth int, elapsed time.Duration, canvas string) string {
+	cfg := m.textEffectConfig(animation.EffectShimmer)
+	cfg.Base = m.theme.Muted
+	frame := animatedText(revealDisplayCells(splashDecorativeText, contentWidth), cfg, elapsed, canvas)
+	return centeredEffectLine(frame, contentWidth, canvas)
+}
+
+func splashTaglineStep(animationMode string) time.Duration {
+	if animationMode == string(animation.ModeReduced) {
+		return 55 * time.Millisecond
+	}
+	return 30 * time.Millisecond
+}
+
+// splashElapsed returns how long the splash has been on screen at now.
+func (m mockShellModel) splashElapsed(now time.Time) time.Duration {
+	if m.splashUntil.IsZero() {
+		return 0
+	}
+	return splashDuration - m.splashUntil.Sub(now)
+}
+
 func (m mockShellModel) splashFraction(now time.Time) float64 {
-	elapsed := splashDuration - m.splashUntil.Sub(now)
-	return clampFraction(float64(elapsed) / float64(splashDuration))
+	return clampFraction(float64(m.splashElapsed(now)) / float64(splashDuration))
 }
 
 func splashContentWidth(width int) int {

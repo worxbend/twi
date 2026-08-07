@@ -5,15 +5,20 @@ import (
 	"testing"
 )
 
-func TestPresetNamesIncludesAllThirteen(t *testing.T) {
+func TestPresetNamesListsEveryBuiltInInStableOrder(t *testing.T) {
 	want := []string{
-		"btop", "catppuccin-mocha", "claude", "codex", "dracula", "gruvbox",
-		"mono", "monokai", "nord", "one-dark", "rose-pine", "solarized-dark",
-		"tokyo-night",
+		"ayu-dark", "ayu-mirage", "btop", "catppuccin-frappe",
+		"catppuccin-latte", "catppuccin-macchiato", "catppuccin-mocha",
+		"claude", "cobalt2", "codex", "dracula", "everforest", "github-light",
+		"gruvbox", "gruvbox-light", "horizon", "kanagawa", "mono", "monokai",
+		"night-owl", "nightfox", "nord", "oceanic-next", "one-dark",
+		"palenight", "rose-pine", "rose-pine-dawn", "rose-pine-moon",
+		"solarized-dark", "solarized-light", "synthwave-84", "tokyo-night",
+		"zenburn",
 	}
 	got := PresetNames()
 	if len(got) != len(want) {
-		t.Fatalf("PresetNames() = %v, want %v", got, want)
+		t.Fatalf("PresetNames() = %v (%d), want %v (%d)", got, len(got), want, len(want))
 	}
 	for i, name := range want {
 		if got[i] != name {
@@ -22,15 +27,94 @@ func TestPresetNamesIncludesAllThirteen(t *testing.T) {
 	}
 }
 
-func TestPresetNamesAreValidPalettes(t *testing.T) {
+// Every role must be a parseable hex color: an unset or malformed field would
+// reach lipgloss as an unknown color and render as the terminal's default,
+// silently dropping that role's meaning instead of failing loudly.
+func TestPresetPalettesFillEveryRoleWithValidHex(t *testing.T) {
 	for _, name := range PresetNames() {
 		palette := Presets()[name]
 		if palette == (Palette{}) {
 			t.Fatalf("preset %q has zero-value palette", name)
 		}
-		if _, ok := parseHexColor(palette.Background); !ok {
-			t.Fatalf("preset %q has invalid background %q", name, palette.Background)
+		for role, color := range paletteRoles(palette) {
+			if _, ok := parseHexColor(color); !ok {
+				t.Fatalf("preset %q has invalid %s %q", name, role, color)
+			}
 		}
+	}
+}
+
+// publishedSurfaceExceptions records presets whose own upstream scheme pairs
+// its body text with its panel color below the text bar. Solarized Dark's
+// base0 on base02 measures 4.11 by the scheme's definition, so twi keeps the
+// published pairing rather than inventing a different Solarized. New presets
+// must not join this list.
+var publishedSurfaceExceptions = map[string]float64{
+	"solarized-dark": 4.0,
+}
+
+// Body text has to clear the same contrast bar ContrastCorrectedForeground
+// enforces for derived colors, on the canvas and on raised panes alike.
+// Muted is deliberately excluded: several upstream schemes publish a
+// low-contrast comment color, and twi keeps their identity rather than
+// substituting its own.
+func TestPresetForegroundsAreReadableOnBackgroundAndSurface(t *testing.T) {
+	for _, name := range PresetNames() {
+		palette := Presets()[name]
+		foreground, _ := parseHexColor(palette.Foreground)
+		for role, color := range map[string]string{
+			"background": palette.Background,
+			"surface":    palette.Surface,
+		} {
+			want := minimumTextContrast
+			if floor, ok := publishedSurfaceExceptions[name]; ok && role == "surface" {
+				want = floor
+			}
+			behind, _ := parseHexColor(color)
+			if got := contrastRatio(foreground, behind); got < want {
+				t.Fatalf("preset %q foreground contrast on %s = %.2f, want >= %.2f", name, role, got, want)
+			}
+		}
+	}
+}
+
+// The accent paints the status bar and every focus rail, so it has to be
+// visible against the canvas rather than blending into it. 3.0 is the
+// large-text/graphical-object bar, which is what an accent fill is.
+func TestPresetAccentsStandOutFromTheirBackground(t *testing.T) {
+	const minimumAccentContrast = 3.0
+	for _, name := range PresetNames() {
+		palette := Presets()[name]
+		accent, _ := parseHexColor(palette.Accent)
+		background, _ := parseHexColor(palette.Background)
+		if got := contrastRatio(accent, background); got < minimumAccentContrast {
+			t.Fatalf("preset %q accent contrast = %.2f, want >= %.2f", name, got, minimumAccentContrast)
+		}
+	}
+}
+
+func TestPresetPalettesAreDistinct(t *testing.T) {
+	seen := make(map[Palette]string, len(presets))
+	for _, name := range PresetNames() {
+		palette := Presets()[name]
+		if other, ok := seen[palette]; ok {
+			t.Fatalf("presets %q and %q are the same palette", other, name)
+		}
+		seen[palette] = name
+	}
+}
+
+func paletteRoles(palette Palette) map[string]string {
+	return map[string]string{
+		"background": palette.Background,
+		"foreground": palette.Foreground,
+		"accent":     palette.Accent,
+		"muted":      palette.Muted,
+		"border":     palette.Border,
+		"surface":    palette.Surface,
+		"warning":    palette.Warning,
+		"error":      palette.Error,
+		"success":    palette.Success,
 	}
 }
 

@@ -11,6 +11,39 @@ constant in the source tree.
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-08-07
+
+### Added
+
+- **Animated text effects for chrome labels.** `internal/animation` gained a
+  text-effect engine with four treatments — `typewriter` (caret reveal),
+  `gradient-wave`, `shimmer`, and `bounce` (a marker with a fading trail) —
+  rendered as a pure function of elapsed time on the existing shared ~10fps
+  clock. Effects return styled cells rather than escape sequences, so the
+  package keeps its terminal-free boundary.
+- The **splash tagline now types in behind a blinking caret** and the
+  strapline below it shimmers, both centered at their final width so the
+  words no longer slide sideways as they appear.
+- The **no-channels-open empty state** drifts an accent gradient through its
+  headline and bounces an idle marker below the hints, so a waiting pane
+  still reads as a live app.
+- **20 more themes**, taking the built-in set from 13 to 33. Dark:
+  `catppuccin-macchiato`, `catppuccin-frappe`, `rose-pine-moon`, `everforest`,
+  `kanagawa`, `ayu-dark`, `ayu-mirage`, `night-owl`, `palenight`,
+  `synthwave-84`, `oceanic-next`, `nightfox`, `zenburn`, `cobalt2`,
+  `horizon`. Light — twi's first: `catppuccin-latte`, `rose-pine-dawn`,
+  `gruvbox-light`, `solarized-light`, `github-light`. All are selectable from
+  `ctrl+t`, `theme_name`, `TWI_THEME_NAME`, and `twi profile set`.
+- Preset palettes are now covered by contrast tests: every role must be valid
+  hex, body text must clear 4.5:1 on both the background and the pane
+  surface, and the accent must clear 3:1 on the background.
+
+### Changed
+
+- Every text effect preserves its label's display width on every frame, and
+  `animation_mode = "off"` renders the same wording and layout statically;
+  `"reduced"` roughly halves the motion rather than disabling it.
+
 ## [0.13.0] — 2026-08-02
 
 ### Added
@@ -189,7 +222,8 @@ Releases before `0.8.0` predate this changelog; see the
 [commit history](https://github.com/worxbend/twi/commits/main) and the
 [releases page](https://github.com/worxbend/twi/releases).
 
-[Unreleased]: https://github.com/worxbend/twi/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/worxbend/twi/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/worxbend/twi/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/worxbend/twi/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/worxbend/twi/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/worxbend/twi/compare/v0.11.0...v0.12.0
