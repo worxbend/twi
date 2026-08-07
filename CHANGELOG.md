@@ -13,6 +13,14 @@ constant in the source tree.
 
 ### Added
 
+- **11 more vibrant dark themes**, taking the built-in set from 46 to 57:
+  `plasma`, `sapphire`, `orchid`, `ruby`, `magma`, `bullion`,
+  `emerald-noir`, `mint-noir`, `abyss`, `spectre`, and `obsidian`. These fill
+  the hues the first batch left thin — blues and blue-violets, jewel greens,
+  gold — plus two deliberately low-chroma looks: `spectre` (pale cyan) and
+  `obsidian` (silver chrome, with color kept for the roles that carry
+  meaning). Same contrast bar as everything else; the tightest is `plasma`'s
+  accent at 4.45:1 against a 3:1 floor.
 - **13 vibrant dark themes**, taking the built-in set from 33 to 46:
   `neon-tokyo`, `vaporwave`, `hotline`, `ultraviolet`, `cyberpunk`, `matrix`,
   `toxic`, `amber-crt`, `midnight-ember`, `blood-moon`, `deep-ocean`,

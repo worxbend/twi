@@ -549,6 +549,149 @@ var presets = map[string]Palette{
 		Error:      "#ff3b30",
 		Success:    "#32d74b",
 	},
+
+	// Second batch of authored dark presets, in hues the first batch left
+	// thin: blues and blue-violets, jewel greens, gold, and two low-chroma
+	// looks for anyone who wants a black terminal without a neon accent.
+	"plasma": {
+		// Electric violet-blue on black.
+		Background: "#06050f",
+		Foreground: "#e6e3ff",
+		Accent:     "#6c5cff",
+		Muted:      "#75729c",
+		Border:     "#231f4a",
+		Surface:    "#0d0b1c",
+		Warning:    "#ffc93c",
+		Error:      "#ff5470",
+		Success:    "#3ce8b0",
+	},
+	"sapphire": {
+		// Bright blue on near-black; the saturated counterpart to the
+		// slate blues the ported schemes favor.
+		Background: "#03070f",
+		Foreground: "#dfeaff",
+		Accent:     "#2979ff",
+		Muted:      "#65799c",
+		Border:     "#122647",
+		Surface:    "#070e1c",
+		Warning:    "#ffc233",
+		Error:      "#ff5c7a",
+		Success:    "#31dba0",
+	},
+	"orchid": {
+		// Pink-purple, between neon-tokyo's magenta and ultraviolet.
+		Background: "#08040a",
+		Foreground: "#f7e4ff",
+		Accent:     "#e56cf0",
+		Muted:      "#8f6b99",
+		Border:     "#341542",
+		Surface:    "#120818",
+		Warning:    "#ffcc52",
+		Error:      "#ff5c8a",
+		Success:    "#52e0b8",
+	},
+	"ruby": {
+		// Pink-red on black, cooler than blood-moon's crimson.
+		Background: "#0a0308",
+		Foreground: "#ffe0ec",
+		Accent:     "#f50057",
+		Muted:      "#9c6b81",
+		Border:     "#3d0f28",
+		Surface:    "#150610",
+		Warning:    "#ffbf47",
+		Error:      "#ff5c7a",
+		Success:    "#4de3a8",
+	},
+	"magma": {
+		// Lava red-orange, the hottest of the warm presets.
+		Background: "#0b0503",
+		Foreground: "#ffe4d6",
+		Accent:     "#ff3d00",
+		Muted:      "#9c7263",
+		Border:     "#3d1a0d",
+		Surface:    "#160a05",
+		Warning:    "#ffab2e",
+		Error:      "#ff6347",
+		Success:    "#8fd97f",
+	},
+	"bullion": {
+		// Metallic gold on black; warmer and less orange than amber-crt.
+		Background: "#0a0803",
+		Foreground: "#fff3d4",
+		Accent:     "#ffcf33",
+		Muted:      "#9c8a5e",
+		Border:     "#3a2f10",
+		Surface:    "#141005",
+		Warning:    "#ffe066",
+		Error:      "#ff6b52",
+		Success:    "#a8e05f",
+	},
+	"emerald-noir": {
+		// Deep emerald on black, a jewel tone rather than matrix's
+		// phosphor or toxic's acid.
+		Background: "#020a07",
+		Foreground: "#dcf6ea",
+		Accent:     "#00d68f",
+		Muted:      "#5f8c78",
+		Border:     "#0f3327",
+		Surface:    "#06130e",
+		Warning:    "#ffc94d",
+		Error:      "#ff5d6e",
+		Success:    "#3ff2a8",
+	},
+	"mint-noir": {
+		// Bright mint on black. Accent and success share the hue
+		// because a mint scheme has one signature color.
+		Background: "#040b09",
+		Foreground: "#e0fff2",
+		Accent:     "#5effc4",
+		Muted:      "#6b9c8a",
+		Border:     "#12352a",
+		Surface:    "#081511",
+		Warning:    "#ffd75e",
+		Error:      "#ff6b7d",
+		Success:    "#5effc4",
+	},
+	"abyss": {
+		// Turquoise on a black-teal canvas; deep-ocean's colder,
+		// greener neighbor.
+		Background: "#010a0c",
+		Foreground: "#d6f5f2",
+		Accent:     "#00e5cc",
+		Muted:      "#5c8a8a",
+		Border:     "#0d3033",
+		Surface:    "#041416",
+		Warning:    "#ffcb47",
+		Error:      "#ff5f70",
+		Success:    "#4dffd2",
+	},
+	"spectre": {
+		// Pale cyan on true black; the accent is light rather than
+		// saturated, for a colder read than the neon presets.
+		Background: "#000000",
+		Foreground: "#e8f6fa",
+		Accent:     "#9fe8ff",
+		Muted:      "#6b8592",
+		Border:     "#1c2b33",
+		Surface:    "#080d10",
+		Warning:    "#ffd98f",
+		Error:      "#ff8fa3",
+		Success:    "#8fffd6",
+	},
+	"obsidian": {
+		// True black with a silver accent and color kept for the roles
+		// that carry meaning, for anyone who wants the chrome quiet and
+		// only warnings and errors to speak.
+		Background: "#000000",
+		Foreground: "#e8eaed",
+		Accent:     "#cfd8dc",
+		Muted:      "#7a8288",
+		Border:     "#22262a",
+		Surface:    "#0b0d0f",
+		Warning:    "#ffca28",
+		Error:      "#ff5252",
+		Success:    "#69f0ae",
+	},
 }
 
 // Presets returns the built-in named palettes, keyed by lowercase name.

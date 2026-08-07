@@ -7,15 +7,17 @@ import (
 
 func TestPresetNamesListsEveryBuiltInInStableOrder(t *testing.T) {
 	want := []string{
-		"amber-crt", "arctic-neon", "ayu-dark", "ayu-mirage", "blood-moon",
-		"btop", "carbon", "catppuccin-frappe", "catppuccin-latte",
-		"catppuccin-macchiato", "catppuccin-mocha", "claude", "cobalt2",
-		"codex", "cyberpunk", "deep-ocean", "dracula", "everforest",
-		"github-light", "gruvbox", "gruvbox-light", "horizon", "hotline",
-		"kanagawa", "matrix", "midnight-ember", "mono", "monokai",
-		"neon-tokyo", "night-owl", "nightfox", "nord", "oceanic-next",
-		"one-dark", "palenight", "rose-pine", "rose-pine-dawn",
-		"rose-pine-moon", "solarized-dark", "solarized-light", "synthwave-84",
+		"abyss", "amber-crt", "arctic-neon", "ayu-dark", "ayu-mirage",
+		"blood-moon", "btop", "bullion", "carbon", "catppuccin-frappe",
+		"catppuccin-latte", "catppuccin-macchiato", "catppuccin-mocha",
+		"claude", "cobalt2", "codex", "cyberpunk", "deep-ocean", "dracula",
+		"emerald-noir", "everforest", "github-light", "gruvbox",
+		"gruvbox-light", "horizon", "hotline", "kanagawa", "magma",
+		"matrix", "midnight-ember", "mint-noir", "mono", "monokai",
+		"neon-tokyo", "night-owl", "nightfox", "nord", "obsidian",
+		"oceanic-next", "one-dark", "orchid", "palenight", "plasma",
+		"rose-pine", "rose-pine-dawn", "rose-pine-moon", "ruby", "sapphire",
+		"solarized-dark", "solarized-light", "spectre", "synthwave-84",
 		"tokyo-night", "toxic", "ultraviolet", "vaporwave", "zenburn",
 	}
 	got := PresetNames()
