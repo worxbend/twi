@@ -53,6 +53,12 @@ type FeatureConfig struct {
 	HighlightEmotes bool
 	// FullUsername appends the login when it differs from the display name.
 	FullUsername bool
+	// ScrollbackLimit caps how many messages each channel retains. Chat is
+	// unbounded upstream, and every retained message is re-rendered on each
+	// repaint, so an uncapped buffer degrades the frame time of a long
+	// session until the UI cannot keep up with the animation tick. Zero or
+	// negative disables trimming and restores the old unbounded behavior.
+	ScrollbackLimit int
 }
 
 // ResolveTheme returns the effective palette for cfg: the named preset, or
@@ -124,6 +130,12 @@ func LoadEnvOnly(environ []string, overrides Overrides) (Config, error) {
 	return cfg, nil
 }
 
+// DefaultScrollbackLimit is the per-channel message cap applied when no
+// scrollback_limit is configured. It is high enough that a viewer scrolling
+// back through a busy stream keeps well more history than fits on screen, and
+// low enough that a full repaint stays inside the animation frame budget.
+const DefaultScrollbackLimit = 2000
+
 func Default() Config {
 	return Config{
 		Features: FeatureConfig{
@@ -137,6 +149,7 @@ func Default() Config {
 			BadgeMode:             "glyph",
 			HighlightEmotes:       true,
 			FullUsername:          false,
+			ScrollbackLimit:       DefaultScrollbackLimit,
 		},
 	}
 }
@@ -474,6 +487,8 @@ func applyEnv(cfg *Config, environ []string) {
 			cfg.Features.HighlightEmotes = parseBool(value, cfg.Features.HighlightEmotes)
 		case "TWI_FULL_USERNAME":
 			cfg.Features.FullUsername = parseBool(value, cfg.Features.FullUsername)
+		case "TWI_SCROLLBACK_LIMIT":
+			cfg.Features.ScrollbackLimit = parseInt(value, cfg.Features.ScrollbackLimit)
 		case "TWI_EMOTE_AUTOCOMPLETE_MODE":
 			cfg.Features.EmoteAutocompleteMode = value
 		case "TWI_DEBUG_LOG":
@@ -547,6 +562,8 @@ func applyKey(cfg *Config, key, value string) {
 		cfg.Features.HighlightEmotes = parseBool(value, cfg.Features.HighlightEmotes)
 	case "full_username":
 		cfg.Features.FullUsername = parseBool(value, cfg.Features.FullUsername)
+	case "scrollback_limit":
+		cfg.Features.ScrollbackLimit = parseInt(value, cfg.Features.ScrollbackLimit)
 	case "debug_logging":
 		cfg.Debug.Enabled = parseBool(value, cfg.Debug.Enabled)
 	case "debug_log_path":
@@ -591,6 +608,14 @@ func normalizeChannels(values []string) []string {
 		}
 	}
 	return channels
+}
+
+func parseInt(value string, fallback int) int {
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func parseBool(value string, fallback bool) bool {

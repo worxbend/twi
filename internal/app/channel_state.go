@@ -14,6 +14,9 @@ type channelStateSet struct {
 	states          map[string]*channelState
 	animationConfig animation.Config
 	clock           animation.Clock
+	// scrollbackLimit caps retained messages per channel. Zero or negative
+	// means unbounded. See config.FeatureConfig.ScrollbackLimit.
+	scrollbackLimit int
 	// placeholder backs the no-channels-open empty state. It is never in
 	// order or states, so it cannot be joined, switched to, or shown in the
 	// sidebar; it exists only so every view and key handler still has a
@@ -53,11 +56,12 @@ type channelState struct {
 	viewerCount            int
 }
 
-func newChannelStateSet(channels []string, animationConfig animation.Config, clock animation.Clock) *channelStateSet {
+func newChannelStateSet(channels []string, animationConfig animation.Config, clock animation.Clock, scrollbackLimit int) *channelStateSet {
 	set := &channelStateSet{
 		states:          make(map[string]*channelState),
 		animationConfig: animationConfig,
 		clock:           clock,
+		scrollbackLimit: scrollbackLimit,
 	}
 	for _, channel := range channels {
 		set.ensure(channel)
@@ -242,10 +246,35 @@ func (s *channelStateSet) applyMessage(message twitch.ChatMessage) (*channelStat
 	inactive := channelKey(state.name) != s.active
 	if inactive {
 		state.messages = append(state.messages, message)
+		state.trimScrollback(s.scrollbackLimit)
 		state.unread++
 		return state, false
 	}
 	return state, true
+}
+
+// trimScrollback drops the oldest messages once the channel exceeds limit.
+//
+// Retained messages are re-rendered on every repaint, so an untrimmed buffer
+// makes frame time grow without bound over a long session. Trimming from the
+// head keeps the newest history, which is the part anyone is reading.
+//
+// A non-zero scrollOffset is measured from the bottom of the buffer, so
+// dropping from the head does not shift what the viewer is looking at and the
+// offset is deliberately left alone. It is only clamped, by the caller's
+// clampScroll, once the buffer is short enough that the old offset would
+// scroll past the top.
+func (s *channelState) trimScrollback(limit int) {
+	if s == nil || limit <= 0 || len(s.messages) <= limit {
+		return
+	}
+	drop := len(s.messages) - limit
+	// Reslice into a fresh backing array rather than sliding in place: the
+	// old array keeps every dropped message alive otherwise, which defeats
+	// the point of trimming on a long stream.
+	kept := make([]twitch.ChatMessage, limit)
+	copy(kept, s.messages[drop:])
+	s.messages = kept
 }
 
 // applyMembership folds a JOIN/PART into the target channel's roster and

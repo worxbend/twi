@@ -69,7 +69,10 @@ type fdWriter interface {
 }
 
 type mockShellModel struct {
-	channels                    *channelStateSet
+	channels *channelStateSet
+	// rowCache memoizes per-message rendered rows across repaints. It is a
+	// pointer so the copies Bubble Tea makes on every Update share one cache.
+	rowCache                    *chatRowCache
 	theme                       theme.Palette
 	effectiveConfig             config.Config
 	terminalOutput              io.Writer
@@ -421,7 +424,7 @@ func newMockShellModel(channel string, cfg config.Config) mockShellModel {
 func newMockShellModelWithClock(channel string, cfg config.Config, clock animation.Clock) mockShellModel {
 	connectedAt := time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)
 	animationConfig := mockAnimationConfig(cfg.Features.AnimationMode)
-	channels := newChannelStateSet(configuredChannels(channel, cfg.DefaultChannels), animationConfig, clock)
+	channels := newChannelStateSet(configuredChannels(channel, cfg.DefaultChannels), animationConfig, clock, cfg.Features.ScrollbackLimit)
 	for _, channelName := range channels.channelNames() {
 		state := channels.ensure(channelName)
 		state.status = ConnectionState{
@@ -441,6 +444,7 @@ func newMockShellModelWithClock(channel string, cfg config.Config, clock animati
 	}
 	return mockShellModel{
 		channels:             channels,
+		rowCache:             newChatRowCache(),
 		theme:                cfg.ResolveTheme(),
 		membershipBurstIndex: -1,
 		mentionLogin:         cfg.Twitch.Username,
@@ -495,7 +499,7 @@ func newLiveShellModelWithClock(channel string, cfg config.Config, client ChatCl
 
 func newLiveShellModelWithClockAndOptions(channel string, cfg config.Config, client ChatClient, clock animation.Clock, opts ClientOptions) mockShellModel {
 	animationConfig := mockAnimationConfig(cfg.Features.AnimationMode)
-	channels := newChannelStateSet(configuredChannels(channel, cfg.DefaultChannels), animationConfig, clock)
+	channels := newChannelStateSet(configuredChannels(channel, cfg.DefaultChannels), animationConfig, clock, cfg.Features.ScrollbackLimit)
 	active := channels.activeState()
 	active.status = ConnectionState{
 		Status:  ConnectionConnecting,
@@ -505,6 +509,7 @@ func newLiveShellModelWithClockAndOptions(channel string, cfg config.Config, cli
 	}
 	return mockShellModel{
 		channels:              channels,
+		rowCache:              newChatRowCache(),
 		theme:                 cfg.ResolveTheme(),
 		mentionLogin:          cfg.Twitch.Username,
 		animationMode:         string(animationConfig.Mode),
@@ -1072,9 +1077,39 @@ func (m mockShellModel) statusLine(width int) string {
 		Render(line)
 }
 
+// visibleChatRows returns exactly the styled rows the chat pane will draw,
+// styling only the window rather than the whole backlog. It is equivalent to
+// visibleRows(chatRows(layout), height, scrollOffset) but does not pay to
+// style rows that are scrolled off screen.
+func (m mockShellModel) visibleChatRows(layout mockShellLayout) []string {
+	height := layout.chatContentHeight
+	if height <= 0 {
+		return nil
+	}
+	active := m.activeChannelState()
+	rowWidth := m.chatRowWidth(layout)
+	if m.channels.empty() {
+		return visibleRows(m.noChannelRows(rowWidth), height, active.scrollOffset)
+	}
+
+	blocks := m.visibleChatRowBlocks(layout)
+	total := chatRowBlockCount(blocks)
+	if total == 0 && active.messageFilters.active() {
+		return []string{backgroundStyledLine(m.emptyFilterRow(rowWidth), m.theme.Background)}
+	}
+	if total <= height {
+		return m.styleChatRowWindow(blocks, rowWidth, 0, -1)
+	}
+
+	// Mirrors visibleRows: scrollOffset counts rows hidden below the
+	// viewport, so the window ends that far from the bottom.
+	scrollOffset := min(clampMin(active.scrollOffset, 0), total-height)
+	start := total - scrollOffset - height
+	return m.styleChatRowWindow(blocks, rowWidth, clampMin(start, 0), height)
+}
+
 func (m mockShellModel) chatView(layout mockShellLayout) string {
-	rows := m.chatRows(layout)
-	rows = visibleRows(rows, layout.chatContentHeight, m.activeChannelState().scrollOffset)
+	rows := m.visibleChatRows(layout)
 
 	if len(rows) < layout.chatContentHeight {
 		for len(rows) < layout.chatContentHeight {
@@ -1351,6 +1386,84 @@ func channelStatusIndicator(status ConnectionStatus) string {
 	}
 }
 
+// styleChatRowWindow converts blocks into styled terminal rows, producing
+// only the rows in [start, start+count). A negative count means "to the end".
+//
+// Styling a row is not free, and only a screenful is ever displayed, so the
+// viewport path asks for just the window it will draw rather than styling the
+// whole backlog and slicing afterwards.
+func (m mockShellModel) styleChatRowWindow(blocks []chatRowBlock, rowWidth, start, count int) []string {
+	if start < 0 {
+		start = 0
+	}
+	capacity := count
+	if capacity < 0 {
+		capacity = chatRowBlockCount(blocks)
+	}
+	rows := make([]string, 0, clampMin(capacity, 0))
+	index := 0
+	// want reports whether the row at the current global index falls inside
+	// the requested window, and stops the walk once it is past the end.
+	want := func() (keep, done bool) {
+		if index < start {
+			return false, false
+		}
+		if count >= 0 && len(rows) >= count {
+			return false, true
+		}
+		return true, false
+	}
+	for _, block := range blocks {
+		if block.separatorBefore {
+			keep, done := want()
+			if done {
+				return rows
+			}
+			if keep {
+				rows = append(rows, m.messageGroupSeparatorString(rowWidth))
+			}
+			index++
+		}
+		if len(block.rows) == 0 {
+			keep, done := want()
+			if done {
+				return rows
+			}
+			if keep {
+				rows = append(rows, m.messageRowString(block, block.groupIndex, 0, render.Row{}, rowWidth))
+			}
+			index++
+			continue
+		}
+		for rowIndex, row := range block.rows {
+			keep, done := want()
+			if done {
+				return rows
+			}
+			if keep {
+				rows = append(rows, m.messageRowString(block, block.groupIndex, rowIndex, row, rowWidth))
+			}
+			index++
+		}
+	}
+	return rows
+}
+
+// chatRowCount reports how many rows chatRows would produce, without paying
+// for the string styling of every row. Scroll clamping needs only the count,
+// and it runs from several Update paths per arriving message.
+func (m mockShellModel) chatRowCount(layout mockShellLayout) int {
+	if m.channels.empty() {
+		return len(m.noChannelRows(m.chatRowWidth(layout)))
+	}
+	blocks := m.visibleChatRowBlocks(layout)
+	count := chatRowBlockCount(blocks)
+	if count == 0 && m.activeChannelState().messageFilters.active() {
+		return 1
+	}
+	return count
+}
+
 func (m mockShellModel) chatRows(layout mockShellLayout) []string {
 	active := m.activeChannelState()
 	rowWidth := m.chatRowWidth(layout)
@@ -1359,19 +1472,7 @@ func (m mockShellModel) chatRows(layout mockShellLayout) []string {
 	}
 	blocks := m.visibleChatRowBlocks(layout)
 
-	rows := make([]string, 0, chatRowBlockCount(blocks))
-	for _, block := range blocks {
-		if block.separatorBefore {
-			rows = append(rows, m.messageGroupSeparatorString(rowWidth))
-		}
-		if len(block.rows) == 0 {
-			rows = append(rows, m.messageRowString(block, block.groupIndex, 0, render.Row{}, rowWidth))
-			continue
-		}
-		for rowIndex, row := range block.rows {
-			rows = append(rows, m.messageRowString(block, block.groupIndex, rowIndex, row, rowWidth))
-		}
-	}
+	rows := m.styleChatRowWindow(blocks, rowWidth, 0, -1)
 	if len(rows) == 0 && active.messageFilters.active() {
 		rows = append(rows, backgroundStyledLine(m.emptyFilterRow(rowWidth), m.theme.Background))
 	}
@@ -1406,16 +1507,37 @@ func (m mockShellModel) visibleChatRowBlocks(layout mockShellLayout) []chatRowBl
 	// Rendering happens after grouping because LayoutGrouped needs to know
 	// whether a message continues the previous author's block. Reveal frames
 	// are already-rendered partial rows, so they are left as-is.
+	params := m.chatRenderParams(rowWidth)
 	for index := range blocks {
 		if blocks[index].revealed {
 			continue
 		}
-		blocks[index].rows = render.Rows(
-			blocks[index].message,
-			m.messageRenderOptions(rowWidth, blocks[index].message, blocks[index].continuesGroup),
-		)
+		message := blocks[index].message
+		continuesGroup := blocks[index].continuesGroup
+		meta := m.authorMeta(message)
+		blocks[index].rows = m.rowCache.rows(message, continuesGroup, meta, params, func() []render.Row {
+			opts := m.renderOptions(rowWidth)
+			opts.ContinuesGroup = continuesGroup
+			opts.Meta = meta
+			return render.Rows(message, opts)
+		})
 	}
 	return blocks
+}
+
+// chatRenderParams mirrors the non-message inputs of renderOptions so the row
+// cache can detect a change that invalidates every cached message.
+func (m mockShellModel) chatRenderParams(width int) chatRenderParams {
+	opts := m.renderOptions(width)
+	return chatRenderParams{
+		width:        opts.Width,
+		layout:       opts.Layout,
+		badges:       opts.Badges,
+		highlight:    opts.HighlightEmotes,
+		fullUsername: opts.FullUsername,
+		showAvatars:  opts.Assets.ShowAvatars,
+		palette:      opts.Palette,
+	}
 }
 
 // assignChatAuthorGroups joins adjacent visible messages from the same author
@@ -1508,7 +1630,7 @@ func isInteractiveTerminal(w io.Writer) bool {
 
 func (m mockShellModel) activeChannelState() *channelState {
 	if m.channels == nil {
-		channels := newChannelStateSet([]string{"chat"}, mockAnimationConfig(m.animationMode), nil)
+		channels := newChannelStateSet([]string{"chat"}, mockAnimationConfig(m.animationMode), nil, config.DefaultScrollbackLimit)
 		return channels.activeState()
 	}
 	return m.channels.activeState()
@@ -2189,11 +2311,11 @@ func (m *mockShellModel) clampScroll() {
 func (m mockShellModel) maxScrollOffset() int {
 	layout := m.layout()
 	visible := layout.chatContentHeight
-	rows := m.chatRows(layout)
-	if visible <= 0 || len(rows) <= visible {
+	total := m.chatRowCount(layout)
+	if visible <= 0 || total <= visible {
 		return 0
 	}
-	return len(rows) - visible
+	return total - visible
 }
 
 func (m mockShellModel) nextIncomingCommand() tea.Cmd {
@@ -2436,14 +2558,15 @@ func (m *mockShellModel) appendStaticMessage(message twitch.ChatMessage, preserv
 	}
 	beforeRows := 0
 	if preserveScrolledView {
-		beforeRows = len(m.chatRows(m.layout()))
+		beforeRows = m.chatRowCount(m.layout())
 	}
 	if message.Channel == "" {
 		message.Channel = state.name
 	}
 	state.messages = append(state.messages, message)
+	state.trimScrollback(m.channels.scrollbackLimit)
 	if preserveScrolledView {
-		state.scrollOffset = clampMin(state.scrollOffset+len(m.chatRows(m.layout()))-beforeRows, 0)
+		state.scrollOffset = clampMin(state.scrollOffset+m.chatRowCount(m.layout())-beforeRows, 0)
 	}
 }
 
@@ -2979,7 +3102,11 @@ func (m mockShellModel) authorMeta(message twitch.ChatMessage) render.AuthorMeta
 		FollowsSince:     entry.FollowsSince,
 		FollowKnown:      entry.FollowKnown,
 		FirstSeen:        entry.FirstSeen,
-		Now:              m.metricsNow(),
+		// Truncated to the minute because render.humanizeDuration is
+		// minute-granular at its finest: a raw clock would produce identical
+		// output while changing on every frame, which defeats row caching for
+		// every message whose author twi knows anything about.
+		Now: m.metricsNow().Truncate(time.Minute),
 	}
 }
 

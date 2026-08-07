@@ -149,6 +149,7 @@ Supported variables:
 | `TWI_BADGE_MODE` | No | Badge rendering beside usernames: `glyph` (single-cell icons), `text` (`[mod]` labels), or `off`. Defaults to `glyph`. |
 | `TWI_HIGHLIGHT_EMOTES` | No | Draw emotes and emoji on a tinted chip background. Defaults to `true`. |
 | `TWI_FULL_USERNAME` | No | Append the login when it differs from the display name (`アリス (alice_l)`). Defaults to `false`. |
+| `TWI_SCROLLBACK_LIMIT` | No | Messages retained per channel. Older messages are dropped once the limit is passed. Defaults to `2000`; `0` keeps everything, at the cost of a repaint that slows down as the buffer grows. |
 | `TWI_THEME_BACKGROUND` / `TWI_THEME_FOREGROUND` / `TWI_THEME_ACCENT` / `TWI_THEME_MUTED` / `TWI_THEME_BORDER` / `TWI_THEME_SURFACE` / `TWI_THEME_WARNING` / `TWI_THEME_ERROR` / `TWI_THEME_SUCCESS` | No | Custom palette hex values, only applied when `TWI_THEME_NAME=custom`. |
 | `TWI_STREAM_STATUS_MODE` | No | Enables (`auto`, default) or disables (`off`) polling Twitch Helix "Get Streams" for the status bar's real LIVE indicator. Requires `TWI_TWITCH_CLIENT_ID`/`TWI_TWITCH_OAUTH_TOKEN` either way. |
 | `TWI_EMOTE_AUTOCOMPLETE_MODE` | No | Enables (`auto`, default) or disables (`off`) fetching real Twitch global/channel emotes for the Ctrl+E picker. Requires Twitch API credentials either way; `--mock` always uses a built-in sample list regardless of this setting. |
@@ -213,6 +214,7 @@ message_layout = "inline"
 badge_mode = "glyph"
 highlight_emotes = true
 full_username = false
+scrollback_limit = 2000
 theme_name = "claude"
 theme_background = ""
 theme_foreground = ""
