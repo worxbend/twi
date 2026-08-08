@@ -52,7 +52,10 @@ func TestSplashViewHasAnimatedLogoAndNamedBootPhases(t *testing.T) {
 	if !strings.Contains(loading, "████████") || !strings.Contains(loading, "twi · loading palette") {
 		t.Fatalf("initial splash missing logo or loading phase:\n%s", loading)
 	}
-	ready := model.splashViewAt(started.Add(1800 * time.Millisecond))
+	// Expressed as a share of splashDuration rather than a fixed number of
+	// milliseconds, so changing the splash length does not silently move
+	// this assertion into a different phase.
+	ready := model.splashViewAt(started.Add(splashDuration * 9 / 10))
 	if !strings.Contains(ready, "ready for #alpha") || !strings.Contains(ready, "━") {
 		t.Fatalf("late splash missing ready phase or progress:\n%s", ready)
 	}

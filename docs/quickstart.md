@@ -47,6 +47,7 @@ docker compose run --rm mock
 | `tab` | Move focus between chat, composer, and the channel sidebar. |
 | `j` / `k` | Select the next/previous message, or move the sidebar highlight. |
 | `space` `c` | Open the `/channels` picker. |
+| any key during the splash | Skip the startup animation. |
 | `space` `e` | Show or hide the channel sidebar. |
 | `space` `a` | Show or hide the Activity column. |
 | `<` / `>` | Resize the pane you are in: the Activity column normally, or the channel sidebar while it has focus. Chat absorbs the difference. |

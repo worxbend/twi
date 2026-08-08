@@ -31,7 +31,10 @@ const (
 	activityLogMinWidth   = 100
 	activityLogNormalSize = 28
 	activityLogWideSize   = 34
-	splashDuration        = 2 * time.Second
+	// splashDuration is long enough for the startup chat to play through.
+	// Any keypress skips it, so the wait is never something a user is stuck
+	// with once they know it is there.
+	splashDuration = 10 * time.Second
 	// sidebarCloseAffordance marks the highlighted sidebar row as closable
 	// with x (keyboard) or a click on the glyph itself (mouse).
 	sidebarCloseAffordance = " ✕"

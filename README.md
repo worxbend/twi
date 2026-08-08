@@ -327,6 +327,7 @@ is only claimed when that document records a complete credential set.
 | `i` / `o` / `a` | Focus the composer and start typing (vim insert keys). |
 | `esc` | Leave the composer for the chat view, keeping the draft; from chat, close inspect mode, cancel reply mode, or close an open overlay. |
 | `j` / `k` | Select the next/previous message (chat focus) or move the sidebar highlight. |
+| any key during the splash | Skip the startup animation. |
 | `space` `e` | Show or hide the channel sidebar. |
 | `space` `a` | Show or hide the Activity column. |
 | `<` / `>` | Resize the pane you are in: the Activity column normally, or the channel sidebar while it has focus. Chat absorbs the difference. |

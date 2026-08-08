@@ -85,8 +85,16 @@ func (m shellModel) splashViewAt(now time.Time) string {
 		phase,
 		true,
 	)
-	phaseLine := splashStyledLine(centeredFittedLine(splashPhaseLabel(fraction, m.activeChannelName()), contentWidth), m.theme.Muted, canvas, false)
-	lines := splashLinesForHeight(height, logoLines, taglineLine, decorativeLine, blankLine, progressLine, phaseLine)
+	phaseLabel := splashPhaseLabel(fraction, m.activeChannelName())
+	if hint := splashSkipHint(fraction); hint != "" && contentWidth >= uniseg.StringWidth(phaseLabel)+uniseg.StringWidth(hint)+5 {
+		phaseLabel += "   ·   " + hint
+	}
+	phaseLine := splashStyledLine(centeredFittedLine(phaseLabel, contentWidth), m.theme.Muted, canvas, false)
+	// The chat gets whatever vertical room is left after everything else has
+	// been placed, so it never pushes the logo or the progress bar off a
+	// short terminal.
+	chatRows := m.splashChatRows(fraction, contentWidth, splashChatBudget(height, len(logo)))
+	lines := splashLinesForHeight(height, logoLines, taglineLine, decorativeLine, blankLine, progressLine, phaseLine, chatRows)
 
 	content := strings.Join(lines, "\n")
 	return lipgloss.NewStyle().
@@ -97,7 +105,19 @@ func (m shellModel) splashViewAt(now time.Time) string {
 		Render(content)
 }
 
-func splashLinesForHeight(height int, logo []string, tagline, decorative, blank, progress, phase string) []string {
+// splashChatBudget returns how many chat rows the terminal can spare once
+// the logo, tagline, decorative line, spacer, progress bar and phase label
+// have taken theirs. Returning zero simply omits the chat.
+func splashChatBudget(height, logoLines int) int {
+	const fixedRows = 5 // tagline, decorative, blank, progress, phase
+	spare := height - logoLines - fixedRows - 1
+	if spare < 1 {
+		return 0
+	}
+	return minInt(spare, splashChatMaxRows)
+}
+
+func splashLinesForHeight(height int, logo []string, tagline, decorative, blank, progress, phase string, chat []string) []string {
 	if height <= 1 {
 		return logo[:1]
 	}
@@ -113,9 +133,14 @@ func splashLinesForHeight(height int, logo []string, tagline, decorative, blank,
 	if height == 5 {
 		return []string{logo[0], tagline, decorative, progress, phase}
 	}
-	lines := make([]string, 0, len(logo)+5)
+	lines := make([]string, 0, len(logo)+5+len(chat))
 	lines = append(lines, logo...)
-	lines = append(lines, tagline, decorative, blank, progress, phase)
+	lines = append(lines, tagline, decorative)
+	if len(chat) > 0 {
+		lines = append(lines, blank)
+		lines = append(lines, chat...)
+	}
+	lines = append(lines, blank, progress, phase)
 	return lines
 }
 
@@ -179,6 +204,16 @@ func splashProgressBar(fraction float64, width int) string {
 		return "[" + strings.Repeat("━", width) + "]"
 	}
 	return "[" + strings.Repeat("━", filled) + "◆" + strings.Repeat("·", width-filled-1) + "]"
+}
+
+// splashSkipHint tells the user the splash is optional. Ten seconds is a
+// long time to look at a progress bar without knowing you can leave, and a
+// skippable wait nobody knows is skippable is just a wait.
+func splashSkipHint(fraction float64) string {
+	if fraction < 0.12 {
+		return ""
+	}
+	return "press any key to skip"
 }
 
 func splashPhaseLabel(fraction float64, channel string) string {

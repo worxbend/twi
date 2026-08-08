@@ -13,6 +13,15 @@ constant in the source tree.
 
 ### Added
 
+- **The startup splash now plays a small chat.** Five kaomoji mascots talk to
+  each other while twi loads, each message typing in behind a caret and the
+  column scrolling once it fills, using the same per-author color hashing and
+  the same `name: message` layout that real chat uses — so the splash previews
+  what the app does instead of just saying it is busy. The splash runs for 10
+  seconds and says `press any key to skip`, which any keypress does. It is
+  omitted entirely with `animation_mode = "off"`, and the chat is dropped
+  first on a terminal too short or narrow to fit it.
+
 - **Resizable side panes.** `<` and `>` move the boundary between chat and
   the Activity column two cells at a time, with chat absorbing the
   difference; with the channel sidebar focused they resize that instead. `=`
