@@ -48,6 +48,9 @@ docker compose run --rm mock
 | `j` / `k` | Select the next/previous message, or move the sidebar highlight. |
 | `space` `c` | Open the `/channels` picker. |
 | `space` `e` | Show or hide the channel sidebar. |
+| `space` `a` | Show or hide the Activity column. |
+| `<` / `>` | Resize the pane you are in: the Activity column normally, or the channel sidebar while it has focus. Chat absorbs the difference. |
+| `=` | Reset both side panes to sizing themselves from the terminal width. |
 | `space` `x` | Close the active channel. |
 | `[` / `]` | Switch the active channel from chat focus. |
 | `?` | Expand or collapse help. |

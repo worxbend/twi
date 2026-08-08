@@ -53,6 +53,14 @@ type FeatureConfig struct {
 	HighlightEmotes bool
 	// FullUsername appends the login when it differs from the display name.
 	FullUsername bool
+	// SidebarWidth and ActivityWidth override the responsive default width
+	// of the channel sidebar and the activity column, in terminal cells.
+	// Zero means "size automatically from the terminal width", which is the
+	// default and what most terminals want. Values are clamped to a usable
+	// range rather than rejected, so a config that asks for something the
+	// terminal cannot afford degrades instead of failing.
+	SidebarWidth  int
+	ActivityWidth int
 	// ScrollbackLimit caps how many messages each channel retains. Chat is
 	// unbounded upstream, and every retained message is re-rendered on each
 	// repaint, so an uncapped buffer degrades the frame time of a long
@@ -487,6 +495,10 @@ func applyEnv(cfg *Config, environ []string) {
 			cfg.Features.HighlightEmotes = parseBool(value, cfg.Features.HighlightEmotes)
 		case "TWI_FULL_USERNAME":
 			cfg.Features.FullUsername = parseBool(value, cfg.Features.FullUsername)
+		case "TWI_SIDEBAR_WIDTH":
+			cfg.Features.SidebarWidth = parseInt(value, cfg.Features.SidebarWidth)
+		case "TWI_ACTIVITY_WIDTH":
+			cfg.Features.ActivityWidth = parseInt(value, cfg.Features.ActivityWidth)
 		case "TWI_SCROLLBACK_LIMIT":
 			cfg.Features.ScrollbackLimit = parseInt(value, cfg.Features.ScrollbackLimit)
 		case "TWI_EMOTE_AUTOCOMPLETE_MODE":
@@ -562,6 +574,10 @@ func applyKey(cfg *Config, key, value string) {
 		cfg.Features.HighlightEmotes = parseBool(value, cfg.Features.HighlightEmotes)
 	case "full_username":
 		cfg.Features.FullUsername = parseBool(value, cfg.Features.FullUsername)
+	case "sidebar_width":
+		cfg.Features.SidebarWidth = parseInt(value, cfg.Features.SidebarWidth)
+	case "activity_width":
+		cfg.Features.ActivityWidth = parseInt(value, cfg.Features.ActivityWidth)
 	case "scrollback_limit":
 		cfg.Features.ScrollbackLimit = parseInt(value, cfg.Features.ScrollbackLimit)
 	case "debug_logging":

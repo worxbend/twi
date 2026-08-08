@@ -43,6 +43,7 @@ var keyBindings = []keyBinding{
 	{Keys: "space e", Description: "channel sidebar", Group: keyGroupChannels},
 	{Keys: "space c", Description: "open channel", Group: keyGroupChannels},
 	{Keys: "space x", Description: "close channel", Group: keyGroupChannels},
+	{Keys: "space a", Description: "activity column", Group: keyGroupChannels},
 	{Keys: "[/]", Description: "switch", Group: keyGroupChannels},
 
 	{Keys: "1-4", Description: "filters", Group: keyGroupView},
@@ -50,6 +51,8 @@ var keyBindings = []keyBinding{
 	{Keys: "alt+1/2/3", Description: "tabs", Group: keyGroupView},
 	{Keys: "tab", Description: "focus chat/composer/channels", Group: keyGroupView},
 	{Keys: "?", Description: "help", Group: keyGroupView},
+	{Keys: "</>", Description: "resize pane", Group: keyGroupView},
+	{Keys: "=", Description: "reset pane sizes", Group: keyGroupView},
 
 	{Keys: "ctrl+t", Description: "theme", Group: keyGroupDisplay},
 	{Keys: "ctrl+g", Description: "layout", Group: keyGroupDisplay},

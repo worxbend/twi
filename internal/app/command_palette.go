@@ -50,6 +50,13 @@ const (
 	commandPaletteCycleBadges     commandPaletteAction = "cycle_badges"
 	commandPaletteToggleHighlight commandPaletteAction = "toggle_emote_highlight"
 	commandPaletteToggleFullNames commandPaletteAction = "toggle_full_names"
+	// Pane visibility and sizing. Chat competes with the activity column for
+	// horizontal room, so the palette exposes both the toggle and the resize
+	// rather than leaving them key-only.
+	commandPaletteToggleActivity commandPaletteAction = "toggle_activity"
+	commandPaletteWidenChat      commandPaletteAction = "widen_chat"
+	commandPaletteNarrowChat     commandPaletteAction = "narrow_chat"
+	commandPaletteResetPanes     commandPaletteAction = "reset_panes"
 )
 
 type commandPaletteCommand struct {
@@ -242,6 +249,18 @@ func (m shellModel) executeCommandPaletteCommand(command commandPaletteCommand) 
 		m.toggleEmoteHighlight()
 	case commandPaletteToggleFullNames:
 		m.toggleFullUsername()
+	case commandPaletteToggleActivity:
+		m.toggleActivity()
+		m.clampScroll()
+	case commandPaletteWidenChat:
+		m.resizeActivity(-paneResizeStep)
+		m.clampScroll()
+	case commandPaletteNarrowChat:
+		m.resizeActivity(paneResizeStep)
+		m.clampScroll()
+	case commandPaletteResetPanes:
+		m.resetPaneWidths()
+		m.clampScroll()
 	case commandPaletteStartReply:
 		m.startReplyMode()
 	case commandPaletteCancelReply:
@@ -319,6 +338,10 @@ func (m shellModel) commandPaletteCommands() []commandPaletteCommand {
 		{action: commandPaletteOpenChannel, title: "Open channel", shortcut: channelPickerKeyHint, keywords: []string{"channel", "channels", "join", "open", "follow", "follows"}},
 		{action: commandPaletteCloseChannel, title: "Close current channel", shortcut: "space x", keywords: []string{"channel", "close", "leave", "part"}},
 		{action: commandPaletteToggleSidebar, title: "Toggle channel sidebar", shortcut: "space e", keywords: []string{"channel", "sidebar", "list", "panel"}},
+		{action: commandPaletteToggleActivity, title: "Toggle activity column", shortcut: "space a", keywords: []string{"activity", "log", "events", "raids", "subs", "panel", "hide", "show"}},
+		{action: commandPaletteWidenChat, title: "Widen chat", shortcut: "<", keywords: []string{"pane", "resize", "wider", "chat", "messages", "activity", "narrow"}},
+		{action: commandPaletteNarrowChat, title: "Narrow chat", shortcut: ">", keywords: []string{"pane", "resize", "narrower", "chat", "messages", "activity", "wider"}},
+		{action: commandPaletteResetPanes, title: "Reset pane sizes", shortcut: "=", keywords: []string{"pane", "resize", "reset", "default", "auto", "layout"}},
 		{action: commandPaletteToggleHelp, title: "Toggle help panel", shortcut: "?", keywords: []string{"help", "panel"}},
 		{action: commandPaletteNext, title: "Next channel", shortcut: "]", keywords: []string{"channel", "switch"}},
 		{action: commandPalettePrevious, title: "Previous channel", shortcut: "[", keywords: []string{"channel", "switch"}},

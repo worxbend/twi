@@ -123,7 +123,13 @@ type shellModel struct {
 	membershipBurstCount        int
 	membershipBurstIndex        int
 	// pendingClearChat marks a ctrl+L awaiting confirmation.
-	pendingClearChat          bool
+	pendingClearChat bool
+	// activityVisibility is the standing show/hide choice for the activity
+	// column. The width overrides are zero while a pane sizes itself from
+	// the terminal width.
+	activityVisibility        activityVisibility
+	sidebarWidthOverride      int
+	activityWidthOverride     int
 	mentionAutocomplete       mentionAutocompleteState
 	messageLayout             render.LayoutMode
 	badgeMode                 render.BadgeMode
@@ -416,8 +422,13 @@ func newShellModel(channel string, cfg config.Config, clock animation.Clock) she
 		badgeMode:       render.NormalizeBadgeMode(cfg.Features.BadgeMode),
 		highlightEmotes: cfg.Features.HighlightEmotes,
 		fullUsername:    cfg.Features.FullUsername,
-		debugRecording:  cfg.Debug.Enabled,
-		effectiveConfig: cfg,
+		// Zero means "size from the terminal width"; a configured value is
+		// clamped at layout time rather than here, because what a terminal
+		// can afford is not knowable until it reports its size.
+		sidebarWidthOverride:  cfg.Features.SidebarWidth,
+		activityWidthOverride: cfg.Features.ActivityWidth,
+		debugRecording:        cfg.Debug.Enabled,
+		effectiveConfig:       cfg,
 		// -1 means "no membership burst is being coalesced". Zero would name
 		// the first activity row as an open burst before one exists.
 		membershipBurstIndex: -1,
@@ -640,6 +651,25 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.helpExpanded = !m.helpExpanded
 				m.clampScroll()
 				return m, nil
+			}
+			// Pane resizing works from the chat view and from the sidebar,
+			// because the sidebar is the one pane whose own width these keys
+			// adjust; everywhere else they act on the activity column.
+			if (m.focus == focusChat || m.focus == focusSidebar) && len(msg.Runes) == 1 {
+				switch msg.Runes[0] {
+				case '<':
+					m.resizeFocusedPane(-paneResizeStep)
+					m.clampScroll()
+					return m, nil
+				case '>':
+					m.resizeFocusedPane(paneResizeStep)
+					m.clampScroll()
+					return m, nil
+				case '=':
+					m.resetPaneWidths()
+					m.clampScroll()
+					return m, nil
+				}
 			}
 			if m.focus == focusChat && len(msg.Runes) == 1 && msg.Runes[0] == ']' {
 				if m.channels.switchBy(1) {
@@ -1834,10 +1864,17 @@ func (m shellModel) sidebarWidth(width, chatHeight int) int {
 	if !m.sidebarVisibleFor(width, chatHeight) {
 		return 0
 	}
+	fallback := sidebarNormalSize
 	if width >= 112 {
-		return sidebarWideSize
+		fallback = sidebarWideSize
 	}
-	return sidebarNormalSize
+	// The activity column is measured first and passed in as the competing
+	// pane, so the two can never together starve chat.
+	return paneWidthOrDefault(
+		m.sidebarWidthOverride, fallback,
+		sidebarMinSize, sidebarMaxSize,
+		width, m.activityWidthFor(width, chatHeight),
+	)
 }
 
 // activityWidthFor decides the right-hand activity log column's width.
@@ -1845,13 +1882,18 @@ func (m shellModel) sidebarWidth(width, chatHeight int) int {
 // useful (raids/subs/new followers matter even with one channel open), so
 // it's gated only on having enough width and chat vertical room.
 func (m shellModel) activityWidthFor(width, chatHeight int) int {
-	if width < activityLogMinWidth || chatHeight < 3 {
+	if !m.activityVisibleFor(width, chatHeight) {
 		return 0
 	}
+	fallback := activityLogNormalSize
 	if width >= 140 {
-		return activityLogWideSize
+		fallback = activityLogWideSize
 	}
-	return activityLogNormalSize
+	return paneWidthOrDefault(
+		m.activityWidthOverride, fallback,
+		activityMinSize, activityMaxSize,
+		width, 0,
+	)
 }
 
 func (m shellModel) chatRowWidth(layout shellLayout) int {

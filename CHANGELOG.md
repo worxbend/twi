@@ -11,6 +11,25 @@ constant in the source tree.
 
 ## [Unreleased]
 
+### Added
+
+- **Resizable side panes.** `<` and `>` move the boundary between chat and
+  the Activity column two cells at a time, with chat absorbing the
+  difference; with the channel sidebar focused they resize that instead. `=`
+  returns both panes to sizing themselves from the terminal width. A resize
+  is a standing choice, so a pane keeps the width you gave it when the
+  terminal is resized rather than springing back at the next breakpoint.
+  Resizing stops before chat drops below 32 columns, because chat is the pane
+  the app exists to show.
+- **`space` `a` shows or hides the Activity column**, mirroring `space` `e`
+  for the channel sidebar. The column previously appeared on its own above
+  100 columns and could not be dismissed; it can now be hidden at any width,
+  or shown on a terminal narrower than the automatic threshold as long as
+  chat still fits.
+- **`sidebar_width` and `activity_width` config keys**
+  (`TWI_SIDEBAR_WIDTH`, `TWI_ACTIVITY_WIDTH`, both default `0` = automatic).
+  Values are clamped to what the terminal can afford rather than rejected.
+
 ## [0.15.0] — 2026-08-08
 
 ### Added

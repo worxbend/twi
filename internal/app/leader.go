@@ -13,6 +13,7 @@ const (
 	leaderChannelPickerRune = 'c'
 	leaderCloseChannelRune  = 'x'
 	leaderInspectRune       = 'i'
+	leaderActivityRune      = 'a'
 )
 
 // handleLeaderKey consumes the key following a pending space leader. It
@@ -32,6 +33,10 @@ func (m shellModel) handleLeaderKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.closeChannel(m.activeChannelName())
 	case leaderInspectRune:
 		m.toggleInspect()
+		return m, nil
+	case leaderActivityRune:
+		m.toggleActivity()
+		m.clampScroll()
 		return m, nil
 	}
 	return m, nil

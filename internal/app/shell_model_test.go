@@ -31,6 +31,8 @@ func TestLiveModelReadsEveryFeatureSetting(t *testing.T) {
 	cfg.Features.AvatarMode = "off"
 	cfg.Features.AnimationMode = "off"
 	cfg.Features.ScrollbackLimit = 321
+	cfg.Features.SidebarWidth = 20
+	cfg.Features.ActivityWidth = 30
 
 	live := newLiveModelWithClock("example", cfg, nil, nil)
 
@@ -46,6 +48,8 @@ func TestLiveModelReadsEveryFeatureSetting(t *testing.T) {
 		{"EnableMouse", live.mouseEnabled, false},
 		{"AvatarMode", live.avatarMode, "off"},
 		{"ScrollbackLimit", live.channels.scrollbackLimit, 321},
+		{"SidebarWidth", live.sidebarWidthOverride, 20},
+		{"ActivityWidth", live.activityWidthOverride, 30},
 	}
 	for _, c := range checks {
 		if !reflect.DeepEqual(c.got, c.want) {
@@ -66,6 +70,8 @@ func TestFeatureConfigFieldsAreAllCovered(t *testing.T) {
 		"EnableMouse":     true,
 		"AvatarMode":      true,
 		"ScrollbackLimit": true,
+		"SidebarWidth":    true,
+		"ActivityWidth":   true,
 		// Resolved into the model's palette rather than stored as a name.
 		"ThemeName":   true,
 		"ThemeCustom": true,
