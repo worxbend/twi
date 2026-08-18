@@ -2,7 +2,7 @@ module github.com/worxbend/twi
 
 go 1.26
 
-toolchain go1.26.4
+toolchain go1.26.6
 
 tool (
 	golang.org/x/vuln/cmd/govulncheck
