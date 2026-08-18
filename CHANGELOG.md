@@ -39,6 +39,48 @@ constant in the source tree.
   (`TWI_SIDEBAR_WIDTH`, `TWI_ACTIVITY_WIDTH`, both default `0` = automatic).
   Values are clamped to what the terminal can afford rather than rejected.
 
+### Security
+
+- **Chat text can no longer drive your terminal.** A terminal does not
+  distinguish text to print from commands to obey: an escape character (`ESC`,
+  byte `0x1b`) inside a message starts a command sequence, so anything after
+  it is acted on rather than shown. Incoming chat was drawn without removing
+  those bytes, which meant any chatter could clear every viewer's screen,
+  reposition the cursor, or rewrite the window title just by typing the right
+  characters — no interaction needed beyond the message appearing. All text
+  arriving from Twitch — messages, display names, logins, badges, notices,
+  sub and raid announcements, stream titles, category names, followers — is
+  now stripped of control characters and of the invisible bidirectional marks
+  that let one string display as another, both where it is parsed and again
+  at the single point where it is drawn. Emoji, accents and non-Latin scripts
+  are untouched.
+
+### Fixed
+
+- **Pressing `ctrl+r` during an automatic reconnect no longer makes chat drop
+  again.** When the connection ended, twi waited a couple of seconds before
+  retrying. Reconnecting by hand in that window brought chat back, and then
+  the pending automatic retry woke up and tore the working connection down to
+  start another one. Each automatic retry is now tied to the connection it was
+  started for and stands down as soon as a newer one exists.
+- **Quitting right after "automatic reconnect gave up" could crash instead of
+  exiting.** The message announcing the retries had been exhausted was sent
+  without checking whether shutdown had already begun, and could land on a
+  channel that was being closed at that moment. Shutdown now waits for any
+  retry still in flight before closing anything.
+- **Turning the Activity column on with `space` `a` on a narrow terminal no
+  longer squeezes chat into a ribbon.** Between 48 and 59 columns the column
+  was drawn at its usual width of 28, leaving chat 20 to 31 columns — under
+  the 32-column floor the feature is meant to guarantee. The automatic width
+  is now capped by what the terminal can spare, exactly as a manual resize
+  already was, so the column shrinks toward its 16-column minimum instead of
+  taking the room out of chat.
+- **OAuth token refreshes and Twitch API responses are read with a size
+  limit.** twi runs for hours and refreshes its token on a timer; a response
+  much larger than expected — from a broken endpoint or something in the
+  network path — was read into memory with no ceiling. Every response body is
+  now bounded, matching what the login flow already did.
+
 ## [0.15.0] — 2026-08-08
 
 ### Added
