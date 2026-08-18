@@ -1256,3 +1256,116 @@ func TestSendResultIsNotRateLimitedForOtherFailures(t *testing.T) {
 		t.Fatal("a disconnected send was reported as rate limited")
 	}
 }
+
+// TestStaleAutoReconnectLeavesRestoredSessionAlone covers the ctrl+r race.
+//
+// When the transport ends, an auto-reconnect goroutine is spawned that first
+// sleeps two seconds. If the user presses ctrl+r during that sleep -- exactly
+// what the failure message tells them to do -- the manual reconnect restores a
+// healthy session. The stale goroutine used to wake up, see nothing closed and
+// no reconnect in progress, and tear that healthy session straight back down,
+// so chat came back and then blipped out again for no reason. Each goroutine
+// now remembers the session generation it was spawned for and stands down once
+// a newer one exists.
+func TestStaleAutoReconnectLeavesRestoredSessionAlone(t *testing.T) {
+	factory := &fakeRestartTransportFactory{}
+	first := factory.queueTransport(newFakeTwitchTransport(4))
+	restored := factory.queueTransport(newFakeTwitchTransport(4))
+
+	client, err := NewRestartableLiveChatClient(context.Background(), factory.newTransport, 8)
+	if err != nil {
+		t.Fatalf("NewRestartableLiveChatClient returned error: %v", err)
+	}
+	defer client.Close()
+	if got := <-client.ConnectionStates(); got.Status != ConnectionConnecting {
+		t.Fatalf("initial state = %#v, want connecting", got)
+	}
+
+	// The generation an auto-reconnect goroutine would have captured when the
+	// first transport dropped.
+	dropped := client.currentGeneration()
+
+	// The user presses ctrl+r during the backoff sleep and gets a live session.
+	if err := client.Reconnect(context.Background()); err != nil {
+		t.Fatalf("Reconnect returned error: %v", err)
+	}
+	callsAfterManual := factory.calls()
+
+	// The goroutine spawned for the dropped session finally wakes up.
+	done := make(chan struct{})
+	go func() {
+		client.autoReconnect(dropped)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stale autoReconnect did not stand down; it slept into an attempt against a healthy session")
+	}
+
+	if got := factory.calls(); got != callsAfterManual {
+		t.Fatalf("factory calls = %d after the stale goroutine ran, want %d; it restarted a healthy connection", got, callsAfterManual)
+	}
+	if restored.closedCalled() {
+		t.Fatal("stale autoReconnect closed the transport the manual reconnect had just restored")
+	}
+	if !first.closedCalled() {
+		t.Fatal("manual reconnect did not close the dropped transport")
+	}
+}
+
+// TestCloseWaitsForAutoReconnectGoroutines guards the shutdown panic.
+//
+// The retry loop's final "gave up" state is emitted outside lifecycleMu. If
+// Close ran concurrently, both c.done and c.states would be closed, and a Go
+// select with a ready send on a closed channel panics with "send on closed
+// channel" roughly half the time it picks that case. Close now waits for every
+// registered auto-reconnect goroutine before closing the output channels.
+func TestCloseWaitsForAutoReconnectGoroutines(t *testing.T) {
+	transport := newFakeTwitchTransport(2)
+	client, err := NewLiveChatClient(context.Background(), transport, 2)
+	if err != nil {
+		t.Fatalf("NewLiveChatClient returned error: %v", err)
+	}
+
+	// Stand in for an auto-reconnect goroutine that is still running.
+	client.autoReconnects.Add(1)
+
+	closed := make(chan struct{})
+	go func() {
+		_ = client.Close()
+		close(closed)
+	}()
+
+	select {
+	case <-closed:
+		t.Fatal("Close finished while an auto-reconnect goroutine was still running; it could close c.states out from under that goroutine's emit")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	client.autoReconnects.Done()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not return after the auto-reconnect goroutine finished")
+	}
+}
+
+// TestAutoReconnectNotScheduledAfterClose keeps Close's wait from racing a
+// late registration: a bridge goroutine noticing its channel closed just as
+// Close runs must not add to the WaitGroup after Close has started waiting.
+func TestAutoReconnectNotScheduledAfterClose(t *testing.T) {
+	transport := newFakeTwitchTransport(2)
+	client, err := NewLiveChatClient(context.Background(), transport, 2)
+	if err != nil {
+		t.Fatalf("NewLiveChatClient returned error: %v", err)
+	}
+	if err := client.Close(); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+
+	client.scheduleAutoReconnect(client.currentGeneration())
+	// If scheduleAutoReconnect had registered a goroutine, this would be a
+	// WaitGroup reuse after Wait; it returns immediately when nothing is.
+	client.autoReconnects.Wait()
+}

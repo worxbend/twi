@@ -50,9 +50,17 @@ type LiveChatClient struct {
 	session      *liveChatSession
 	closedFlag   bool
 	reconnecting bool
-	lifecycleMu  sync.Mutex
-	closeOnce    sync.Once
-	debugLogger  debuglog.Logger
+	// sessionGen counts installed sessions. An auto-reconnect goroutine
+	// remembers the generation it was spawned for and stands down once a
+	// newer session exists, so it cannot tear down a connection somebody
+	// else already restored.
+	sessionGen  uint64
+	lifecycleMu sync.Mutex
+	closeOnce   sync.Once
+	// autoReconnects tracks in-flight auto-reconnect goroutines so Close
+	// can wait for them before closing the output channels they emit on.
+	autoReconnects sync.WaitGroup
+	debugLogger    debuglog.Logger
 }
 
 var _ ChatClient = (*LiveChatClient)(nil)
@@ -271,6 +279,13 @@ func (c *LiveChatClient) Close() error {
 		c.mu.Unlock()
 		err = session.stop(true)
 		c.lifecycleMu.Unlock()
+		// Wait before closing the output channels. An auto-reconnect
+		// goroutine emits its terminal "gave up" state outside lifecycleMu;
+		// if that emit raced this close, its select would have both a closed
+		// c.done and a closed c.states ready and would panic with "send on
+		// closed channel" about half the time. c.done is already closed
+		// above, so every such goroutine is unblocked and returns promptly.
+		c.autoReconnects.Wait()
 		close(c.messages)
 		close(c.states)
 		close(c.memberships)
@@ -394,7 +409,7 @@ func (c *LiveChatClient) bridge(session *liveChatSession) {
 						At:     time.Now(),
 					})
 				}
-				go c.autoReconnect()
+				c.scheduleAutoReconnect(c.currentGeneration())
 				return
 			}
 			c.handleEvent(session.ctx, event)
@@ -425,18 +440,27 @@ func (c *LiveChatClient) bridge(session *liveChatSession) {
 // terminal -- and Twitch drops connections routinely, for a server restart or
 // a momentary network blip, not only for anything wrong with twi. Backoff
 // keeps a persistent outage from turning into a reconnect flood.
-func (c *LiveChatClient) autoReconnect() {
+func (c *LiveChatClient) autoReconnect(gen uint64) {
 	if c.factory == nil {
 		return
 	}
 	delay := initialAutoReconnectDelay
 	for attempt := 1; attempt <= maxAutoReconnectAttempts; attempt++ {
+		if c.stale(gen) {
+			return
+		}
 		select {
 		case <-c.done:
 			return
 		case <-time.After(delay):
 		}
-		if c.isClosed() || c.reconnectingNow() {
+		// Rechecked after the sleep, not only before it: the whole point of
+		// the generation check is the window while this goroutine is
+		// sleeping, which is exactly when the failure UI tells the user to
+		// press ctrl+r. A manual reconnect that lands during the backoff
+		// installs a new session, and without this check the goroutine would
+		// wake up and tear that healthy session straight back down.
+		if c.isClosed() || c.reconnectingNow() || c.stale(gen) {
 			return
 		}
 
@@ -456,11 +480,21 @@ func (c *LiveChatClient) autoReconnect() {
 		)
 		delay = min(delay*2, maxAutoReconnectDelay)
 	}
+	if c.isClosed() || c.stale(gen) {
+		return
+	}
 	c.emitState(c.baseCtx, ConnectionState{
 		Status: ConnectionFailed,
 		Detail: "automatic reconnect gave up after repeated failures; retry with ctrl+r",
 		At:     time.Now(),
 	})
+}
+
+// stale reports whether a newer session has been installed since gen, meaning
+// whichever goroutine is asking was spawned for a connection that no longer
+// exists and has nothing left to do.
+func (c *LiveChatClient) stale(gen uint64) bool {
+	return c.currentGeneration() != gen
 }
 
 func (c *LiveChatClient) isClosed() bool {
@@ -564,6 +598,35 @@ func (c *LiveChatClient) setSession(session *liveChatSession) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.session = session
+	c.sessionGen++
+}
+
+// currentGeneration reports how many sessions have been installed so far.
+func (c *LiveChatClient) currentGeneration() uint64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.sessionGen
+}
+
+// scheduleAutoReconnect starts an auto-reconnect goroutine bound to gen, the
+// session generation that was current when the connection dropped.
+//
+// The counter is incremented under the same lock that reads closedFlag, and
+// Close sets closedFlag before it waits, so no goroutine can be registered
+// after Close has started waiting for them.
+func (c *LiveChatClient) scheduleAutoReconnect(gen uint64) {
+	c.mu.Lock()
+	if c.closedFlag {
+		c.mu.Unlock()
+		return
+	}
+	c.autoReconnects.Add(1)
+	c.mu.Unlock()
+
+	go func() {
+		defer c.autoReconnects.Done()
+		c.autoReconnect(gen)
+	}()
 }
 
 func (c *LiveChatClient) swapSession(session *liveChatSession) *liveChatSession {
