@@ -90,3 +90,34 @@ func TestMouseInChatRegionExcludesActivityLogColumn(t *testing.T) {
 		t.Fatal("mouseInChatRegion = false for a point inside chat, want true")
 	}
 }
+
+// TestSidePanesNeverStarveChatBelowFloor sweeps every terminal width at which
+// a side pane can be drawn and checks the chat column keeps
+// minChatWidthAfterPanes. Turning the activity column on explicitly used to
+// draw it at its responsive default (28) on terminals as narrow as 48, where
+// the visibility guard had only reserved room for activityMinSize (16),
+// squeezing chat to 20 cells.
+func TestSidePanesNeverStarveChatBelowFloor(t *testing.T) {
+	for width := minChatWidthAfterPanes + activityMinSize; width <= 200; width++ {
+		for _, visibility := range []activityVisibility{activityAuto, activityShown} {
+			for _, sidebar := range []sidebarVisibility{sidebarAuto, sidebarShown} {
+				cfg := config.Default()
+				cfg.Features.AnimationMode = "off"
+				model := newMockModel("example", cfg)
+				model.width, model.height = width, 30
+				model.activityVisibility = visibility
+				model.sidebarVisibility = sidebar
+
+				layout := model.layout()
+				if layout.activityWidth == 0 && layout.sidebarWidth == 0 {
+					continue
+				}
+				if layout.chatWidth < minChatWidthAfterPanes {
+					t.Fatalf("width=%d activityVisibility=%d sidebarVisibility=%d: sidebar=%d activity=%d leaves chat=%d, want >= %d",
+						width, visibility, sidebar,
+						layout.sidebarWidth, layout.activityWidth, layout.chatWidth, minChatWidthAfterPanes)
+				}
+			}
+		}
+	}
+}

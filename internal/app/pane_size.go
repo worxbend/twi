@@ -141,9 +141,18 @@ func clampPaneWidth(want, minimum, maximum, totalWidth, otherPaneWidth int) int 
 
 // paneWidthOrDefault resolves an override against the responsive default,
 // applying the same clamps a resize would.
+//
+// The fallback goes through clampPaneWidth too, not only the override. The
+// responsive default is picked from the terminal width alone, so on a narrow
+// terminal it can be wider than the visibility guard reserved room for: an
+// explicitly shown activity column is admitted from 48 columns (chat floor
+// plus activityMinSize) but its default width is 28, which would leave chat
+// at 20. Clamping the default degrades it to what the terminal can spare --
+// 16 at width 48 -- so chat keeps minChatWidthAfterPanes either way.
 func paneWidthOrDefault(override, fallback, minimum, maximum, totalWidth, otherPaneWidth int) int {
-	if override <= 0 {
-		return fallback
+	want := fallback
+	if override > 0 {
+		want = override
 	}
-	return clampPaneWidth(override, minimum, maximum, totalWidth, otherPaneWidth)
+	return clampPaneWidth(want, minimum, maximum, totalWidth, otherPaneWidth)
 }
