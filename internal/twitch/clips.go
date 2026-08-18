@@ -103,7 +103,7 @@ func (c *HelixClipsClient) CreateClip(ctx context.Context, broadcasterID string)
 	}
 
 	var decoded helixCreateClipResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+	if err := decodeJSONBody(resp.Body, maxHelixResponseBodySize, &decoded); err != nil {
 		return Clip{}, credentialSafeUserError("decode Twitch clip response", err, c.token())
 	}
 	if len(decoded.Data) == 0 {

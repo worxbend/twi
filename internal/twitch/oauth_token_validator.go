@@ -124,7 +124,7 @@ func (v *OAuthTokenValidator) ValidateToken(ctx context.Context, credentials Tok
 	}
 
 	var decoded oauthValidateResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+	if err := decodeJSONBody(resp.Body, maxHelixResponseBodySize, &decoded); err != nil {
 		return TokenValidationResult{}, credentialSafeError("decode Twitch OAuth validation response", err, credentials)
 	}
 	return validationResultFromOAuthResponse(decoded, credentials, v.now()), nil

@@ -2,7 +2,6 @@ package twitch
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -654,7 +653,7 @@ func (c oauthRefreshConfig) refresh(ctx context.Context, refreshedAt time.Time) 
 	}
 
 	var decoded oauthRefreshResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+	if err := decodeJSONBody(resp.Body, maxOAuthResponseBodySize, &decoded); err != nil {
 		c.Logger.Log(ctx, "twitch.oauth_refresh.failed", slog.String("error", redactIRCError(err.Error())))
 		return OAuthRefresh{}, err
 	}

@@ -2,7 +2,6 @@ package twitch
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -122,7 +121,7 @@ func (c *HelixStreamsClient) GetStreams(ctx context.Context, logins []string) ([
 	}
 
 	var decoded helixStreamsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+	if err := decodeJSONBody(resp.Body, maxHelixResponseBodySize, &decoded); err != nil {
 		return nil, credentialSafeUserError("decode Twitch stream status response", err, c.token())
 	}
 

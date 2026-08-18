@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -735,4 +736,51 @@ func TestIRCClientSendRefusesAfterDisconnect(t *testing.T) {
 	if err := client.Send(context.Background(), "example", "hello"); !errors.Is(err, ErrNotConnected) {
 		t.Fatalf("Send after disconnect = %v, want ErrNotConnected", err)
 	}
+}
+
+// TestOAuthRefreshStopsReadingOversizedResponseBody bounds the token refresh.
+//
+// twi runs unattended for hours and refreshes its token on a timer. Decoding
+// straight from resp.Body reads as much as the JSON asks for with no ceiling,
+// so a token endpoint (or anything sitting in front of it) answering with an
+// endless body would have the process buffer all of it. The body here is far
+// larger than the 4 KiB cap, and the refresh must fail rather than swallow it.
+func TestOAuthRefreshStopsReadingOversizedResponseBody(t *testing.T) {
+	var read atomic.Int64
+	oversized := `{"access_token":"a","token_type":"bearer","expires_in":3600,"padding":"` +
+		strings.Repeat("x", 8*maxOAuthResponseBodySize) + `"}`
+
+	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		resp := responseWithStatus(http.StatusOK, oversized)
+		resp.Body = io.NopCloser(&countingReader{r: resp.Body, count: &read})
+		return resp, nil
+	})}
+
+	_, err := oauthRefreshConfig{
+		ClientID:     "client-id",
+		ClientSecret: "client-secret",
+		RefreshToken: "old-refresh-token",
+		TokenURL:     "https://example.invalid/token",
+		HTTPClient:   httpClient,
+	}.refresh(context.Background(), time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC))
+	if err == nil {
+		t.Fatal("refresh accepted an oversized token response; the decode is unbounded")
+	}
+	if got := read.Load(); got > maxOAuthResponseBodySize {
+		t.Fatalf("read %d bytes of the response body, want no more than %d", got, maxOAuthResponseBodySize)
+	}
+}
+
+// countingReader records how many bytes were actually pulled from a response
+// body, which is what "bounded" means here -- not merely that the decode
+// failed, but that it stopped reading.
+type countingReader struct {
+	r     io.Reader
+	count *atomic.Int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.count.Add(int64(n))
+	return n, err
 }

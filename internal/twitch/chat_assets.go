@@ -2,7 +2,6 @@ package twitch
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -213,7 +212,7 @@ func (c *HelixChatAssetsClient) getJSON(ctx context.Context, endpoint, broadcast
 			c.token(),
 		)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+	if err := decodeJSONBody(resp.Body, maxHelixResponseBodySize, out); err != nil {
 		return credentialSafeChatAssetError("decode Twitch chat asset response", err, c.token())
 	}
 	return nil

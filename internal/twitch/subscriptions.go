@@ -2,7 +2,6 @@ package twitch
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -143,7 +142,7 @@ func (c *HelixSubscriptionsClient) GetBroadcasterSubscriptions(ctx context.Conte
 	}
 
 	var decoded helixSubscriptionsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+	if err := decodeJSONBody(resp.Body, maxHelixResponseBodySize, &decoded); err != nil {
 		return SubscriptionsPage{}, credentialSafeUserError("decode Twitch broadcaster subscriptions response", err, c.token())
 	}
 	// The wire struct and SubscriptionsPage carry the same fields, so a
