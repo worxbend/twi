@@ -2,13 +2,14 @@ package twitch
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/worxbend/twi/internal/textsafe"
 )
 
 const (
@@ -154,7 +155,7 @@ func (c *HelixFollowersClient) GetChannelFollowers(ctx context.Context, broadcas
 	}
 
 	var decoded helixFollowersResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+	if err := decodeJSONBody(resp.Body, maxHelixResponseBodySize, &decoded); err != nil {
 		return FollowersPage{}, credentialSafeUserError("decode Twitch channel followers response", err, c.token())
 	}
 	followers := make([]Follower, 0, len(decoded.Data))
@@ -163,7 +164,7 @@ func (c *HelixFollowersClient) GetChannelFollowers(ctx context.Context, broadcas
 		followers = append(followers, Follower{
 			UserID:     strings.TrimSpace(item.UserID),
 			UserLogin:  strings.TrimSpace(item.UserLogin),
-			UserName:   strings.TrimSpace(item.UserName),
+			UserName:   textsafe.Display(strings.TrimSpace(item.UserName)),
 			FollowedAt: followedAt,
 		})
 	}

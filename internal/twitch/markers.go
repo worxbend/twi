@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/worxbend/twi/internal/textsafe"
 )
 
 const (
@@ -117,7 +119,7 @@ func (c *HelixMarkersClient) CreateStreamMarker(ctx context.Context, userID, des
 	}
 
 	var decoded helixCreateMarkerResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+	if err := decodeJSONBody(resp.Body, maxHelixResponseBodySize, &decoded); err != nil {
 		return StreamMarker{}, credentialSafeUserError("decode Twitch stream marker response", err, c.token())
 	}
 	if len(decoded.Data) == 0 {
@@ -170,7 +172,7 @@ func (c *HelixMarkersClient) GetStreamMarkers(ctx context.Context, userID string
 	}
 
 	var decoded helixStreamMarkersListResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+	if err := decodeJSONBody(resp.Body, maxHelixResponseBodySize, &decoded); err != nil {
 		return nil, credentialSafeUserError("decode Twitch stream markers response", err, c.token())
 	}
 	if len(decoded.Data) == 0 || len(decoded.Data[0].Videos) == 0 {
@@ -227,7 +229,7 @@ func toStreamMarker(m helixMarker) StreamMarker {
 	return StreamMarker{
 		ID:              strings.TrimSpace(m.ID),
 		CreatedAt:       createdAt,
-		Description:     m.Description,
+		Description:     textsafe.Display(m.Description),
 		PositionSeconds: m.PositionSeconds,
 		URL:             strings.TrimSpace(m.URL),
 	}

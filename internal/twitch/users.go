@@ -2,13 +2,14 @@ package twitch
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"slices"
 	"strings"
+
+	"github.com/worxbend/twi/internal/textsafe"
 )
 
 const defaultHelixUsersURL = "https://api.twitch.tv/helix/users"
@@ -128,7 +129,7 @@ func (c *HelixUsersClient) GetUsers(ctx context.Context, req UserLookupRequest) 
 	}
 
 	var decoded helixUsersResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+	if err := decodeJSONBody(resp.Body, maxHelixResponseBodySize, &decoded); err != nil {
 		return nil, credentialSafeUserError("decode Twitch user lookup response", err, c.token())
 	}
 	users := make([]UserIdentity, 0, len(decoded.Data))
@@ -139,7 +140,7 @@ func (c *HelixUsersClient) GetUsers(ctx context.Context, req UserLookupRequest) 
 		users = append(users, UserIdentity{
 			UserID:          strings.TrimSpace(item.ID),
 			Login:           strings.TrimSpace(item.Login),
-			DisplayName:     strings.TrimSpace(item.DisplayName),
+			DisplayName:     textsafe.Display(strings.TrimSpace(item.DisplayName)),
 			ProfileImageURL: strings.TrimSpace(item.ProfileImageURL),
 		})
 	}

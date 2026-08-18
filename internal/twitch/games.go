@@ -2,12 +2,13 @@ package twitch
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/worxbend/twi/internal/textsafe"
 )
 
 const (
@@ -137,13 +138,13 @@ func (c *HelixGamesClient) SearchCategories(ctx context.Context, query string, l
 	}
 
 	var decoded helixGamesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+	if err := decodeJSONBody(resp.Body, maxHelixResponseBodySize, &decoded); err != nil {
 		return nil, credentialSafeUserError("decode Twitch category search response", err, c.token())
 	}
 	games := make([]Game, 0, len(decoded.Data))
 	for _, item := range decoded.Data {
 		id := strings.TrimSpace(item.ID)
-		name := strings.TrimSpace(item.Name)
+		name := textsafe.Display(strings.TrimSpace(item.Name))
 		if id == "" || name == "" {
 			continue
 		}

@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rivo/uniseg"
 	"github.com/worxbend/twi/internal/emoji"
+	"github.com/worxbend/twi/internal/textsafe"
 	"github.com/worxbend/twi/internal/theme"
 	"github.com/worxbend/twi/internal/twitch"
 )
@@ -1329,11 +1330,21 @@ func emojiAssetRef(text string, ref twitch.AssetRef) twitch.AssetRef {
 	return ref
 }
 
+// fragmentFallbackText is the single funnel every visible fragment passes
+// through on its way to the terminal, whatever built it -- a chat message, a
+// Helix stream title, a badge label -- so it is where the escape-sequence
+// strip belongs, in addition to the one at IRC ingestion. Stripping before
+// the width fit also keeps the cell arithmetic honest: it measures the text
+// that is actually printed.
+//
+// textsafe.Display returns the string untouched when there is nothing to
+// strip, which is the case for every ordinary message.
 func fragmentFallbackText(fragment Fragment) string {
+	text := textsafe.Display(fragment.Text)
 	if fragment.WidthCells <= 0 {
-		return fragment.Text
+		return text
 	}
-	return fitCells(fragment.Text, fragment.WidthCells)
+	return fitCells(text, fragment.WidthCells)
 }
 
 func fitCells(value string, width int) string {

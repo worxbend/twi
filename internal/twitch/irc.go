@@ -9,6 +9,8 @@ import (
 	"unicode"
 
 	irc "github.com/gempir/go-twitch-irc/v4"
+
+	"github.com/worxbend/twi/internal/textsafe"
 )
 
 const rawEventTODO = "TODO: add a typed normalizer for this Twitch IRC message before rendering it in the app"
@@ -71,7 +73,7 @@ func NormalizeIRCNoticeMessage(message irc.NoticeMessage) Event {
 		Notice: Notice{
 			Channel: message.Channel,
 			ID:      message.MsgID,
-			Text:    message.Message,
+			Text:    textsafe.Display(message.Message),
 			RawTags: cloneStringMap(message.Tags),
 		},
 	}
@@ -79,6 +81,7 @@ func NormalizeIRCNoticeMessage(message irc.NoticeMessage) Event {
 
 func NormalizeIRCUserNoticeMessage(message irc.UserNoticeMessage) Event {
 	emotes := normalizeIRCEmotes(message.Emotes)
+	text := textsafe.Display(message.Message)
 	return Event{
 		Kind: EventUserNotice,
 		UserNotice: UserNotice{
@@ -88,15 +91,15 @@ func NormalizeIRCUserNoticeMessage(message irc.UserNoticeMessage) Event {
 			Timestamp:   message.Time,
 			AuthorLogin: userLogin(message.User, message.Tags),
 			AuthorID:    message.User.ID,
-			DisplayName: message.User.DisplayName,
+			DisplayName: textsafe.Display(message.User.DisplayName),
 			AuthorColor: message.User.Color,
 			Badges:      normalizeIRCBadges(message.User.Badges, message.Tags),
-			Text:        message.Message,
-			SystemText:  message.SystemMsg,
+			Text:        text,
+			SystemText:  textsafe.Display(message.SystemMsg),
 			MessageID:   message.MsgID,
 			Params:      cloneStringMap(message.MsgParams),
 			Emotes:      emotes,
-			Fragments:   normalizeMessageFragments(message.Message, emotes),
+			Fragments:   normalizeMessageFragments(text, emotes),
 			RawTags:     cloneStringMap(message.Tags),
 		},
 	}
@@ -131,9 +134,9 @@ func NormalizeIRCClearChatMessage(message irc.ClearChatMessage) Event {
 			RoomID:       message.RoomID,
 			Timestamp:    message.Time,
 			TargetUserID: message.TargetUserID,
-			TargetLogin:  message.TargetUsername,
+			TargetLogin:  textsafe.Display(message.TargetUsername),
 			BanDuration:  time.Duration(message.BanDuration) * time.Second,
-			Text:         message.Message,
+			Text:         textsafe.Display(message.Message),
 			RawTags:      cloneStringMap(message.Tags),
 		},
 	}
@@ -145,9 +148,9 @@ func NormalizeIRCClearMessage(message irc.ClearMessage) Event {
 		Moderation: ModerationEvent{
 			Type:            ModerationMessageDeleted,
 			Channel:         message.Channel,
-			TargetLogin:     message.Login,
+			TargetLogin:     textsafe.Display(message.Login),
 			TargetMessageID: message.TargetMsgID,
-			Text:            message.Message,
+			Text:            textsafe.Display(message.Message),
 			RawTags:         cloneStringMap(message.Tags),
 		},
 	}
@@ -158,9 +161,9 @@ func NormalizeIRCUserStateMessage(message irc.UserStateMessage) Event {
 		Kind: EventUserState,
 		UserState: UserState{
 			Channel:     message.Channel,
-			AuthorLogin: message.User.Name,
+			AuthorLogin: textsafe.Display(message.User.Name),
 			AuthorID:    message.User.ID,
-			DisplayName: message.User.DisplayName,
+			DisplayName: textsafe.Display(message.User.DisplayName),
 			AuthorColor: message.User.Color,
 			Badges:      normalizeIRCBadges(message.User.Badges, message.Tags),
 			EmoteSets:   cloneStringSlice(message.EmoteSets),
@@ -188,7 +191,7 @@ func membershipEvent(membership MembershipType, channel, login string, at time.T
 		Membership: MembershipEvent{
 			Type:    membership,
 			Channel: strings.TrimPrefix(strings.TrimSpace(channel), "#"),
-			Login:   strings.ToLower(strings.TrimSpace(login)),
+			Login:   strings.ToLower(strings.TrimSpace(textsafe.Display(login))),
 			At:      at,
 		},
 	}
@@ -235,7 +238,7 @@ func NormalizeIRCRawMessage(message irc.RawMessage) Event {
 		Kind: EventRaw,
 		Raw: RawEvent{
 			RawType: message.RawType,
-			Text:    message.Message,
+			Text:    textsafe.Display(message.Message),
 			Raw:     message.Raw,
 			RawTags: cloneStringMap(message.Tags),
 			TODO:    rawEventTODO,
@@ -243,8 +246,16 @@ func NormalizeIRCRawMessage(message irc.RawMessage) Event {
 	}
 }
 
+// normalizeIRCChatMessage builds the internal message from a PRIVMSG.
+//
+// Everything that will be drawn goes through textsafe.Display on the way in.
+// A chat message is attacker-controlled text that lands in every viewer's
+// terminal with no interaction at all, so an ESC sequence pasted into chat
+// would otherwise be executed rather than shown. Sanitizing here, before the
+// fragments are cut, keeps the split points aligned with what is rendered.
 func normalizeIRCChatMessage(id, channel, channelID string, timestamp time.Time, user irc.User, text string, ircEmotes []*irc.Emote, reply *irc.Reply, action bool, tags map[string]string) ChatMessage {
 	emotes := normalizeIRCEmotes(ircEmotes)
+	text = textsafe.Display(text)
 	messageType := MessageTypeChat
 	if action {
 		messageType = MessageTypeAction
@@ -255,9 +266,9 @@ func normalizeIRCChatMessage(id, channel, channelID string, timestamp time.Time,
 		Channel:      channel,
 		ChannelID:    channelID,
 		Timestamp:    timestamp,
-		AuthorLogin:  user.Name,
+		AuthorLogin:  textsafe.Display(user.Name),
 		AuthorID:     user.ID,
-		DisplayName:  user.DisplayName,
+		DisplayName:  textsafe.Display(user.DisplayName),
 		AuthorColor:  user.Color,
 		Badges:       normalizeIRCBadges(user.Badges, tags),
 		Text:         text,
@@ -313,9 +324,9 @@ func normalizeIRCBadges(in map[string]int, tags map[string]string) []Badge {
 	badges := make([]Badge, 0, len(keys))
 	for _, key := range keys {
 		badges = append(badges, Badge{
-			SetID: key,
+			SetID: textsafe.Display(key),
 			ID:    strconv.Itoa(in[key]),
-			Info:  info[key],
+			Info:  textsafe.Display(info[key]),
 		})
 	}
 	return badges
@@ -323,9 +334,9 @@ func normalizeIRCBadges(in map[string]int, tags map[string]string) []Badge {
 
 func userLogin(user irc.User, tags map[string]string) string {
 	if tags["login"] != "" {
-		return tags["login"]
+		return textsafe.Display(tags["login"])
 	}
-	return user.Name
+	return textsafe.Display(user.Name)
 }
 
 func parseBadges(raw string, info map[string]string) []Badge {
@@ -340,9 +351,9 @@ func parseBadges(raw string, info map[string]string) []Badge {
 			continue
 		}
 		badges = append(badges, Badge{
-			SetID: setID,
-			ID:    id,
-			Info:  info[setID],
+			SetID: textsafe.Display(setID),
+			ID:    textsafe.Display(id),
+			Info:  textsafe.Display(info[setID]),
 		})
 	}
 	return badges
@@ -357,7 +368,7 @@ func normalizeIRCEmotes(in []*irc.Emote) []Emote {
 		for _, position := range emote.Positions {
 			out = append(out, Emote{
 				ID:    emote.ID,
-				Name:  emote.Name,
+				Name:  textsafe.Display(emote.Name),
 				Start: position.Start,
 				End:   position.End,
 				Ref:   twitchEmoteAssetRef(emote.ID),
@@ -380,9 +391,9 @@ func normalizeIRCReply(reply *irc.Reply) *Reply {
 	return &Reply{
 		ParentMessageID: reply.ParentMsgID,
 		ParentAuthorID:  reply.ParentUserID,
-		ParentLogin:     reply.ParentUserLogin,
-		ParentAuthor:    reply.ParentDisplayName,
-		ParentText:      reply.ParentMsgBody,
+		ParentLogin:     textsafe.Display(reply.ParentUserLogin),
+		ParentAuthor:    textsafe.Display(reply.ParentDisplayName),
+		ParentText:      textsafe.Display(reply.ParentMsgBody),
 	}
 }
 

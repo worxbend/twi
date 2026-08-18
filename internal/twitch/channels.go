@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/worxbend/twi/internal/textsafe"
 )
 
 const defaultHelixChannelsURL = "https://api.twitch.tv/helix/channels"
@@ -128,7 +130,7 @@ func (c *HelixChannelsClient) GetChannelInformation(ctx context.Context, broadca
 	}
 
 	var decoded helixChannelsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+	if err := decodeJSONBody(resp.Body, maxHelixResponseBodySize, &decoded); err != nil {
 		return ChannelInfo{}, credentialSafeUserError("decode Twitch channel information response", err, c.token())
 	}
 	if len(decoded.Data) == 0 {
@@ -138,12 +140,12 @@ func (c *HelixChannelsClient) GetChannelInformation(ctx context.Context, broadca
 	return ChannelInfo{
 		BroadcasterID:    strings.TrimSpace(item.BroadcasterID),
 		BroadcasterLogin: strings.TrimSpace(item.BroadcasterLogin),
-		BroadcasterName:  strings.TrimSpace(item.BroadcasterName),
+		BroadcasterName:  textsafe.Display(strings.TrimSpace(item.BroadcasterName)),
 		GameID:           strings.TrimSpace(item.GameID),
-		GameName:         strings.TrimSpace(item.GameName),
-		Title:            item.Title,
+		GameName:         textsafe.Display(strings.TrimSpace(item.GameName)),
+		Title:            textsafe.Display(item.Title),
 		Language:         strings.TrimSpace(item.BroadcasterLanguage),
-		Tags:             append([]string(nil), item.Tags...),
+		Tags:             sanitizeDisplayList(item.Tags),
 	}, nil
 }
 

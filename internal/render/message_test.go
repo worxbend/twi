@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
+	irc "github.com/gempir/go-twitch-irc/v4"
 	"github.com/muesli/termenv"
 	"github.com/worxbend/twi/internal/theme"
 	"github.com/worxbend/twi/internal/twitch"
@@ -626,4 +627,53 @@ func countKind(rows []Row, kind FragmentKind) int {
 		}
 	}
 	return count
+}
+
+// TestChatMessageEscapeSequencesNeverReachTheTerminal covers the whole path a
+// hostile chat message takes: an IRC PRIVMSG carrying raw ANSI escape
+// sequences, normalized into a ChatMessage, then rendered.
+//
+// A terminal treats ESC (0x1b) in printed text as the start of a command, not
+// as a character to show, so a chatter used to be able to clear every
+// viewer's screen or rewrite their window title just by typing the right
+// bytes into chat -- no interaction needed beyond the message being
+// displayed. Both the normalizer and the render funnel strip these now.
+func TestChatMessageEscapeSequencesNeverReachTheTerminal(t *testing.T) {
+	hostile := "hey \x1b[2J\x1b]0;pwned\x07 there\x1b[31m"
+
+	event := twitch.NormalizeIRCPrivateMessage(irc.PrivateMessage{
+		ID:      "abc",
+		Channel: "example",
+		User:    irc.User{Name: "chatter", DisplayName: "chat\x1b[5Bter"},
+		Message: hostile,
+		Time:    time.Date(2026, 7, 3, 9, 0, 0, 0, time.UTC),
+	})
+
+	msg := event.Message
+	if strings.ContainsRune(msg.Text, 0x1b) {
+		t.Fatalf("normalized message text still contains ESC: %q", msg.Text)
+	}
+	if strings.ContainsRune(msg.DisplayName, 0x1b) {
+		t.Fatalf("normalized display name still contains ESC: %q", msg.DisplayName)
+	}
+	for _, fragment := range msg.Fragments {
+		if strings.ContainsRune(fragment.Text, 0x1b) {
+			t.Fatalf("fragment still contains ESC: %q", fragment.Text)
+		}
+	}
+
+	// The rendered rows carry styling escapes of their own, so the check is
+	// that none of the attacker's sequences survive, not that no ESC does.
+	for _, row := range Rows(msg, DefaultOptions(80)) {
+		plain := row.Plain()
+		if strings.ContainsRune(plain, 0x1b) || strings.ContainsRune(plain, 0x07) {
+			t.Fatalf("rendered row text contains a control character: %q", plain)
+		}
+		styled := row.TerminalString()
+		for _, injected := range []string{"\x1b[2J", "\x1b]0;", "\x1b[5B"} {
+			if strings.Contains(styled, injected) {
+				t.Fatalf("rendered row passed %q through to the terminal:\n%q", injected, styled)
+			}
+		}
+	}
 }
