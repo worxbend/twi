@@ -93,7 +93,7 @@ func (m shellModel) overlayTop(layout shellLayout) int {
 // handleOverlayMouse routes a click inside an open bottom overlay to that
 // overlay's selection, then runs it - matching the keyboard flow where
 // moving the selection and pressing enter are one gesture with a mouse.
-func (m shellModel) handleOverlayMouse(event tea.MouseEvent, layout shellLayout) (tea.Model, tea.Cmd, bool) {
+func (m shellModel) handleOverlayMouse(event tea.MouseEvent, layout shellLayout) (shellModel, tea.Cmd, bool) {
 	top := m.overlayTop(layout)
 	switch {
 	case m.palette.open && layout.paletteHeight > 0:

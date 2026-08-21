@@ -169,7 +169,7 @@ func miscErrorMessage(err error) string {
 	}
 }
 
-func (m shellModel) handleMiscKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m shellModel) handleMiscKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
 	if m.misc.editing {
 		switch msg.Type {
 		case tea.KeyEsc:

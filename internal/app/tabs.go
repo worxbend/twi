@@ -12,7 +12,7 @@ import (
 // switchToTab activates tab, closing any open overlay so the new screen
 // isn't obscured, and kicks off that screen's data load the first time it's
 // opened. Switching to the already-active tab is a no-op.
-func (m shellModel) switchToTab(tab shellTab) (tea.Model, tea.Cmd) {
+func (m shellModel) switchToTab(tab shellTab) (shellModel, tea.Cmd) {
 	if m.activeTab == tab {
 		return m, nil
 	}

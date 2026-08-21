@@ -18,7 +18,7 @@ const (
 
 // handleLeaderKey consumes the key following a pending space leader. It
 // always clears the pending flag: a chord is exactly two keystrokes.
-func (m shellModel) handleLeaderKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m shellModel) handleLeaderKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
 	m.leaderPending = false
 	if msg.Type != tea.KeyRunes || len(msg.Runes) != 1 {
 		return m, nil

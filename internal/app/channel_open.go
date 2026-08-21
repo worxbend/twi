@@ -12,7 +12,7 @@ import (
 // (the mock source, or one that is momentarily disconnected) is not an
 // error: the channel is still tracked locally and the next reconnect picks
 // it up, so opening never fails in a way the user has to recover from.
-func (m shellModel) openChannel(channel string) (tea.Model, tea.Cmd) {
+func (m shellModel) openChannel(channel string) (shellModel, tea.Cmd) {
 	name := normalizeChannelName(channel)
 	if name == "" {
 		return m, nil
@@ -36,7 +36,7 @@ func (m shellModel) openChannel(channel string) (tea.Model, tea.Cmd) {
 // closeChannel leaves a channel and drops its buffered messages. Closing the
 // last open channel is allowed and lands on the empty state rather than
 // quitting: the session still has a connection, a composer, and a picker.
-func (m shellModel) closeChannel(channel string) (tea.Model, tea.Cmd) {
+func (m shellModel) closeChannel(channel string) (shellModel, tea.Cmd) {
 	name := normalizeChannelName(channel)
 	if name == "" || !m.channelIsOpen(name) {
 		return m, nil

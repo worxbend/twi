@@ -62,7 +62,7 @@ func (m *shellModel) toggleThemeSettings() {
 // View() re-derives the OSC 11 background sequence from m.theme on every
 // render (see themeBackgroundSequence), so changing m.theme here is enough
 // to keep the terminal background in sync with the live preview.
-func (m shellModel) handleThemeSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m shellModel) handleThemeSettingsKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
 		m.theme = m.themeSettings.originalPalette
@@ -109,7 +109,7 @@ func (m *shellModel) setThemeSettingsSelection(selected int) {
 // persistSelectedTheme writes the previewed theme to the effective config
 // file, preserving every other setting already in effect (it round-trips
 // the full config, not just the theme fields, so nothing else is reset).
-func (m shellModel) persistSelectedTheme() (tea.Model, tea.Cmd) {
+func (m shellModel) persistSelectedTheme() (shellModel, tea.Cmd) {
 	names := themeSettingsNames()
 	selected := m.themeSettings.selected
 	if selected < 0 || selected >= len(names) {

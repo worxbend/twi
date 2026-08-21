@@ -93,7 +93,7 @@ func (m shellModel) selectedSidebarChannel() string {
 
 // handleSidebarKey implements the sidebar's vim-style navigation: j/k move,
 // enter/l switch, x/d close, esc/h leave for the chat pane.
-func (m shellModel) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+func (m shellModel) handleSidebarKey(msg tea.KeyMsg) (shellModel, tea.Cmd, bool) {
 	switch msg.Type {
 	case tea.KeyUp:
 		m.moveSidebarSelection(-1)
@@ -141,7 +141,7 @@ func (m shellModel) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) 
 	return m, nil, false
 }
 
-func (m shellModel) switchToSelectedSidebarChannel() (tea.Model, tea.Cmd) {
+func (m shellModel) switchToSelectedSidebarChannel() (shellModel, tea.Cmd) {
 	channel := m.selectedSidebarChannel()
 	if channel == "" {
 		return m, nil

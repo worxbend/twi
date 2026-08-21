@@ -781,7 +781,7 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // `m.focus == focusChat && len(msg.Runes) == 1` before comparing one rune.
 // Testing the focus once and switching on the rune says the same thing, and
 // adding a shortcut is now one case rather than another copy of the guard.
-func (m *shellModel) handleRuneShortcut(r rune) (tea.Model, tea.Cmd, bool) {
+func (m *shellModel) handleRuneShortcut(r rune) (shellModel, tea.Cmd, bool) {
 	// "?" toggles help everywhere except in the composer, where it is an
 	// ordinary character in the message being typed.
 	if r == '?' && m.focus != focusComposer {
@@ -867,7 +867,7 @@ func (m *shellModel) handleRuneShortcut(r rune) (tea.Model, tea.Cmd, bool) {
 //
 // Its first few lines still run for every keypress, because disarming a
 // pending ctrl+L confirmation is something any other key does.
-func (m *shellModel) handleAlwaysOnKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+func (m *shellModel) handleAlwaysOnKey(msg tea.KeyMsg) (shellModel, tea.Cmd, bool) {
 	// Any key other than a second ctrl+L abandons a pending clear, so a
 	// stray press cannot arm the confirmation and sit waiting for an
 	// unrelated keystroke to trigger it later.
@@ -907,9 +907,9 @@ func (m *shellModel) handleAlwaysOnKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool
 // routeKeyToOpenPanel hands the key to whichever overlay or full-screen tab
 // currently owns the keyboard. At most one of them is ever active, and the
 // case order decides which wins if that were somehow not true.
-func (m shellModel) routeKeyToOpenPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+func (m shellModel) routeKeyToOpenPanel(msg tea.KeyMsg) (shellModel, tea.Cmd, bool) {
 	var (
-		model tea.Model
+		model shellModel
 		cmd   tea.Cmd
 	)
 	switch {
@@ -936,7 +936,7 @@ func (m shellModel) routeKeyToOpenPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd, boo
 // handleMentionKey lets the @mention strip claim tab, the arrows and esc, but
 // only while it is actually offering completions, so those keys keep their
 // normal meaning the rest of the time.
-func (m *shellModel) handleMentionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+func (m *shellModel) handleMentionKey(msg tea.KeyMsg) (shellModel, tea.Cmd, bool) {
 	if len(m.mentionSuggestions()) == 0 {
 		return *m, nil, false
 	}
@@ -959,7 +959,7 @@ func (m *shellModel) handleMentionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool)
 	return *m, nil, false
 }
 
-func (m shellModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m shellModel) handleKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
 	if model, cmd, handled := m.handleAlwaysOnKey(msg); handled {
 		return model, cmd
 	}
@@ -2257,7 +2257,7 @@ func (m *shellModel) scrollBy(delta int) {
 	m.clampScroll()
 }
 
-func (m *shellModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+func (m *shellModel) handleMouse(msg tea.MouseMsg) (shellModel, tea.Cmd) {
 	if !m.mouseEnabled {
 		return *m, nil
 	}
@@ -2843,7 +2843,7 @@ func (m *shellModel) scheduleRevealTick() tea.Cmd {
 // withAsyncAssetCommands schedules the async lookups that keep channel
 // emote autocomplete current (broadcaster ID, then that channel's emote
 // index) alongside whatever other commands the caller already produced.
-func (m *shellModel) withAsyncAssetCommands(cmds ...tea.Cmd) (tea.Model, tea.Cmd) {
+func (m *shellModel) withAsyncAssetCommands(cmds ...tea.Cmd) (shellModel, tea.Cmd) {
 	if cmd := m.scheduleBroadcasterIDLookup(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
@@ -2882,7 +2882,7 @@ func (m *shellModel) refreshActiveRevealRows() {
 	}
 }
 
-func (m *shellModel) queueComposerSend() (tea.Model, tea.Cmd) {
+func (m *shellModel) queueComposerSend() (shellModel, tea.Cmd) {
 	state := m.activeChannelState()
 	draft := strings.TrimSpace(state.composerText)
 	// /channels never reaches Twitch: bare, it opens the picker; with a name,
@@ -2967,7 +2967,7 @@ func (m *shellModel) startNextComposerSend(state *channelState) tea.Cmd {
 	}
 }
 
-func (m shellModel) completeComposerSend(msg composerSendCompletedMsg) (tea.Model, tea.Cmd) {
+func (m shellModel) completeComposerSend(msg composerSendCompletedMsg) (shellModel, tea.Cmd) {
 	state := m.channelStateForActiveSend(msg.id)
 	if state == nil || state.activeSend == nil {
 		return m, nil

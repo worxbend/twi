@@ -265,7 +265,7 @@ func parseStreamInfoTags(raw string) []string {
 // handleStreamInfoKey handles all keys while the Stream Info tab is active
 // and no overlay (palette/inspect/theme/emotes) is open; see the KeyMsg
 // dispatch order in Update.
-func (m shellModel) handleStreamInfoKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m shellModel) handleStreamInfoKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
 	if m.streamInfo.editing {
 		switch msg.Type {
 		case tea.KeyEsc:

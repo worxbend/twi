@@ -25,7 +25,7 @@ func (m *shellModel) toggleEmotePicker() {
 	m.emotePicker = emotePickerState{open: true}
 }
 
-func (m shellModel) handleEmotePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m shellModel) handleEmotePickerKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
 		m.emotePicker = emotePickerState{}
@@ -111,7 +111,7 @@ func (m shellModel) visibleEmotePickerEntries() []assets.EmoteEntry {
 // executeEmotePickerSelection appends the selected emote's name plus a
 // trailing space to the composer (matching the composer's append-only text
 // model) and closes the picker.
-func (m shellModel) executeEmotePickerSelection() (tea.Model, tea.Cmd) {
+func (m shellModel) executeEmotePickerSelection() (shellModel, tea.Cmd) {
 	entries := m.visibleEmotePickerEntries()
 	if len(entries) == 0 {
 		m.emotePicker = emotePickerState{}

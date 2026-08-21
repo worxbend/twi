@@ -75,7 +75,7 @@ func TestOpenChannelJoinsTransportAndClosingParts(t *testing.T) {
 	model := emptyChannelModel(t, client)
 
 	updated, _ := model.openChannel("#Alpha")
-	model = updated.(shellModel)
+	model = updated
 	if got, want := model.activeChannelName(), "Alpha"; got != want {
 		t.Fatalf("active channel after open = %q, want %q", got, want)
 	}
@@ -85,9 +85,9 @@ func TestOpenChannelJoinsTransportAndClosingParts(t *testing.T) {
 
 	// Reopening an open channel switches to it without a second join.
 	updated, _ = model.openChannel("beta")
-	model = updated.(shellModel)
+	model = updated
 	updated, _ = model.openChannel("alpha")
-	model = updated.(shellModel)
+	model = updated
 	if got := len(client.joined); got != 2 {
 		t.Fatalf("join count after reopening = %d, want 2", got)
 	}
@@ -96,7 +96,7 @@ func TestOpenChannelJoinsTransportAndClosingParts(t *testing.T) {
 	}
 
 	updated, _ = model.closeChannel("alpha")
-	model = updated.(shellModel)
+	model = updated
 	if got := client.departed; len(got) != 1 || got[0] != "alpha" {
 		t.Fatalf("departed = %#v, want [alpha]", got)
 	}
@@ -107,7 +107,7 @@ func TestOpenChannelJoinsTransportAndClosingParts(t *testing.T) {
 	// Closing the last channel lands back on the empty state instead of
 	// leaving a phantom channel behind.
 	updated, _ = model.closeChannel("beta")
-	model = updated.(shellModel)
+	model = updated
 	if !model.channels.empty() {
 		t.Fatalf("channels after closing the last one = %#v, want empty", model.channels.channelNames())
 	}

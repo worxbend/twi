@@ -141,7 +141,7 @@ func (m shellModel) paletteRevealedLines(lines []string, width int) []string {
 	return out
 }
 
-func (m shellModel) handleCommandPaletteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m shellModel) handleCommandPaletteKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
 		m.palette = commandPaletteState{}
@@ -207,7 +207,7 @@ func (m *shellModel) clampPaletteSelection() {
 	}
 }
 
-func (m shellModel) executeCommandPaletteSelection() (tea.Model, tea.Cmd) {
+func (m shellModel) executeCommandPaletteSelection() (shellModel, tea.Cmd) {
 	commands := m.visibleCommandPaletteCommands()
 	if len(commands) == 0 {
 		m.palette = commandPaletteState{}
@@ -225,7 +225,7 @@ func (m shellModel) executeCommandPaletteSelection() (tea.Model, tea.Cmd) {
 	return m.executeCommandPaletteCommand(command)
 }
 
-func (m shellModel) executeCommandPaletteCommand(command commandPaletteCommand) (tea.Model, tea.Cmd) {
+func (m shellModel) executeCommandPaletteCommand(command commandPaletteCommand) (shellModel, tea.Cmd) {
 	switch command.action {
 	case commandPaletteFocusChat:
 		m.focus = focusChat

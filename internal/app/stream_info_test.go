@@ -115,7 +115,7 @@ func TestStreamInfoLoadsAndDisplaysChannelInfo(t *testing.T) {
 	model.services.userLookup = &appFakeUserLookup{users: []twitch.UserIdentity{{UserID: "123", Login: "streamer"}}}
 
 	updated, cmd := model.switchToTab(tabStreamInfo)
-	model = updated.(shellModel)
+	model = updated
 	if cmd == nil {
 		t.Fatal("switchToTab(tabStreamInfo) returned nil command, want a load command")
 	}
@@ -184,17 +184,17 @@ func TestStreamInfoEditAndSaveUpdatesOnlyChangedFields(t *testing.T) {
 	// Edit only the title field; category/language/tags stay untouched.
 	model.streamInfo.selected = streamInfoFieldTitle
 	updated, _ := model.handleStreamInfoKey(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(shellModel)
+	model = updated
 	if !model.streamInfo.editing {
 		t.Fatal("editing = false after enter on unedited field, want true")
 	}
 	model.streamInfo.editBuffer = ""
 	for _, r := range "New title" {
 		updated, _ = model.handleStreamInfoKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-		model = updated.(shellModel)
+		model = updated
 	}
 	updated, _ = model.handleStreamInfoKey(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(shellModel)
+	model = updated
 	if model.streamInfo.editing {
 		t.Fatal("editing = true after commit, want false")
 	}
@@ -203,7 +203,7 @@ func TestStreamInfoEditAndSaveUpdatesOnlyChangedFields(t *testing.T) {
 	}
 
 	updated, cmd := model.handleStreamInfoKey(tea.KeyMsg{Type: tea.KeyCtrlS})
-	model = updated.(shellModel)
+	model = updated
 	if cmd == nil {
 		t.Fatal("ctrl+s returned nil command, want save command")
 	}
@@ -281,7 +281,7 @@ func TestCategoryPickerSearchesAndSelectsCategory(t *testing.T) {
 
 	model.streamInfo.selected = streamInfoFieldCategory
 	updated, cmd := model.handleStreamInfoKey(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(shellModel)
+	model = updated
 	if !model.categoryPicker.open {
 		t.Fatal("categoryPicker.open = false after enter on category field, want true")
 	}
@@ -300,14 +300,14 @@ func TestCategoryPickerSearchesAndSelectsCategory(t *testing.T) {
 	model.categoryPicker.query = ""
 	for _, r := range "fort" {
 		updated, cmd = model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-		model = updated.(shellModel)
+		model = updated
 		if cmd == nil {
 			t.Fatal("typing in category picker returned nil command, want debounce tick")
 		}
 	}
 	debounceMsg := cmd().(categoryPickerDebounceMsg)
 	updated, cmd = model.applyCategoryPickerDebounce(debounceMsg)
-	model = updated.(shellModel)
+	model = updated
 	if cmd == nil {
 		t.Fatal("debounce tick returned nil command, want search command")
 	}
@@ -321,7 +321,7 @@ func TestCategoryPickerSearchesAndSelectsCategory(t *testing.T) {
 	// (Fortnite, alphabetically before Fortnite Creative) and select it.
 	model.moveCategoryPickerSelection(1)
 	updated, _ = model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(shellModel)
+	model = updated
 	if model.categoryPicker.open {
 		t.Fatal("categoryPicker.open = true after enter, want closed")
 	}
@@ -339,7 +339,7 @@ func TestCategoryPickerNoCategoryEntryClearsCategory(t *testing.T) {
 	model.categoryPicker = categoryPickerState{open: true}
 
 	updated, _ := model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(shellModel)
+	model = updated
 	if model.streamInfo.category != "" || model.streamInfo.categoryGameID != "" {
 		t.Fatalf("category = %q id = %q, want cleared", model.streamInfo.category, model.streamInfo.categoryGameID)
 	}
@@ -353,7 +353,7 @@ func TestCategoryPickerEscCancelsWithoutChangingCategory(t *testing.T) {
 	model.categoryPicker = categoryPickerState{open: true, query: "fort"}
 
 	updated, _ := model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyEsc})
-	model = updated.(shellModel)
+	model = updated
 	if model.categoryPicker.open {
 		t.Fatal("categoryPicker.open = true after esc, want closed")
 	}
@@ -371,17 +371,17 @@ func TestCategoryPickerStaleDebounceAndResultsAreDiscarded(t *testing.T) {
 	model.categoryPicker = categoryPickerState{open: true}
 
 	updated, cmd1 := model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
-	model = updated.(shellModel)
+	model = updated
 	staleDebounce := cmd1().(categoryPickerDebounceMsg)
 
 	updated, _ = model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
-	model = updated.(shellModel)
+	model = updated
 
 	// The first keystroke's debounce tick arrives after the second keystroke
 	// already bumped the generation counter; it must be ignored, not trigger
 	// a search for the stale "f" query.
 	updated, cmd := model.applyCategoryPickerDebounce(staleDebounce)
-	model = updated.(shellModel)
+	model = updated
 	if cmd != nil {
 		t.Fatal("stale debounce triggered a search command, want nil")
 	}

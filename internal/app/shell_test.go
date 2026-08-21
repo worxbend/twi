@@ -1713,8 +1713,8 @@ func TestMockShellChannelSidebarResponsiveLayouts(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			updated, _ := model.Update(tea.WindowSizeMsg{Width: tt.width, Height: tt.height})
-			rendered := updated.(shellModel)
-			layout := rendered.layout()
+			rendered := updated
+			layout := rendered.(shellModel).layout()
 			view := rendered.View()
 
 			if got, want := lineCount(view), tt.height; got != want {

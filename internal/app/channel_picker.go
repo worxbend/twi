@@ -111,7 +111,7 @@ func (m *shellModel) applyFollowedChannels(msg followedChannelsResolvedMsg) {
 	m.clampChannelPickerSelection()
 }
 
-func (m shellModel) handleChannelPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m shellModel) handleChannelPickerKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
 		m.channelPicker = channelPickerState{}
@@ -178,7 +178,7 @@ func (m *shellModel) clampChannelPickerSelection() {
 // commitChannelPickerSelection opens the highlighted channel (or closes an
 // already-open one, so the picker doubles as a switcher) and dismisses the
 // overlay.
-func (m shellModel) commitChannelPickerSelection() (tea.Model, tea.Cmd) {
+func (m shellModel) commitChannelPickerSelection() (shellModel, tea.Cmd) {
 	entries := m.channelPickerEntries()
 	index := m.channelPicker.selected
 	if index < 0 || index >= len(entries) {

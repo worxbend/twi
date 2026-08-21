@@ -65,7 +65,7 @@ func TestMiscLoadsAndDisplaysMarkers(t *testing.T) {
 	model.services.userLookup = &appFakeUserLookup{users: []twitch.UserIdentity{{UserID: "123", Login: "streamer"}}}
 
 	updated, cmd := model.switchToTab(tabMisc)
-	model = updated.(shellModel)
+	model = updated
 	if cmd == nil {
 		t.Fatal("switchToTab(tabMisc) returned nil command, want a load command")
 	}
@@ -127,18 +127,18 @@ func TestMiscCreateMarkerFlow(t *testing.T) {
 	model.misc.loaded = true
 
 	updated, _ := model.handleMiscKey(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(shellModel)
+	model = updated
 	if !model.misc.editing {
 		t.Fatal("editing = false after enter, want true")
 	}
 
 	for _, r := range "big play" {
 		updated, _ = model.handleMiscKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-		model = updated.(shellModel)
+		model = updated
 	}
 
 	updated, cmd := model.handleMiscKey(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(shellModel)
+	model = updated
 	if model.misc.editing {
 		t.Fatal("editing = true after commit, want false")
 	}

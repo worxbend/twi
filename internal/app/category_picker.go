@@ -50,7 +50,7 @@ func (m *shellModel) openCategoryPicker() tea.Cmd {
 	return m.scheduleCategorySearch()
 }
 
-func (m shellModel) handleCategoryPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m shellModel) handleCategoryPickerKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
 		m.categoryPicker = categoryPickerState{}
@@ -105,7 +105,7 @@ func (m *shellModel) moveCategoryPickerSelection(delta int) {
 // Info Category field (both display name and Twitch game ID, so saving never
 // needs a separate name->ID resolution step) and closes the picker. The
 // pinned first entry clears the category entirely.
-func (m shellModel) commitCategoryPickerSelection() (tea.Model, tea.Cmd) {
+func (m shellModel) commitCategoryPickerSelection() (shellModel, tea.Cmd) {
 	entries := m.categoryPickerEntries()
 	index := m.categoryPicker.selected
 	if index < 0 || index >= len(entries) {
@@ -169,7 +169,7 @@ func (m *shellModel) scheduleCategorySearch() tea.Cmd {
 	}
 }
 
-func (m shellModel) applyCategoryPickerDebounce(msg categoryPickerDebounceMsg) (tea.Model, tea.Cmd) {
+func (m shellModel) applyCategoryPickerDebounce(msg categoryPickerDebounceMsg) (shellModel, tea.Cmd) {
 	if msg.generation != m.categoryPicker.generation {
 		return m, nil
 	}
