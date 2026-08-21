@@ -289,33 +289,18 @@ func writeFilePrivate(path string, data []byte) error {
 	return os.Rename(tmpPath, path)
 }
 
+// RedactedString renders the effective configuration for `twi config show`,
+// with credentials replaced by a redaction marker.
+//
+// It reports every setting in the table, so a setting cannot be added and
+// then be quietly missing from the one command whose job is to say what the
+// configuration currently is. Seven settings used to be missing exactly that
+// way.
 func (c Config) RedactedString() string {
-	lines := []string{
-		"path = " + quote(RedactDisplayValue(c.Path)),
-		"twitch_username = " + quote(c.Twitch.Username),
-		"twitch_oauth_token = " + quote(redact(c.Twitch.OAuthToken)),
-		"twitch_refresh_token = " + quote(redact(c.Twitch.RefreshToken)),
-		"twitch_client_id = " + quote(c.Twitch.ClientID),
-		"twitch_client_secret = " + quote(redact(c.Twitch.ClientSecret)),
-		"twitch_redirect_url = " + quote(redactUnsafe(c.Twitch.RedirectURL)),
-		"default_channels = " + quote(strings.Join(c.DefaultChannels, ",")),
-		"enable_mouse = " + strconv.FormatBool(c.Features.EnableMouse),
-		"avatar_mode = " + quote(c.Features.AvatarMode),
-		"animation_mode = " + quote(c.Features.AnimationMode),
-		"theme_name = " + quote(c.Features.ThemeName),
-		"theme_background = " + quote(c.Features.ThemeCustom.Background),
-		"theme_foreground = " + quote(c.Features.ThemeCustom.Foreground),
-		"theme_accent = " + quote(c.Features.ThemeCustom.Accent),
-		"theme_muted = " + quote(c.Features.ThemeCustom.Muted),
-		"theme_border = " + quote(c.Features.ThemeCustom.Border),
-		"theme_surface = " + quote(c.Features.ThemeCustom.Surface),
-		"theme_warning = " + quote(c.Features.ThemeCustom.Warning),
-		"theme_error = " + quote(c.Features.ThemeCustom.Error),
-		"theme_success = " + quote(c.Features.ThemeCustom.Success),
-		"stream_status_mode = " + quote(c.Features.StreamStatusMode),
-		"emote_autocomplete_mode = " + quote(c.Features.EmoteAutocompleteMode),
-		"debug_logging = " + strconv.FormatBool(c.Debug.Enabled),
-		"debug_log_path = " + quote(RedactDisplayValue(c.Debug.LogPath)),
+	lines := make([]string, 0, len(settings)+1)
+	lines = append(lines, "path = "+quote(RedactDisplayValue(c.Path)))
+	for _, s := range settings {
+		lines = append(lines, s.key+" = "+s.displayValue(c))
 	}
 	return strings.Join(lines, "\n") + "\n"
 }

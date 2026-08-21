@@ -117,3 +117,34 @@ func sampleValueFor(key string) string {
 		return "sample-" + key
 	}
 }
+
+// TestRedactedStringReportsEverySetting is the regression test for `twi
+// config show` quietly omitting settings. It used to be missing seven of
+// them, because its list of settings was maintained by hand separately from
+// the lists used to read and write them.
+func TestRedactedStringReportsEverySetting(t *testing.T) {
+	output := Config{}.RedactedString()
+	for _, s := range settings {
+		if !strings.Contains(output, "\n"+s.key+" = ") {
+			t.Errorf("`twi config show` does not report %q", s.key)
+		}
+	}
+}
+
+// TestRedactedStringRedactsEverySecret checks that a setting with no format
+// function -- the marker for a credential -- never has its value printed.
+func TestRedactedStringRedactsEverySecret(t *testing.T) {
+	const secret = "s3cr3t-value-that-must-not-appear"
+	for _, s := range settings {
+		if s.format != nil {
+			continue
+		}
+		t.Run(s.key, func(t *testing.T) {
+			var cfg Config
+			s.apply(&cfg, secret)
+			if output := cfg.RedactedString(); strings.Contains(output, secret) {
+				t.Errorf("`twi config show` leaked %s:\n%s", s.key, output)
+			}
+		})
+	}
+}

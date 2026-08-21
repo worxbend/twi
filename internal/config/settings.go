@@ -27,6 +27,11 @@ type setting struct {
 	// format renders the setting's current value the way a config file
 	// spells it. It is nil for secrets, which are never written to a file.
 	format func(cfg Config) string
+	// display renders the value for `twi config show`. It defaults to
+	// format; a setting overrides it when showing the real value would leak
+	// a credential, either because the value is one or because it is
+	// free-form text that can carry one.
+	display func(cfg Config) string
 	// persisted marks the settings the config writer keeps in config.toml.
 	// Credentials are excluded (they live in the credential store), as are
 	// the debug and pane-size settings, which are deliberately not written
@@ -48,11 +53,13 @@ var settings = []setting{
 	},
 	{
 		key: "twitch_oauth_token", env: "TWI_TWITCH_OAUTH_TOKEN",
-		apply: func(cfg *Config, v string) { cfg.Twitch.OAuthToken = v },
+		apply:   func(cfg *Config, v string) { cfg.Twitch.OAuthToken = v },
+		display: func(cfg Config) string { return quote(redact(cfg.Twitch.OAuthToken)) },
 	},
 	{
 		key: "twitch_refresh_token", env: "TWI_TWITCH_REFRESH_TOKEN",
-		apply: func(cfg *Config, v string) { cfg.Twitch.RefreshToken = v },
+		apply:   func(cfg *Config, v string) { cfg.Twitch.RefreshToken = v },
+		display: func(cfg Config) string { return quote(redact(cfg.Twitch.RefreshToken)) },
 	},
 	{
 		key: "twitch_client_id", env: "TWI_TWITCH_CLIENT_ID", persisted: true,
@@ -61,12 +68,14 @@ var settings = []setting{
 	},
 	{
 		key: "twitch_client_secret", env: "TWI_TWITCH_CLIENT_SECRET",
-		apply: func(cfg *Config, v string) { cfg.Twitch.ClientSecret = v },
+		apply:   func(cfg *Config, v string) { cfg.Twitch.ClientSecret = v },
+		display: func(cfg Config) string { return quote(redact(cfg.Twitch.ClientSecret)) },
 	},
 	{
 		key: "twitch_redirect_url", env: "TWI_TWITCH_REDIRECT_URL", persisted: true,
-		apply:  func(cfg *Config, v string) { cfg.Twitch.RedirectURL = v },
-		format: func(cfg Config) string { return quoteTrimmed(cfg.Twitch.RedirectURL) },
+		apply:   func(cfg *Config, v string) { cfg.Twitch.RedirectURL = v },
+		format:  func(cfg Config) string { return quoteTrimmed(cfg.Twitch.RedirectURL) },
+		display: func(cfg Config) string { return quote(redactUnsafe(cfg.Twitch.RedirectURL)) },
 	},
 	{
 		key: "default_channels", env: "TWI_DEFAULT_CHANNELS", persisted: true,
@@ -196,8 +205,9 @@ var settings = []setting{
 	},
 	{
 		key: "debug_log_path", env: "TWI_DEBUG_LOG_PATH",
-		apply:  func(cfg *Config, v string) { cfg.Debug.LogPath = v },
-		format: func(cfg Config) string { return quoteTrimmed(cfg.Debug.LogPath) },
+		apply:   func(cfg *Config, v string) { cfg.Debug.LogPath = v },
+		format:  func(cfg Config) string { return quoteTrimmed(cfg.Debug.LogPath) },
+		display: func(cfg Config) string { return quote(RedactDisplayValue(cfg.Debug.LogPath)) },
 	},
 }
 
@@ -216,4 +226,13 @@ var settingsByKey, settingsByEnv = func() (map[string]setting, map[string]settin
 // quoteTrimmed renders a string setting for a config file.
 func quoteTrimmed(value string) string {
 	return quote(strings.TrimSpace(value))
+}
+
+// displayValue renders the setting for `twi config show`, scrubbing anything
+// that must not be printed.
+func (s setting) displayValue(cfg Config) string {
+	if s.display != nil {
+		return s.display(cfg)
+	}
+	return s.format(cfg)
 }
