@@ -106,15 +106,21 @@ type Sequence struct {
 
 // NewSequence creates reveal state for rows at now.
 func NewSequence(rows []render.Row, cfg Config, now time.Time) Sequence {
-	cfg = cfg.withDefaults()
+	return newSequence(rows, cfg.resolve(), now)
+}
+
+// newSequence builds reveal state from an already-resolved config. Queue holds
+// its config in that form, so enqueuing a message does not re-derive the same
+// timings for every message that arrives.
+func newSequence(rows []render.Row, cfg resolvedConfig, now time.Time) Sequence {
 	sequence := Sequence{
 		rows:         cloneRows(rows),
 		units:        Units(rows),
 		lastAdvance:  now,
-		interval:     cfg.interval(),
-		unitsPerTick: cfg.unitsPerTick(),
+		interval:     cfg.interval,
+		unitsPerTick: cfg.unitsPerTick,
 	}
-	if cfg.mode() == ModeOff || len(sequence.units) == 0 {
+	if cfg.mode == ModeOff || len(sequence.units) == 0 {
 		sequence.visibleUnits = len(sequence.units)
 	}
 	return sequence
@@ -168,7 +174,7 @@ func (s Sequence) Frame() []render.Row {
 		if unit.Row < 0 || unit.Row >= len(rows) {
 			continue
 		}
-		appendFragment(&rows[unit.Row], unit.Fragment)
+		rows[unit.Row].Append(unit.Fragment)
 	}
 	return rows
 }
@@ -211,7 +217,7 @@ type queuedReveal struct {
 
 // Queue holds a bounded set of active reveals.
 type Queue struct {
-	cfg       Config
+	cfg       resolvedConfig
 	clock     Clock
 	items     []queuedReveal
 	overflows int
@@ -219,12 +225,11 @@ type Queue struct {
 
 // NewQueue creates a bounded reveal queue. A nil clock uses the system clock.
 func NewQueue(cfg Config, clock Clock) *Queue {
-	cfg = cfg.withDefaults()
 	if clock == nil {
 		clock = systemClock{}
 	}
 	return &Queue{
-		cfg:   cfg,
+		cfg:   cfg.resolve(),
 		clock: clock,
 	}
 }
@@ -235,7 +240,7 @@ func NewQueue(cfg Config, clock Clock) *Queue {
 // the new reveal is accepted.
 func (q *Queue) Enqueue(id string, rows []render.Row) EnqueueResult {
 	now := q.clock.Now()
-	sequence := NewSequence(rows, q.cfg, now)
+	sequence := newSequence(rows, q.cfg, now)
 	if sequence.Done() {
 		complete := completedReveal(id, &sequence, CompletionImmediate)
 		return EnqueueResult{
@@ -245,7 +250,7 @@ func (q *Queue) Enqueue(id string, rows []render.Row) EnqueueResult {
 	}
 
 	result := EnqueueResult{Queued: true}
-	for len(q.items) >= q.cfg.MaxQueued {
+	for len(q.items) >= q.cfg.maxQueued {
 		oldest := q.items[0]
 		q.items = q.items[1:]
 		oldest.sequence.Complete()
@@ -308,7 +313,7 @@ func (q *Queue) ReplaceRows(id string, rows []render.Row) bool {
 			continue
 		}
 		current := q.items[i].sequence
-		next := NewSequence(rows, q.cfg, current.lastAdvance)
+		next := newSequence(rows, q.cfg, current.lastAdvance)
 		next.visibleUnits = current.visibleUnits
 		if next.visibleUnits > len(next.units) {
 			next.visibleUnits = len(next.units)
@@ -346,19 +351,29 @@ func fragmentUnits(row int, fragment render.Fragment) []RevealUnit {
 	return units
 }
 
+// isAtomic reports whether a fragment is revealed as one unit rather than one
+// grapheme cluster at a time.
+//
+// It is deliberately broader than render.Fragment.Atomic, which it builds on.
+// The renderer only has to keep a fragment whole while wrapping a row, so its
+// rule covers mentions, emotes, and emoji. A reveal has a second concern: chat
+// chrome that reads as a single object -- the clock, a badge, an avatar chip,
+// the author's name -- looks wrong typed out letter by letter, and so does any
+// fragment carrying an asset reference or a style beyond a plain foreground
+// color. Those all appear at once here.
 func isAtomic(fragment render.Fragment) bool {
+	if fragment.Atomic() {
+		return true
+	}
 	switch fragment.Kind {
 	case render.FragmentAvatar,
 		render.FragmentTimestamp,
 		render.FragmentBadge,
 		render.FragmentUsername,
-		render.FragmentMention,
 		render.FragmentReply,
 		render.FragmentNotice,
 		render.FragmentAction,
-		render.FragmentDeleted,
-		render.FragmentEmojiFallback,
-		render.FragmentEmoteFallback:
+		render.FragmentDeleted:
 		return true
 	}
 	return fragment.Ref != (render.Fragment{}.Ref) ||
@@ -366,28 +381,6 @@ func isAtomic(fragment render.Fragment) bool {
 		fragment.Style.Bold ||
 		fragment.Style.Italic ||
 		fragment.Style.Strikethrough
-}
-
-func appendFragment(row *render.Row, fragment render.Fragment) {
-	if fragment.Text == "" {
-		return
-	}
-	last := len(row.Fragments) - 1
-	if last >= 0 && sameFragment(row.Fragments[last], fragment) {
-		row.Fragments[last].Text += fragment.Text
-		return
-	}
-	row.Fragments = append(row.Fragments, cloneFragment(fragment))
-}
-
-func sameFragment(a, b render.Fragment) bool {
-	if a.WidthCells > 0 || b.WidthCells > 0 {
-		return false
-	}
-	return a.Kind == b.Kind &&
-		a.Style == b.Style &&
-		a.Ref == b.Ref &&
-		a.WidthCells == b.WidthCells
 }
 
 func cloneRows(rows []render.Row) []render.Row {
@@ -440,30 +433,35 @@ func (c Config) withDefaults() Config {
 	return c
 }
 
-func (c Config) mode() Mode {
-	return c.withDefaults().Mode
+// resolvedConfig is a Config with every missing value filled in and the timing
+// for the chosen mode already selected. It is produced once, when a Sequence or
+// a Queue is built, so that reading the interval on every animation tick is a
+// field access rather than a fresh round of normalization.
+type resolvedConfig struct {
+	mode      Mode
+	maxQueued int
+	// interval is how long one reveal step lasts, and unitsPerTick how many
+	// units that step makes visible. Together they set the reveal speed.
+	interval     time.Duration
+	unitsPerTick int
 }
 
-func (c Config) interval() time.Duration {
+// resolve normalizes a Config and picks the timings its mode calls for.
+func (c Config) resolve() resolvedConfig {
 	c = c.withDefaults()
+	resolved := resolvedConfig{mode: c.Mode, maxQueued: c.MaxQueued}
 	switch c.Mode {
 	case ModeReduced:
-		return c.ReducedInterval
+		resolved.interval = c.ReducedInterval
+		resolved.unitsPerTick = c.ReducedUnitsPerTick
 	case ModeOff:
-		return 0
+		// Off has no timing to speak of: a sequence built from it starts
+		// fully revealed and never advances.
+		resolved.interval = 0
+		resolved.unitsPerTick = 1
 	default:
-		return c.FastInterval
+		resolved.interval = c.FastInterval
+		resolved.unitsPerTick = c.FastUnitsPerTick
 	}
-}
-
-func (c Config) unitsPerTick() int {
-	c = c.withDefaults()
-	switch c.Mode {
-	case ModeReduced:
-		return c.ReducedUnitsPerTick
-	case ModeOff:
-		return 1
-	default:
-		return c.FastUnitsPerTick
-	}
+	return resolved
 }

@@ -104,21 +104,30 @@ func TextFrame(text string, cfg TextConfig, elapsed time.Duration) []TextCell {
 	if len(units) == 0 {
 		return nil
 	}
-	if cfg.Mode == ModeOff || cfg.Step <= 0 {
-		return mergeTextCells(staticTextCells(units, cfg))
-	}
+	return mergeTextCells(effectCells(units, cfg, elapsed))
+}
 
+// effectCells draws one frame of the configured effect as one cell per
+// grapheme cluster, before neighboring cells of the same style are merged.
+//
+// Every path returns the resting frame unless the effect is both known and
+// actually moving: animation turned off, or a step of zero (no advance per
+// frame), leaves the label static.
+func effectCells(units []textCluster, cfg TextConfig, elapsed time.Duration) []TextCell {
+	if cfg.Mode == ModeOff || cfg.Step <= 0 {
+		return staticTextCells(units, cfg)
+	}
 	switch cfg.Effect {
 	case EffectTypewriter:
-		return mergeTextCells(typewriterCells(units, cfg, elapsed))
+		return typewriterCells(units, cfg, elapsed)
 	case EffectGradientWave:
-		return mergeTextCells(gradientWaveCells(units, cfg, elapsed))
+		return gradientWaveCells(units, cfg, elapsed)
 	case EffectShimmer:
-		return mergeTextCells(shimmerCells(units, cfg, elapsed))
+		return shimmerCells(units, cfg, elapsed)
 	case EffectBounce:
-		return mergeTextCells(bounceCells(units, cfg, elapsed))
+		return bounceCells(units, cfg, elapsed)
 	default:
-		return mergeTextCells(staticTextCells(units, cfg))
+		return staticTextCells(units, cfg)
 	}
 }
 

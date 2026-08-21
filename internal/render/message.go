@@ -7,10 +7,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/rivo/uniseg"
 	"github.com/worxbend/twi/internal/emoji"
-	"github.com/worxbend/twi/internal/textsafe"
 	"github.com/worxbend/twi/internal/theme"
 	"github.com/worxbend/twi/internal/twitch"
 )
@@ -19,158 +16,6 @@ const (
 	defaultWidth       = 80
 	minimumRenderWidth = 8
 )
-
-// FragmentKind identifies the semantic role of a render fragment.
-type FragmentKind string
-
-const (
-	FragmentAvatar        FragmentKind = "avatar"
-	FragmentTimestamp     FragmentKind = "timestamp"
-	FragmentBadge         FragmentKind = "badge"
-	FragmentUsername      FragmentKind = "username"
-	FragmentText          FragmentKind = "text"
-	FragmentMention       FragmentKind = "mention"
-	FragmentReply         FragmentKind = "reply"
-	FragmentNotice        FragmentKind = "notice"
-	FragmentAction        FragmentKind = "action"
-	FragmentDeleted       FragmentKind = "deleted"
-	FragmentEmojiFallback FragmentKind = "emoji_fallback"
-	FragmentEmoteFallback FragmentKind = "emote_fallback"
-	FragmentFirstMessage  FragmentKind = "first_message"
-)
-
-// FragmentStyle describes terminal styling that can be applied without
-// changing a fragment's layout width.
-type FragmentStyle struct {
-	Foreground    string
-	Background    string
-	Bold          bool
-	Italic        bool
-	Strikethrough bool
-}
-
-// Fragment is a normalized, styled segment of a rendered chat message.
-type Fragment struct {
-	Kind       FragmentKind
-	Text       string
-	Style      FragmentStyle
-	Ref        twitch.AssetRef
-	WidthCells int
-}
-
-// Width returns the terminal cell width reserved by the fragment.
-func (f Fragment) Width() int {
-	if f.WidthCells > 0 {
-		return f.WidthCells
-	}
-	return textWidth(f.Text)
-}
-
-// Row is a width-bounded collection of render fragments.
-type Row struct {
-	Fragments []Fragment
-}
-
-// Plain returns the row fallback text without terminal styling.
-func (r Row) Plain() string {
-	var builder strings.Builder
-	for _, fragment := range r.Fragments {
-		builder.WriteString(fragmentFallbackText(fragment))
-	}
-	return builder.String()
-}
-
-// String returns the row with ANSI styling applied.
-// TerminalString returns the row with styled text fallbacks (avatars,
-// badges, emotes, and emoji always render as text - there is no image
-// rendering path).
-func (r Row) TerminalString() string {
-	var builder strings.Builder
-	for _, fragment := range r.Fragments {
-		builder.WriteString(renderFragment(fragment))
-	}
-	return builder.String()
-}
-
-// Width returns the terminal cell width reserved by the row.
-func (r Row) Width() int {
-	return fragmentsWidth(r.Fragments)
-}
-
-// TerminalStringWithBackground behaves like TerminalString, but fills every
-// fragment's unset background with background instead of leaving it empty.
-//
-// Each fragment renders through its own independent lipgloss.Style.Render
-// call and ends in its own ANSI reset. Wrapping the fully-assembled row in an
-// outer Background() style afterward (as View() does for the whole screen)
-// only colors text up to that row's first embedded reset — verified
-// empirically against lipgloss v1.1.0 — so every fragment after the first
-// falls back to the terminal's own default background, which many terminals
-// render with the user's configured transparency/blur even after an OSC 11
-// default-background override. Setting an explicit background on every
-// fragment sidesteps that: explicit SGR backgrounds are always opaque,
-// regardless of terminal transparency settings. Fragments that already carry
-// their own background (e.g. the avatar-initials chip) are left untouched.
-func (r Row) TerminalStringWithBackground(background string) string {
-	var builder strings.Builder
-	for _, fragment := range r.Fragments {
-		builder.WriteString(renderFragment(fragmentWithDefaultBackground(fragment, background)))
-	}
-	return builder.String()
-}
-
-func fragmentWithDefaultBackground(fragment Fragment, background string) Fragment {
-	if fragment.Style.Background == "" {
-		fragment.Style.Background = background
-	}
-	return fragment
-}
-
-// LayoutMode selects how a message's author and text are arranged.
-type LayoutMode string
-
-const (
-	// LayoutInline puts the author and the message on one row:
-	// "12:00 [AB] Name: message text". Densest layout; every row is
-	// self-describing, which suits fast-moving chat.
-	LayoutInline LayoutMode = "inline"
-	// LayoutGrouped puts the author on their own header row with the
-	// message text indented beneath it, and omits the header entirely for
-	// consecutive messages from the same author (see Options.ContinuesGroup).
-	// Trades vertical space for a much clearer read of who said what.
-	LayoutGrouped LayoutMode = "grouped"
-	// LayoutCompact drops avatars, timestamps, and badges, leaving
-	// "Name: message". For narrow terminals and side-by-side panes.
-	LayoutCompact LayoutMode = "compact"
-)
-
-// DefaultLayoutMode is used when a config value is missing or unrecognized.
-const DefaultLayoutMode = LayoutInline
-
-// LayoutModes lists every layout a config file may name.
-//
-// It exists so that whoever validates configuration -- `twi doctor`, `twi
-// setup` -- asks this package rather than repeating the strings. Those lists
-// had drifted before: a mode added here and not there makes doctor report a
-// perfectly valid config as "unknown".
-func LayoutModes() []string {
-	return []string{string(LayoutInline), string(LayoutGrouped), string(LayoutCompact)}
-}
-
-// NormalizeLayoutMode maps a config string onto a known layout, falling back
-// to DefaultLayoutMode so an unrecognized value degrades instead of failing.
-func NormalizeLayoutMode(value string) LayoutMode {
-	switch LayoutMode(strings.ToLower(strings.TrimSpace(value))) {
-	case LayoutInline:
-		return LayoutInline
-	case LayoutGrouped:
-		return LayoutGrouped
-	case LayoutCompact:
-		return LayoutCompact
-	default:
-		return DefaultLayoutMode
-	}
-}
 
 // AuthorMeta is per-user context the renderer cannot derive from a message on
 // its own. It is resolved by the app from its channel roster (badges seen so
@@ -335,69 +180,6 @@ func Rows(msg twitch.ChatMessage, opts Options) []Row {
 	return rows
 }
 
-// groupedRows renders LayoutGrouped: an author header row followed by the
-// message text indented beneath it. Consecutive messages from the same author
-// (Options.ContinuesGroup) skip the header, so a run of messages reads as one
-// block under a single name.
-func groupedRows(msg twitch.ChatMessage, opts Options) []Row {
-	indent := groupedIndentWidth(opts.Width)
-	var rows []Row
-	if !opts.ContinuesGroup {
-		header := groupedHeaderFragments(msg, opts)
-		headerRows, current, _ := appendWrappedFragments(nil, Row{}, 0, header, opts.Width, indent)
-		rows = append(headerRows, current)
-	}
-
-	content := messageContent(msg, opts)
-	indentFragment := []Fragment{{Kind: FragmentText, Text: strings.Repeat(" ", indent)}}
-	bodyRows, current, _ := appendWrappedFragments(nil, Row{}, 0, indentFragment, opts.Width, 0)
-	bodyRows, current, _ = appendWrappedFragments(bodyRows, current, indent, content, opts.Width, indent)
-	rows = append(rows, append(bodyRows, current)...)
-	return rows
-}
-
-// groupedIndentWidth is how far grouped message text is inset under its
-// author header. It scales down on narrow terminals so the indent never eats
-// the message.
-func groupedIndentWidth(width int) int {
-	switch {
-	case width >= 40:
-		return 3
-	case width >= 20:
-		return 2
-	default:
-		return 0
-	}
-}
-
-// groupedHeaderFragments builds the author row for LayoutGrouped: avatar
-// chip, username, badges, then muted metadata (timestamp and author context).
-// The username carries the heading weight here - a terminal cannot vary font
-// size, so the visual hierarchy between "who" and "what" comes from putting
-// the name on its own bold, colored row above unemphasized body text.
-func groupedHeaderFragments(msg twitch.ChatMessage, opts Options) []Fragment {
-	var fragments []Fragment
-	if opts.Assets.ShowAvatars && opts.Width >= 28 {
-		fragments = append(fragments, avatarFallbackFragment(msg, opts, displayAuthor(msg)))
-	}
-	fragments = append(fragments, usernameFragment(msg, opts))
-	if badges := badgeFragments(msg, opts); len(badges) > 0 && opts.Width >= 24 {
-		fragments = append(fragments, Fragment{Kind: FragmentText, Text: " "})
-		fragments = append(fragments, badges...)
-	}
-	if opts.Width >= 30 {
-		fragments = append(fragments, Fragment{
-			Kind:  FragmentTimestamp,
-			Text:  " " + timestampText(msg.Timestamp),
-			Style: FragmentStyle{Foreground: opts.Palette.Muted},
-		})
-	}
-	if opts.Width >= 46 {
-		fragments = append(fragments, authorMetaFragments(opts)...)
-	}
-	return fragments
-}
-
 // usernameFragment renders the author name in their stable identity color.
 //
 // FullUsername appends the login when the display name is not simply a
@@ -418,46 +200,6 @@ func usernameFragment(msg twitch.ChatMessage, opts Options) Fragment {
 			Foreground: usernameColor(msg, opts.Palette),
 			Bold:       true,
 		},
-	}
-}
-
-// badgeFragments renders a message's badges according to the active badge
-// mode: bracketed text labels, single-cell glyphs, or nothing.
-func badgeFragments(msg twitch.ChatMessage, opts Options) []Fragment {
-	mode := opts.badgeMode()
-	if mode == BadgeModeOff || len(msg.Badges) == 0 {
-		return nil
-	}
-	// Each glyph fragment reserves BadgeGlyphWidth (icon plus one trailing
-	// pad cell), so callers supply any leading separator themselves rather
-	// than getting a doubled space after an element that already ends in one.
-	fragments := make([]Fragment, 0, len(msg.Badges))
-	if mode == BadgeModeGlyph {
-		for _, badge := range msg.Badges {
-			fragments = append(fragments, badgeGlyphFragment(badge, opts))
-		}
-		return fragments
-	}
-	for _, badge := range msg.Badges {
-		fragments = append(fragments, badgeFallbackFragment(badge, opts))
-	}
-	return fragments
-}
-
-// badgeGlyphFragment renders one badge as a colored icon. The fixed
-// BadgeGlyphWidth keeps badge columns aligned between rows even when a badge
-// set has no glyph mapping and falls back to a neutral marker.
-func badgeGlyphFragment(badge twitch.Badge, opts Options) Fragment {
-	glyph, _ := BadgeGlyph(badge.SetID)
-	return Fragment{
-		Kind:       FragmentBadge,
-		Text:       glyph,
-		WidthCells: BadgeGlyphWidth,
-		Style: FragmentStyle{
-			Foreground: badgeGlyphColor(badge.SetID, opts.Palette),
-			Bold:       true,
-		},
-		Ref: badgeAssetRef(badge),
 	}
 }
 
@@ -522,6 +264,28 @@ func humanizeDuration(d time.Duration) string {
 	}
 }
 
+// The fixed punctuation of a message prefix. These are the exact strings
+// messagePrefix draws, and prefixDecorations.width measures them to budget the
+// prefix, so the space reserved for the punctuation cannot drift from the
+// punctuation that ends up on screen.
+const (
+	// firstMessageMark precedes the author's name on a viewer's first-ever
+	// message in the channel.
+	firstMessageMark = "✦ "
+	// messageSeparator sits between the author's name and what they said.
+	messageSeparator = ": "
+	// actionSeparator replaces messageSeparator for a /me action, where the
+	// name reads as the subject of a sentence rather than as a label.
+	actionSeparator = " "
+	// actionMark precedes the author's name on a /me action.
+	actionMark = "* "
+)
+
+// timestampWidth is the width of a drawn clock plus the space after it. It is
+// measured from the renderer's own formatter rather than written out as a
+// number, so changing the clock format keeps the prefix budget correct.
+var timestampWidth = textWidth(timestampText(time.Time{}) + " ")
+
 // prefixDecorations records which of the optional parts of a message prefix
 // -- the avatar, the timestamp, the badges, the first-message mark -- are
 // being drawn for one message.
@@ -545,10 +309,10 @@ func chooseDecorations(msg twitch.ChatMessage, opts Options, author string) pref
 	compact := opts.layout() == LayoutCompact
 	d := prefixDecorations{
 		// LayoutCompact trades every decoration for message text.
-		timestamp:    !compact && opts.Width >= 16,
-		badges:       !compact && opts.Width >= 28 && len(msg.Badges) > 0 && opts.badgeMode() != BadgeModeOff,
-		avatar:       !compact && opts.Assets.ShowAvatars && opts.Width >= 24,
-		firstMessage: msg.FirstMessage && !compact && opts.Width >= 24,
+		timestamp:    !compact && opts.Width >= inlineMinWidthForTimestamp,
+		badges:       !compact && opts.Width >= inlineMinWidthForBadges && len(msg.Badges) > 0 && opts.badgeMode() != BadgeModeOff,
+		avatar:       !compact && opts.Assets.ShowAvatars && opts.Width >= inlineMinWidthForAvatar,
+		firstMessage: msg.FirstMessage && !compact && opts.Width >= inlineMinWidthForFirstMessage,
 	}
 
 	for {
@@ -572,16 +336,15 @@ func chooseDecorations(msg twitch.ChatMessage, opts Options, author string) pref
 // width is the number of cells the decorations and the fixed punctuation of
 // the prefix occupy, excluding the author's name.
 func (d prefixDecorations) width(msg twitch.ChatMessage, opts Options) int {
-	// The trailing separator is ": ", or " " plus the "* " action marker.
-	width := 2
+	width := textWidth(messageSeparator)
 	if msg.Type == twitch.MessageTypeAction {
-		width = 3
+		width = textWidth(actionMark) + textWidth(actionSeparator)
 	}
 	if d.firstMessage {
-		width += 2
+		width += textWidth(firstMessageMark)
 	}
 	if d.timestamp {
-		width += 6
+		width += timestampWidth
 	}
 	if d.badges {
 		width += badgeSetWidth(msg.Badges, opts)
@@ -624,7 +387,7 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 	if decorations.firstMessage {
 		fragments = append(fragments, Fragment{
 			Kind: FragmentFirstMessage,
-			Text: "✦ ",
+			Text: firstMessageMark,
 			Style: FragmentStyle{
 				Foreground: opts.Palette.Success,
 				Bold:       true,
@@ -634,7 +397,7 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 	if msg.Type == twitch.MessageTypeAction {
 		fragments = append(fragments, Fragment{
 			Kind: FragmentAction,
-			Text: "* ",
+			Text: actionMark,
 			Style: FragmentStyle{
 				Foreground: accent,
 				Bold:       true,
@@ -644,9 +407,9 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 
 	fragments = append(fragments, usernameFragment(msg, opts))
 
-	separator := ": "
+	separator := messageSeparator
 	if msg.Type == twitch.MessageTypeAction {
-		separator = " "
+		separator = actionSeparator
 	}
 	fragments = append(fragments, Fragment{
 		Kind: FragmentText,
@@ -658,56 +421,87 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 	return fragments
 }
 
+// messageContent builds everything that follows the prefix: the optional
+// reply and notice lead-ins, then the message body itself.
 func messageContent(msg twitch.ChatMessage, opts Options) []Fragment {
 	if msg.Deleted {
-		return []Fragment{{
-			Kind: FragmentDeleted,
-			Text: "[message deleted]",
-			Style: FragmentStyle{
-				Foreground:    opts.Palette.Muted,
-				Italic:        true,
-				Strikethrough: true,
-			},
-		}}
+		return []Fragment{deletedFragment(opts)}
 	}
 
 	var fragments []Fragment
-	if msg.Reply != nil {
-		reply := "reply to " + emptyFallback(msg.Reply.ParentAuthor, "unknown")
-		if msg.Reply.ParentText != "" {
-			reply += ": " + compactWhitespace(msg.Reply.ParentText)
-		}
-		fragments = append(fragments, Fragment{
-			Kind: FragmentReply,
-			Text: reply + " ",
-			Style: FragmentStyle{
-				Foreground: opts.Palette.Muted,
-				Italic:     true,
-			},
-		})
-	}
+	fragments = append(fragments, replyFragments(msg, opts)...)
+	fragments = append(fragments, noticeFragments(msg, opts)...)
+	fragments = append(fragments, bodyFragments(msg, opts)...)
+	return fragments
+}
 
-	if msg.Type == twitch.MessageTypeNotice || msg.Type == twitch.MessageTypeSystem {
-		fragments = append(fragments, Fragment{
-			Kind: FragmentNotice,
-			Text: "[notice] ",
-			Style: FragmentStyle{
-				Foreground: opts.Palette.Warning,
-				Bold:       true,
-			},
-		})
+// deletedFragment stands in for a message a moderator removed. The text is
+// kept in place, struck through and muted, rather than erased: a reader who
+// saw the original needs to know that what they read was taken down.
+func deletedFragment(opts Options) Fragment {
+	return Fragment{
+		Kind: FragmentDeleted,
+		Text: "[message deleted]",
+		Style: FragmentStyle{
+			Foreground:    opts.Palette.Muted,
+			Italic:        true,
+			Strikethrough: true,
+		},
 	}
+}
 
+// replyFragments renders the "reply to <author>: <quoted text>" lead-in that
+// precedes a threaded reply, or nothing when the message is not a reply.
+func replyFragments(msg twitch.ChatMessage, opts Options) []Fragment {
+	if msg.Reply == nil {
+		return nil
+	}
+	reply := "reply to " + emptyFallback(msg.Reply.ParentAuthor, "unknown")
+	if msg.Reply.ParentText != "" {
+		reply += ": " + compactWhitespace(msg.Reply.ParentText)
+	}
+	return []Fragment{{
+		Kind: FragmentReply,
+		Text: reply + " ",
+		Style: FragmentStyle{
+			Foreground: opts.Palette.Muted,
+			Italic:     true,
+		},
+	}}
+}
+
+// noticeFragments marks server notices and twi's own status lines, so a line
+// the client wrote is never mistaken for something a viewer said.
+func noticeFragments(msg twitch.ChatMessage, opts Options) []Fragment {
+	if msg.Type != twitch.MessageTypeNotice && msg.Type != twitch.MessageTypeSystem {
+		return nil
+	}
+	return []Fragment{{
+		Kind: FragmentNotice,
+		Text: "[notice] ",
+		Style: FragmentStyle{
+			Foreground: opts.Palette.Warning,
+			Bold:       true,
+		},
+	}}
+}
+
+// bodyFragments renders what the author actually typed, from the richest
+// description of it the message carries.
+//
+// Twitch describes a message's emotes in one of two ways depending on where it
+// came from: the EventSub/Helix path hands over pre-split fragments, while the
+// IRC path hands over the raw text plus index ranges naming which parts of it
+// are emotes. Messages from neither path (twi's own status lines, for example)
+// have only text, which is scanned for mentions and emoji.
+func bodyFragments(msg twitch.ChatMessage, opts Options) []Fragment {
 	if len(msg.Fragments) > 0 {
-		fragments = append(fragments, normalizedFragments(msg.Fragments, opts)...)
-		return fragments
+		return normalizedFragments(msg.Fragments, opts)
 	}
 	if len(msg.Emotes) > 0 {
-		fragments = append(fragments, emoteFallbackFragments(msg, opts)...)
-		return fragments
+		return emoteFallbackFragments(msg, opts)
 	}
-	fragments = append(fragments, splitTextFragments(msg.Text, opts)...)
-	return fragments
+	return splitTextFragments(msg.Text, opts)
 }
 
 func normalizedFragments(in []twitch.MessageFragment, opts Options) []Fragment {
@@ -729,28 +523,9 @@ func normalizedFragments(in []twitch.MessageFragment, opts Options) []Fragment {
 				Ref: fragment.Ref,
 			})
 		case twitch.FragmentEmote:
-			out = append(out, Fragment{
-				Kind:       FragmentEmoteFallback,
-				Text:       text,
-				WidthCells: opts.Assets.EmoteWidthCells,
-				Style: FragmentStyle{
-					Foreground: opts.Palette.Success,
-					Background: opts.emoteHighlight(),
-					Bold:       true,
-				},
-				Ref: emoteFragmentRef(fragment),
-			})
+			out = append(out, emoteFragment(text, emoteFragmentRef(fragment), opts))
 		case twitch.FragmentEmoji:
-			out = append(out, Fragment{
-				Kind:       FragmentEmojiFallback,
-				Text:       text,
-				WidthCells: opts.Assets.EmojiWidthCells,
-				Style: FragmentStyle{
-					Foreground: opts.Palette.Foreground,
-					Background: opts.emojiHighlight(),
-				},
-				Ref: emojiAssetRef(text, fragment.Ref),
-			})
+			out = append(out, emojiFragment(text, emojiAssetRef(text, fragment.Ref), opts))
 		case twitch.FragmentBits:
 			out = append(out, Fragment{
 				Kind: FragmentText,
@@ -766,6 +541,44 @@ func normalizedFragments(in []twitch.MessageFragment, opts Options) []Fragment {
 		}
 	}
 	return coalesceAdjacent(out)
+}
+
+// emoteFragment builds the text stand-in for one channel emote. Emotes are
+// never drawn as images, so the token keeps its own text but reserves a fixed
+// number of cells (Options.Assets.EmoteWidthCells): every emote then occupies
+// the same width, which stops a row of emotes from reflowing the text around
+// it. ref is the already-resolved asset reference for the emote; the two call
+// sites resolve it differently (rich message fragments carry one, the legacy
+// emote ranges do not) and hand in the result.
+func emoteFragment(text string, ref twitch.AssetRef, opts Options) Fragment {
+	return Fragment{
+		Kind:       FragmentEmoteFallback,
+		Text:       text,
+		WidthCells: opts.Assets.EmoteWidthCells,
+		Style: FragmentStyle{
+			Foreground: opts.Palette.Success,
+			Background: opts.emoteHighlight(),
+			Bold:       true,
+		},
+		Ref: ref,
+	}
+}
+
+// emojiFragment builds the stand-in for one emoji grapheme cluster. It mirrors
+// emoteFragment but uses the emoji width and highlight, so emoji and channel
+// emotes stay visually distinguishable. cluster is a single grapheme cluster
+// (a flag or a skin-toned face is several codepoints but one cluster).
+func emojiFragment(cluster string, ref twitch.AssetRef, opts Options) Fragment {
+	return Fragment{
+		Kind:       FragmentEmojiFallback,
+		Text:       cluster,
+		WidthCells: opts.Assets.EmojiWidthCells,
+		Style: FragmentStyle{
+			Foreground: opts.Palette.Foreground,
+			Background: opts.emojiHighlight(),
+		},
+		Ref: ref,
+	}
 }
 
 func emoteFragmentRef(fragment twitch.MessageFragment) twitch.AssetRef {
@@ -812,17 +625,7 @@ func emoteFallbackFragments(msg twitch.ChatMessage, opts Options) []Fragment {
 		if token == "" {
 			token = emptyFallback(emote.Name, ":"+emote.ID+":")
 		}
-		fragments = append(fragments, Fragment{
-			Kind:       FragmentEmoteFallback,
-			Text:       token,
-			WidthCells: opts.Assets.EmoteWidthCells,
-			Style: FragmentStyle{
-				Foreground: opts.Palette.Success,
-				Background: opts.emoteHighlight(),
-				Bold:       true,
-			},
-			Ref: emoteAssetRef(emote),
-		})
+		fragments = append(fragments, emoteFragment(token, emoteAssetRef(emote), opts))
 		cursor = end + 1
 	}
 	if cursor < len(textRunes) {
@@ -874,16 +677,7 @@ func splitTextFragments(text string, opts Options) []Fragment {
 		}
 		if emoji.IsCluster(cluster) {
 			flushText()
-			fragments = append(fragments, Fragment{
-				Kind:       FragmentEmojiFallback,
-				Text:       cluster,
-				WidthCells: opts.Assets.EmojiWidthCells,
-				Style: FragmentStyle{
-					Foreground: opts.Palette.Foreground,
-					Background: opts.emojiHighlight(),
-				},
-				Ref: emojiAssetRef(cluster, twitch.AssetRef{}),
-			})
+			fragments = append(fragments, emojiFragment(cluster, emojiAssetRef(cluster, twitch.AssetRef{}), opts))
 			i++
 			continue
 		}
@@ -892,231 +686,6 @@ func splitTextFragments(text string, opts Options) []Fragment {
 	}
 	flushText()
 	return coalesceAdjacent(fragments)
-}
-
-func wrap(prefix, content []Fragment, width int) []Row {
-	if width <= 0 {
-		return nil
-	}
-
-	prefixWidth := fragmentsWidth(prefix)
-	indentWidth := prefixWidth
-	if indentWidth >= width {
-		indentWidth = width / 2
-	}
-
-	rows := make([]Row, 0, 2)
-	current := Row{}
-	used := 0
-	rows, current, used = appendWrappedFragments(rows, current, used, prefix, width, 0)
-	// The final width is not needed: nothing is appended after content, so
-	// the trailing row is emitted as-is.
-	rows, current, _ = appendWrappedFragments(rows, current, used, content, width, indentWidth)
-	rows = append(rows, current)
-	return rows
-}
-
-func appendWrappedFragments(rows []Row, current Row, used int, fragments []Fragment, width, indentWidth int) ([]Row, Row, int) {
-	for _, fragment := range fragments {
-		if fragment.WidthCells > 0 || isAtomicFragment(fragment) {
-			fragmentWidth := fragment.Width()
-			if fragmentWidth == 0 {
-				continue
-			}
-			if used+fragmentWidth > width && used > indentWidth {
-				rows = append(rows, current)
-				current = continuationRow(indentWidth)
-				used = indentWidth
-			}
-			if used+fragmentWidth > width && used == indentWidth && used > 0 && fragmentWidth <= width {
-				// The fragment cannot fit beside the indent but would fit on
-				// a full-width row, so give up the indent.
-				//
-				// The row being abandoned must be emitted first if it holds
-				// anything real. On the content pass, indentWidth is exactly
-				// the prefix width, so `used == indentWidth` is also true on
-				// the very first row -- where `current` holds the timestamp,
-				// badges and author name. Discarding it unconditionally
-				// dropped the whole prefix whenever a message opened with a
-				// long mention or emote, leaving an unattributed line in
-				// chat at ordinary terminal widths.
-				if rowHasContent(current) {
-					rows = append(rows, current)
-				}
-				current = Row{}
-				used = 0
-			}
-			if used+fragmentWidth <= width {
-				appendFragment(&current, fragment)
-				used += fragmentWidth
-				continue
-			}
-		}
-
-		// Prefer a break between words. Chat is prose, and breaking mid-word
-		// makes it materially harder to read at the speed a busy channel
-		// moves. A word wider than the line still falls through to
-		// cluster-by-cluster wrapping below, so nothing becomes unrenderable.
-		for _, chunk := range wrapChunks(fragment.Text) {
-			chunkWidth := textWidth(chunk)
-			if chunkWidth > 0 && chunkWidth <= width-indentWidth &&
-				used+chunkWidth > width && used > indentWidth &&
-				strings.TrimSpace(chunk) != "" {
-				rows = append(rows, current)
-				current = continuationRow(indentWidth)
-				used = indentWidth
-			}
-			rows, current, used = appendWrappedClusters(rows, current, used, fragment, chunk, width, indentWidth)
-		}
-	}
-	return rows, current, used
-}
-
-// wrapChunks splits text into word-sized pieces, each a run of non-space
-// characters together with the spaces that follow it. Keeping the trailing
-// spaces attached means a break taken before a chunk lands between words
-// rather than stranding a space at the start of the next row.
-func wrapChunks(text string) []string {
-	if text == "" {
-		return nil
-	}
-	var chunks []string
-	var current strings.Builder
-	inTrailingSpace := false
-	for _, cluster := range graphemeStrings(text) {
-		if cluster == "\n" {
-			if current.Len() > 0 {
-				chunks = append(chunks, current.String())
-				current.Reset()
-			}
-			chunks = append(chunks, cluster)
-			inTrailingSpace = false
-			continue
-		}
-		isSpace := strings.TrimSpace(cluster) == ""
-		if !isSpace && inTrailingSpace {
-			chunks = append(chunks, current.String())
-			current.Reset()
-			inTrailingSpace = false
-		}
-		current.WriteString(cluster)
-		if isSpace {
-			inTrailingSpace = true
-		}
-	}
-	if current.Len() > 0 {
-		chunks = append(chunks, current.String())
-	}
-	return chunks
-}
-
-func appendWrappedClusters(rows []Row, current Row, used int, fragment Fragment, text string, width, indentWidth int) ([]Row, Row, int) {
-	{
-		for _, cluster := range graphemeStrings(text) {
-			if cluster == "\n" {
-				rows = append(rows, current)
-				current = continuationRow(indentWidth)
-				used = indentWidth
-				continue
-			}
-
-			clusterWidth := textWidth(cluster)
-			if used+clusterWidth > width && used > indentWidth {
-				rows = append(rows, current)
-				current = continuationRow(indentWidth)
-				used = indentWidth
-				if strings.TrimSpace(cluster) == "" {
-					continue
-				}
-			}
-			if used+clusterWidth > width && used == indentWidth && used > 0 {
-				rows = append(rows, current)
-				current = continuationRow(0)
-				used = 0
-			}
-
-			next := fragment
-			next.Text = cluster
-			next.WidthCells = 0
-			appendFragment(&current, next)
-			used += clusterWidth
-		}
-	}
-	return rows, current, used
-}
-
-func isAtomicFragment(fragment Fragment) bool {
-	switch fragment.Kind {
-	case FragmentMention, FragmentEmojiFallback, FragmentEmoteFallback:
-		return true
-	default:
-		return false
-	}
-}
-
-func continuationRow(indentWidth int) Row {
-	if indentWidth <= 0 {
-		return Row{}
-	}
-	return Row{Fragments: []Fragment{{
-		Kind: FragmentText,
-		Text: strings.Repeat(" ", indentWidth),
-	}}}
-}
-
-func appendFragment(row *Row, fragment Fragment) {
-	if fragment.Text == "" {
-		return
-	}
-	lastIndex := len(row.Fragments) - 1
-	if lastIndex >= 0 && sameFragmentStyle(row.Fragments[lastIndex], fragment) {
-		row.Fragments[lastIndex].Text += fragment.Text
-		return
-	}
-	row.Fragments = append(row.Fragments, fragment)
-}
-
-func coalesceAdjacent(in []Fragment) []Fragment {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]Fragment, 0, len(in))
-	for _, fragment := range in {
-		row := Row{Fragments: out}
-		appendFragment(&row, fragment)
-		out = row.Fragments
-	}
-	return out
-}
-
-func sameFragmentStyle(a, b Fragment) bool {
-	if a.WidthCells > 0 || b.WidthCells > 0 {
-		return false
-	}
-	return a.Kind == b.Kind &&
-		a.Style == b.Style &&
-		a.Ref == b.Ref &&
-		a.WidthCells == b.WidthCells
-}
-
-func renderFragment(fragment Fragment) string {
-	style := lipgloss.NewStyle()
-	if fragment.Style.Foreground != "" {
-		style = style.Foreground(lipgloss.Color(fragment.Style.Foreground))
-	}
-	if fragment.Style.Background != "" {
-		style = style.Background(lipgloss.Color(fragment.Style.Background))
-	}
-	if fragment.Style.Bold {
-		style = style.Bold(true)
-	}
-	if fragment.Style.Italic {
-		style = style.Italic(true)
-	}
-	if fragment.Style.Strikethrough {
-		style = style.Strikethrough(true)
-	}
-	return style.Render(fragmentFallbackText(fragment))
 }
 
 func usernameColor(msg twitch.ChatMessage, palette theme.Palette) string {
@@ -1217,96 +786,6 @@ func timestampText(timestamp time.Time) string {
 	return timestamp.Local().Format("15:04")
 }
 
-func badgeLabel(badge twitch.Badge) string {
-	name := emptyFallback(badge.SetID, "badge")
-	if badge.ID != "" && badge.ID != "1" {
-		name += "/" + badge.ID
-	}
-	return "[" + name + "]"
-}
-
-func badgeFallbackFragment(badge twitch.Badge, opts Options) Fragment {
-	width := badgeFallbackWidth(badge, opts.Assets)
-	text := badgeLabel(badge) + " "
-	if opts.Assets.BadgeWidthCells > 0 {
-		text = compactBadgeLabel(badge)
-	}
-	return Fragment{
-		Kind:       FragmentBadge,
-		Text:       text,
-		WidthCells: width,
-		Style: FragmentStyle{
-			Foreground: opts.Palette.Accent,
-			Bold:       true,
-		},
-		Ref: badgeAssetRef(badge),
-	}
-}
-
-// badgeSetWidth is the total width a message's badges will occupy under the
-// active badge mode, used to budget the message prefix before rendering.
-func badgeSetWidth(badges []twitch.Badge, opts Options) int {
-	switch opts.badgeMode() {
-	case BadgeModeOff:
-		return 0
-	case BadgeModeGlyph:
-		return len(badges) * BadgeGlyphWidth
-	default:
-		width := 0
-		for _, badge := range badges {
-			width += badgeFallbackWidth(badge, opts.Assets)
-		}
-		return width
-	}
-}
-
-func badgeFallbackWidth(badge twitch.Badge, assets AssetOptions) int {
-	if assets.BadgeWidthCells > 0 {
-		return assets.BadgeWidthCells
-	}
-	return textWidth(badgeLabel(badge) + " ")
-}
-
-func compactBadgeLabel(badge twitch.Badge) string {
-	name := badge.SetID
-	switch strings.ToLower(name) {
-	case "broadcaster":
-		name = "cast"
-	case "moderator":
-		name = "mod"
-	case "subscriber":
-		name = "sub"
-	case "vip":
-		name = "vip"
-	case "founder":
-		name = "found"
-	case "":
-		name = "badge"
-	}
-	if badge.ID != "" && badge.ID != "1" && textWidth(name) <= 3 {
-		name += "/" + badge.ID
-	}
-	return "[" + name + "]"
-}
-
-func badgeAssetID(badge twitch.Badge) string {
-	if badge.ID == "" {
-		return badge.SetID
-	}
-	return badge.SetID + "/" + badge.ID
-}
-
-func badgeAssetRef(badge twitch.Badge) twitch.AssetRef {
-	ref := badge.Ref
-	if ref.Kind == "" {
-		ref.Kind = "badge"
-	}
-	if ref.ID == "" {
-		ref.ID = badgeAssetID(badge)
-	}
-	return ref
-}
-
 func emoteAssetRef(emote twitch.Emote) twitch.AssetRef {
 	ref := emote.Ref
 	if ref.Kind == "" {
@@ -1330,117 +809,4 @@ func emojiAssetRef(text string, ref twitch.AssetRef) twitch.AssetRef {
 		}
 	}
 	return ref
-}
-
-// fragmentFallbackText is the single funnel every visible fragment passes
-// through on its way to the terminal, whatever built it -- a chat message, a
-// Helix stream title, a badge label -- so it is where the escape-sequence
-// strip belongs, in addition to the one at IRC ingestion. Stripping before
-// the width fit also keeps the cell arithmetic honest: it measures the text
-// that is actually printed.
-//
-// textsafe.Display returns the string untouched when there is nothing to
-// strip, which is the case for every ordinary message.
-func fragmentFallbackText(fragment Fragment) string {
-	text := textsafe.Display(fragment.Text)
-	if fragment.WidthCells <= 0 {
-		return text
-	}
-	return fitCells(text, fragment.WidthCells)
-}
-
-func fitCells(value string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	out := value
-	if textWidth(out) > width {
-		out = truncateCells(out, width)
-	}
-	used := textWidth(out)
-	if used < width {
-		out += strings.Repeat(" ", width-used)
-	}
-	return out
-}
-
-func truncateCells(value string, limit int) string {
-	if limit <= 0 {
-		return ""
-	}
-	if textWidth(value) <= limit {
-		return value
-	}
-	if limit <= 3 {
-		return takeCells(value, limit)
-	}
-	return takeCells(value, limit-3) + "..."
-}
-
-func takeCells(value string, limit int) string {
-	if limit <= 0 {
-		return ""
-	}
-	var builder strings.Builder
-	used := 0
-	for _, cluster := range graphemeStrings(value) {
-		width := textWidth(cluster)
-		if used+width > limit {
-			break
-		}
-		builder.WriteString(cluster)
-		used += width
-	}
-	return builder.String()
-}
-
-func graphemeStrings(value string) []string {
-	graphemes := uniseg.NewGraphemes(value)
-	out := make([]string, 0, len(value))
-	for graphemes.Next() {
-		out = append(out, graphemes.Str())
-	}
-	return out
-}
-
-func fragmentsWidth(fragments []Fragment) int {
-	width := 0
-	for _, fragment := range fragments {
-		width += fragment.Width()
-	}
-	return width
-}
-
-func textWidth(value string) int {
-	return uniseg.StringWidth(value)
-}
-
-func isMentionPart(cluster string) bool {
-	for _, r := range cluster {
-		return twitch.IsLoginRune(r)
-	}
-	return false
-}
-
-func emptyFallback(value, fallback string) string {
-	if value == "" {
-		return fallback
-	}
-	return value
-}
-
-func compactWhitespace(value string) string {
-	return strings.Join(strings.Fields(value), " ")
-}
-
-// rowHasContent reports whether a row holds anything other than indent
-// padding, so an abandoned continuation row can be discarded while a row
-// carrying real fragments is emitted.
-func rowHasContent(row Row) bool {
-	for _, fragment := range row.Fragments {
-		if strings.TrimSpace(fragment.Text) != "" {
-			return true
-		}
-	}
-	return false
 }
