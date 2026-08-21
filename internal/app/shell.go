@@ -72,7 +72,11 @@ type shellModel struct {
 	effectiveConfig config.Config
 	debugLogger     debuglog.Logger
 	terminalOutput  io.Writer
-	theme           theme.Palette
+	// lifetime is cancelled when the shell exits, so an in-flight Twitch call
+	// is abandoned on quit instead of holding the process open. Nil in tests
+	// that build a model directly; see lifetimeContext.
+	lifetime context.Context
+	theme    theme.Palette
 	// mentionLogin is the login whose mentions are highlighted -- whoever
 	// the OAuth token belongs to.
 	mentionLogin   string
@@ -442,8 +446,16 @@ func RunClientWithOptions(w io.Writer, cfg config.Config, client ChatClient, opt
 	model.terminalOutput = w
 	primeTerminalBackground(w, model.canvasBackground())
 
+	// Everything the shell asks Twitch for hangs off this context, so quitting
+	// cancels the requests still in flight rather than leaving their goroutines
+	// waiting on a socket nobody is going to read.
+	lifetime, stop := context.WithCancel(context.Background())
+	defer stop()
+	model.lifetime = lifetime
+
 	program := tea.NewProgram(model, programOptions(w, cfg)...)
 	_, err := program.Run()
+	stop()
 	resetTerminalBackground(w)
 	return err
 }
@@ -2309,8 +2321,12 @@ func (m *shellModel) maybeNotifyForSystemEvent(message twitch.ChatMessage) tea.C
 		return nil
 	}
 	notifier := m.services.systemNotifier
+	lifetime := m.lifetimeContext()
 	return func() tea.Msg {
-		_ = notifier.Notify(context.Background(), notification)
+		ctx, cancel := context.WithTimeout(lifetime, twitchRequestTimeout)
+		defer cancel()
+
+		_ = notifier.Notify(ctx, notification)
 		return nil
 	}
 }

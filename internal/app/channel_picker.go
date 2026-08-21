@@ -78,8 +78,9 @@ func (m *shellModel) scheduleFollowedChannelsLookup() tea.Cmd {
 	userLookup := m.services.userLookup
 	username := m.effectiveConfig.Twitch.Username
 	knownID := m.selfBroadcasterID
+	lifetime := m.lifetimeContext()
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), channelPickerRequestTimeout)
+		ctx, cancel := context.WithTimeout(lifetime, channelPickerRequestTimeout)
 		defer cancel()
 		id := knownID
 		if id == "" {

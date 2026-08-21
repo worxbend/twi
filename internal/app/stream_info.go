@@ -89,8 +89,9 @@ func (m *shellModel) scheduleStreamInfoLoad() tea.Cmd {
 	username := m.effectiveConfig.Twitch.Username
 	knownID := m.selfBroadcasterID
 
+	lifetime := m.lifetimeContext()
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), streamInfoRequestTimeout)
+		ctx, cancel := context.WithTimeout(lifetime, streamInfoRequestTimeout)
 		defer cancel()
 
 		id := knownID
@@ -153,8 +154,9 @@ func (m *shellModel) scheduleStreamInfoSave() tea.Cmd {
 	m.streamInfo.saveErr = ""
 	m.streamInfo.saveOK = false
 
+	lifetime := m.lifetimeContext()
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), streamInfoRequestTimeout)
+		ctx, cancel := context.WithTimeout(lifetime, streamInfoRequestTimeout)
 		defer cancel()
 
 		update := twitch.ChannelInfoUpdate{}

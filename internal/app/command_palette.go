@@ -481,10 +481,14 @@ func (m *shellModel) requestReconnect() tea.Cmd {
 	}
 	m.channels.applyConnectionState(state)
 	m.debugConnectionState("app.reconnect.requested", state)
+	lifetime := m.lifetimeContext()
 	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(lifetime, twitchRequestTimeout)
+		defer cancel()
+
 		return reconnectCompletedMsg{
 			channel: channel,
-			err:     client.Reconnect(context.Background()),
+			err:     client.Reconnect(ctx),
 		}
 	}
 }

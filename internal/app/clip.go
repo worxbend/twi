@@ -141,8 +141,9 @@ func (m *shellModel) scheduleClipCreate(state *channelState, offsets clipOffsets
 	state.sendState = composerSendSending
 	state.sendFeedback = "clip: creating..."
 
+	lifetime := m.lifetimeContext()
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), clipRequestTimeout)
+		ctx, cancel := context.WithTimeout(lifetime, clipRequestTimeout)
 		defer cancel()
 
 		id := knownID

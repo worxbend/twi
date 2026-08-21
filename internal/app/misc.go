@@ -63,8 +63,9 @@ func (m *shellModel) scheduleMiscLoad() tea.Cmd {
 	username := m.effectiveConfig.Twitch.Username
 	knownID := m.selfBroadcasterID
 
+	lifetime := m.lifetimeContext()
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), miscRequestTimeout)
+		ctx, cancel := context.WithTimeout(lifetime, miscRequestTimeout)
 		defer cancel()
 
 		id := knownID
@@ -118,8 +119,9 @@ func (m *shellModel) scheduleCreateMarker(description string) tea.Cmd {
 	m.misc.createErr = ""
 	m.misc.createOK = false
 
+	lifetime := m.lifetimeContext()
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), miscRequestTimeout)
+		ctx, cancel := context.WithTimeout(lifetime, miscRequestTimeout)
 		defer cancel()
 
 		id := knownID

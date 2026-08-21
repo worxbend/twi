@@ -37,8 +37,12 @@ func (m *shellModel) scheduleBroadcasterIDLookup() tea.Cmd {
 	state.broadcasterIDRequested = true
 	lookup := m.services.userLookup
 	key := channelKey(channel)
+	lifetime := m.lifetimeContext()
 	return func() tea.Msg {
-		results, err := lookup.GetUsers(context.Background(), twitch.UserLookupRequest{UserLogins: []string{channel}})
+		ctx, cancel := context.WithTimeout(lifetime, twitchRequestTimeout)
+		defer cancel()
+
+		results, err := lookup.GetUsers(ctx, twitch.UserLookupRequest{UserLogins: []string{channel}})
 		var userID string
 		if err == nil {
 			for _, result := range results {
@@ -83,8 +87,12 @@ func (m *shellModel) scheduleEmoteIndexLookup() tea.Cmd {
 	m.emotes.emoteEntriesRequested[key] = true
 	broadcasterID := m.activeChannelState().broadcasterID
 	index := m.emotes.emoteIndex
+	lifetime := m.lifetimeContext()
 	return func() tea.Msg {
-		entries, err := index.Load(context.Background(), broadcasterID)
+		ctx, cancel := context.WithTimeout(lifetime, twitchRequestTimeout)
+		defer cancel()
+
+		entries, err := index.Load(ctx, broadcasterID)
 		return emoteIndexResolvedMsg{channel: key, entries: entries, err: err}
 	}
 }

@@ -103,8 +103,12 @@ func (m *shellModel) startNextComposerSend(state *channelState) tea.Cmd {
 		ReplyToMessageID: next.ReplyToMessageID,
 		Action:           next.Action,
 	}
+	lifetime := m.lifetimeContext()
 	return func() tea.Msg {
-		result, err := client.Send(context.Background(), req)
+		ctx, cancel := context.WithTimeout(lifetime, twitchRequestTimeout)
+		defer cancel()
+
+		result, err := client.Send(ctx, req)
 		return composerSendCompletedMsg{id: next.ID, result: result, err: err}
 	}
 }

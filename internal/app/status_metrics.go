@@ -48,8 +48,12 @@ func (m shellModel) resolveStreamStatusCommand() tea.Cmd {
 		return nil
 	}
 	logins := m.channels.channelNames()
+	lifetime := m.lifetimeContext()
 	return func() tea.Msg {
-		results, err := resolver.GetStreams(context.Background(), logins)
+		ctx, cancel := context.WithTimeout(lifetime, twitchRequestTimeout)
+		defer cancel()
+
+		results, err := resolver.GetStreams(ctx, logins)
 		return streamStatusResolvedMsg{results: results, err: err}
 	}
 }

@@ -161,8 +161,9 @@ func (m *shellModel) scheduleCategorySearch() tea.Cmd {
 	m.categoryPicker.loading = true
 	m.categoryPicker.err = ""
 	lookup := m.services.gameLookup
+	lifetime := m.lifetimeContext()
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), categoryPickerRequestTimeout)
+		ctx, cancel := context.WithTimeout(lifetime, categoryPickerRequestTimeout)
 		defer cancel()
 		results, err := lookup.SearchCategories(ctx, query, categoryPickerResultLimit)
 		return categoryPickerResultsMsg{generation: generation, results: results, err: err}
