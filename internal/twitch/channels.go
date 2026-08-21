@@ -70,10 +70,8 @@ type HelixChannelsClientConfig struct {
 // HelixChannelsClient reads and updates channel info through Twitch Helix
 // "Get/Modify Channel Information".
 type HelixChannelsClient struct {
-	endpoint         string
-	httpClient       *http.Client
-	clientID         string
-	oauthTokenSource func() string
+	endpoint string
+	helixTransport
 }
 
 var _ ChannelManager = (*HelixChannelsClient)(nil)
@@ -82,19 +80,9 @@ var _ ChannelManager = (*HelixChannelsClient)(nil)
 // HTTP. The returned client performs no network I/O until a method is
 // called.
 func NewHelixChannelsClient(cfg HelixChannelsClientConfig) *HelixChannelsClient {
-	endpoint := strings.TrimSpace(cfg.Endpoint)
-	if endpoint == "" {
-		endpoint = defaultHelixChannelsURL
-	}
-	httpClient := cfg.HTTPClient
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
 	return &HelixChannelsClient{
-		endpoint:         endpoint,
-		httpClient:       httpClient,
-		clientID:         strings.TrimSpace(cfg.ClientID),
-		oauthTokenSource: resolveTokenSource(cfg.OAuthTokenSource, cfg.OAuthToken),
+		endpoint:       endpointOrDefault(cfg.Endpoint, defaultHelixChannelsURL),
+		helixTransport: newHelixTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken),
 	}
 }
 
@@ -113,11 +101,10 @@ func (c *HelixChannelsClient) GetChannelInformation(ctx context.Context, broadca
 	if err != nil {
 		return ChannelInfo{}, credentialSafeUserError("create Twitch channel information request", err, c.token())
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	httpReq, err := c.newGetRequest(ctx, endpoint, "create Twitch channel information request")
 	if err != nil {
-		return ChannelInfo{}, credentialSafeUserError("create Twitch channel information request", err, c.token())
+		return ChannelInfo{}, err
 	}
-	c.setAuthHeaders(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -125,8 +112,8 @@ func (c *HelixChannelsClient) GetChannelInformation(ctx context.Context, broadca
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return ChannelInfo{}, c.responseError(resp, "get Twitch channel information", "Get Channel Information")
+	if !isHelixSuccess(resp) {
+		return ChannelInfo{}, c.responseError(resp, channelErrorLabels("get Twitch channel information", "Get Channel Information"))
 	}
 
 	var decoded helixChannelsResponse
@@ -191,39 +178,23 @@ func (c *HelixChannelsClient) ModifyChannelInformation(ctx context.Context, broa
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return c.responseError(resp, "modify Twitch channel information", "Modify Channel Information")
+	if !isHelixSuccess(resp) {
+		return c.responseError(resp, channelErrorLabels("modify Twitch channel information", "Modify Channel Information"))
 	}
 	return nil
 }
 
-func (c *HelixChannelsClient) setAuthHeaders(req *http.Request) {
-	if c.clientID != "" {
-		req.Header.Set("Client-Id", c.clientID)
+// channelErrorLabels describes a Get/Modify Channel Information failure.
+// Twitch answers 401 both for an expired token and for one missing
+// channel:manage:broadcast, so that status is surfaced as a ChannelAPIError
+// for callers that tell the user which login to re-run.
+func channelErrorLabels(action, endpoint string) helixErrorLabels {
+	return helixErrorLabels{
+		action:             action,
+		readAction:         "read Twitch channel information response",
+		endpoint:           endpoint,
+		channelAPIStatuses: []int{http.StatusUnauthorized},
 	}
-	token := accessTokenForValidation(c.token())
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-}
-
-func (c *HelixChannelsClient) responseError(resp *http.Response, action, endpointLabel string) error {
-	detail, err := readSmallBody(resp.Body)
-	if err != nil {
-		return credentialSafeUserError("read Twitch channel information response", err, c.token())
-	}
-	if detail != "" {
-		detail = ": " + detail
-	}
-	wrapped := credentialSafeUserError(
-		action,
-		fmt.Errorf("twitch %s returned HTTP %d%s", endpointLabel, resp.StatusCode, detail),
-		c.token(),
-	)
-	if resp.StatusCode == http.StatusUnauthorized {
-		return &ChannelAPIError{StatusCode: resp.StatusCode, err: wrapped}
-	}
-	return wrapped
 }
 
 // ChannelAPIError wraps a Get/Modify Channel Information failure with the
@@ -280,13 +251,4 @@ type helixChannelUpdateRequest struct {
 	GameID              *string   `json:"game_id,omitempty"`
 	BroadcasterLanguage *string   `json:"broadcaster_language,omitempty"`
 	Tags                *[]string `json:"tags,omitempty"`
-}
-
-// token returns the OAuth token to present on the next request, read now
-// rather than captured at construction so a mid-session refresh applies.
-func (c *HelixChannelsClient) token() string {
-	if c == nil || c.oauthTokenSource == nil {
-		return ""
-	}
-	return c.oauthTokenSource()
 }

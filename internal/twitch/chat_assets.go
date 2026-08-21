@@ -107,9 +107,7 @@ type HelixChatAssetsClient struct {
 	globalEmotesEndpoint  string
 	channelBadgesEndpoint string
 	globalBadgesEndpoint  string
-	httpClient            *http.Client
-	clientID              string
-	oauthTokenSource      func() string
+	helixTransport
 }
 
 var _ ChatAssetLookup = (*HelixChatAssetsClient)(nil)
@@ -117,18 +115,12 @@ var _ ChatAssetLookup = (*HelixChatAssetsClient)(nil)
 // NewHelixChatAssetsClient creates a chat asset metadata adapter. It performs
 // no network I/O until one of the lookup methods is called.
 func NewHelixChatAssetsClient(cfg HelixChatAssetsClientConfig) *HelixChatAssetsClient {
-	httpClient := cfg.HTTPClient
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
 	return &HelixChatAssetsClient{
 		channelEmotesEndpoint: endpointOrDefault(cfg.ChannelEmotesEndpoint, defaultHelixChannelEmotesURL),
 		globalEmotesEndpoint:  endpointOrDefault(cfg.GlobalEmotesEndpoint, defaultHelixGlobalEmotesURL),
 		channelBadgesEndpoint: endpointOrDefault(cfg.ChannelBadgesEndpoint, defaultHelixChannelBadgesURL),
 		globalBadgesEndpoint:  endpointOrDefault(cfg.GlobalBadgesEndpoint, defaultHelixGlobalBadgesURL),
-		httpClient:            httpClient,
-		clientID:              strings.TrimSpace(cfg.ClientID),
-		oauthTokenSource:      resolveTokenSource(cfg.OAuthTokenSource, cfg.OAuthToken),
+		helixTransport:        newHelixTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken),
 	}
 }
 
@@ -184,13 +176,7 @@ func (c *HelixChatAssetsClient) getJSON(ctx context.Context, endpoint, broadcast
 	if err != nil {
 		return credentialSafeChatAssetError("create Twitch chat asset request", err, c.token())
 	}
-	if c.clientID != "" {
-		req.Header.Set("Client-Id", c.clientID)
-	}
-	token := accessTokenForValidation(c.token())
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
+	c.setAuthHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -198,7 +184,7 @@ func (c *HelixChatAssetsClient) getJSON(ctx context.Context, endpoint, broadcast
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if !isHelixSuccess(resp) {
 		detail, err := readSmallBody(resp.Body)
 		if err != nil {
 			return credentialSafeChatAssetError("read Twitch chat asset response", err, c.token())
@@ -317,14 +303,6 @@ func (r helixBadgesResponse) badges() []BadgeMetadata {
 	return out
 }
 
-func endpointOrDefault(value, fallback string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return fallback
-	}
-	return value
-}
-
 func preferredValue(values []string, preferred string) string {
 	for _, value := range values {
 		if strings.EqualFold(strings.TrimSpace(value), preferred) {
@@ -346,13 +324,4 @@ func credentialSafeChatAssetError(action string, err error, oauthToken string) e
 	}
 	credentials := TokenCredentials{OAuthToken: oauthToken}
 	return errors.New(action + ": " + redactCredentials(err.Error(), credentials))
-}
-
-// token returns the OAuth token to present on the next request, read now
-// rather than captured at construction so a mid-session refresh applies.
-func (c *HelixChatAssetsClient) token() string {
-	if c == nil || c.oauthTokenSource == nil {
-		return ""
-	}
-	return c.oauthTokenSource()
 }

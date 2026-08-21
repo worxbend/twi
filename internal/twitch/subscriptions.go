@@ -48,10 +48,8 @@ type HelixSubscriptionsClientConfig struct {
 // HelixSubscriptionsClient resolves subscriber counts through Twitch Helix
 // "Get Broadcaster Subscriptions".
 type HelixSubscriptionsClient struct {
-	endpoint         string
-	httpClient       *http.Client
-	clientID         string
-	oauthTokenSource func() string
+	endpoint string
+	helixTransport
 }
 
 var _ SubscriptionLookup = (*HelixSubscriptionsClient)(nil)
@@ -60,19 +58,9 @@ var _ SubscriptionLookup = (*HelixSubscriptionsClient)(nil)
 // Helix HTTP. The returned client performs no network I/O until
 // GetBroadcasterSubscriptions is called.
 func NewHelixSubscriptionsClient(cfg HelixSubscriptionsClientConfig) *HelixSubscriptionsClient {
-	endpoint := strings.TrimSpace(cfg.Endpoint)
-	if endpoint == "" {
-		endpoint = defaultHelixSubscriptionsURL
-	}
-	httpClient := cfg.HTTPClient
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
 	return &HelixSubscriptionsClient{
-		endpoint:         endpoint,
-		httpClient:       httpClient,
-		clientID:         strings.TrimSpace(cfg.ClientID),
-		oauthTokenSource: resolveTokenSource(cfg.OAuthTokenSource, cfg.OAuthToken),
+		endpoint:       endpointOrDefault(cfg.Endpoint, defaultHelixSubscriptionsURL),
+		helixTransport: newHelixTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken),
 	}
 }
 
@@ -108,13 +96,7 @@ func (c *HelixSubscriptionsClient) GetBroadcasterSubscriptions(ctx context.Conte
 	if err != nil {
 		return SubscriptionsPage{}, credentialSafeUserError("create Twitch broadcaster subscriptions request", err, c.token())
 	}
-	if c.clientID != "" {
-		httpReq.Header.Set("Client-Id", c.clientID)
-	}
-	token := accessTokenForValidation(c.token())
-	if token != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+token)
-	}
+	c.setAuthHeaders(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -122,23 +104,16 @@ func (c *HelixSubscriptionsClient) GetBroadcasterSubscriptions(ctx context.Conte
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		detail, readErr := readSmallBody(resp.Body)
-		if readErr != nil {
-			return SubscriptionsPage{}, credentialSafeUserError("read Twitch broadcaster subscriptions response", readErr, c.token())
-		}
-		if detail != "" {
-			detail = ": " + detail
-		}
-		wrapped := credentialSafeUserError(
-			"get Twitch broadcaster subscriptions",
-			fmt.Errorf("twitch Get Broadcaster Subscriptions returned HTTP %d%s", resp.StatusCode, detail),
-			c.token(),
-		)
-		if resp.StatusCode == http.StatusUnauthorized {
-			return SubscriptionsPage{}, &ChannelAPIError{StatusCode: resp.StatusCode, err: wrapped}
-		}
-		return SubscriptionsPage{}, wrapped
+	if !isHelixSuccess(resp) {
+		return SubscriptionsPage{}, c.responseError(resp, helixErrorLabels{
+			action:     "get Twitch broadcaster subscriptions",
+			readAction: "read Twitch broadcaster subscriptions response",
+			endpoint:   "Get Broadcaster Subscriptions",
+			// A token missing channel:read:subscriptions fails with 401,
+			// which IsMissingScope recognizes, so the caller can name the
+			// scope instead of reporting a generic failure.
+			channelAPIStatuses: []int{http.StatusUnauthorized},
+		})
 	}
 
 	var decoded helixSubscriptionsResponse
@@ -154,13 +129,4 @@ func (c *HelixSubscriptionsClient) GetBroadcasterSubscriptions(ctx context.Conte
 type helixSubscriptionsResponse struct {
 	Total  int `json:"total"`
 	Points int `json:"points"`
-}
-
-// token returns the OAuth token to present on the next request, read now
-// rather than captured at construction so a mid-session refresh applies.
-func (c *HelixSubscriptionsClient) token() string {
-	if c == nil || c.oauthTokenSource == nil {
-		return ""
-	}
-	return c.oauthTokenSource()
 }

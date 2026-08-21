@@ -61,10 +61,8 @@ type HelixFollowersClientConfig struct {
 // HelixFollowersClient resolves follower data through Twitch Helix "Get
 // Channel Followers".
 type HelixFollowersClient struct {
-	endpoint         string
-	httpClient       *http.Client
-	clientID         string
-	oauthTokenSource func() string
+	endpoint string
+	helixTransport
 }
 
 var _ FollowerLookup = (*HelixFollowersClient)(nil)
@@ -73,19 +71,9 @@ var _ FollowerLookup = (*HelixFollowersClient)(nil)
 // HTTP. The returned client performs no network I/O until
 // GetChannelFollowers is called.
 func NewHelixFollowersClient(cfg HelixFollowersClientConfig) *HelixFollowersClient {
-	endpoint := strings.TrimSpace(cfg.Endpoint)
-	if endpoint == "" {
-		endpoint = defaultHelixChannelFollowersURL
-	}
-	httpClient := cfg.HTTPClient
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
 	return &HelixFollowersClient{
-		endpoint:         endpoint,
-		httpClient:       httpClient,
-		clientID:         strings.TrimSpace(cfg.ClientID),
-		oauthTokenSource: resolveTokenSource(cfg.OAuthTokenSource, cfg.OAuthToken),
+		endpoint:       endpointOrDefault(cfg.Endpoint, defaultHelixChannelFollowersURL),
+		helixTransport: newHelixTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken),
 	}
 }
 
@@ -121,13 +109,7 @@ func (c *HelixFollowersClient) GetChannelFollowers(ctx context.Context, broadcas
 	if err != nil {
 		return FollowersPage{}, credentialSafeUserError("create Twitch channel followers request", err, c.token())
 	}
-	if c.clientID != "" {
-		httpReq.Header.Set("Client-Id", c.clientID)
-	}
-	token := accessTokenForValidation(c.token())
-	if token != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+token)
-	}
+	c.setAuthHeaders(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -135,23 +117,16 @@ func (c *HelixFollowersClient) GetChannelFollowers(ctx context.Context, broadcas
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		detail, readErr := readSmallBody(resp.Body)
-		if readErr != nil {
-			return FollowersPage{}, credentialSafeUserError("read Twitch channel followers response", readErr, c.token())
-		}
-		if detail != "" {
-			detail = ": " + detail
-		}
-		wrapped := credentialSafeUserError(
-			"get Twitch channel followers",
-			fmt.Errorf("twitch Get Channel Followers returned HTTP %d%s", resp.StatusCode, detail),
-			c.token(),
-		)
-		if resp.StatusCode == http.StatusUnauthorized {
-			return FollowersPage{}, &ChannelAPIError{StatusCode: resp.StatusCode, err: wrapped}
-		}
-		return FollowersPage{}, wrapped
+	if !isHelixSuccess(resp) {
+		return FollowersPage{}, c.responseError(resp, helixErrorLabels{
+			action:     "get Twitch channel followers",
+			readAction: "read Twitch channel followers response",
+			endpoint:   "Get Channel Followers",
+			// A token missing moderator:read:followers fails with 401, which
+			// IsMissingScope recognizes, so the caller can name the scope to
+			// re-authorize instead of reporting a generic failure.
+			channelAPIStatuses: []int{http.StatusUnauthorized},
+		})
 	}
 
 	var decoded helixFollowersResponse
@@ -181,13 +156,4 @@ type helixFollowerItem struct {
 	UserLogin  string `json:"user_login"`
 	UserName   string `json:"user_name"`
 	FollowedAt string `json:"followed_at"`
-}
-
-// token returns the OAuth token to present on the next request, read now
-// rather than captured at construction so a mid-session refresh applies.
-func (c *HelixFollowersClient) token() string {
-	if c == nil || c.oauthTokenSource == nil {
-		return ""
-	}
-	return c.oauthTokenSource()
 }

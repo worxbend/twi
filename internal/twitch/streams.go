@@ -2,7 +2,6 @@ package twitch
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -43,10 +42,8 @@ type HelixStreamsClientConfig struct {
 // HelixStreamsClient resolves broadcast status through Twitch Helix Get
 // Streams.
 type HelixStreamsClient struct {
-	endpoint         string
-	httpClient       *http.Client
-	clientID         string
-	oauthTokenSource func() string
+	endpoint string
+	helixTransport
 }
 
 var _ StreamLookup = (*HelixStreamsClient)(nil)
@@ -54,19 +51,9 @@ var _ StreamLookup = (*HelixStreamsClient)(nil)
 // NewHelixStreamsClient creates a StreamLookup backed by Twitch Helix HTTP.
 // The returned client performs no network I/O until GetStreams is called.
 func NewHelixStreamsClient(cfg HelixStreamsClientConfig) *HelixStreamsClient {
-	endpoint := strings.TrimSpace(cfg.Endpoint)
-	if endpoint == "" {
-		endpoint = defaultHelixStreamsURL
-	}
-	httpClient := cfg.HTTPClient
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
 	return &HelixStreamsClient{
-		endpoint:         endpoint,
-		httpClient:       httpClient,
-		clientID:         strings.TrimSpace(cfg.ClientID),
-		oauthTokenSource: resolveTokenSource(cfg.OAuthTokenSource, cfg.OAuthToken),
+		endpoint:       endpointOrDefault(cfg.Endpoint, defaultHelixStreamsURL),
+		helixTransport: newHelixTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken),
 	}
 }
 
@@ -91,13 +78,7 @@ func (c *HelixStreamsClient) GetStreams(ctx context.Context, logins []string) ([
 	if err != nil {
 		return nil, credentialSafeUserError("create Twitch stream status request", err, c.token())
 	}
-	if c.clientID != "" {
-		httpReq.Header.Set("Client-Id", c.clientID)
-	}
-	token := accessTokenForValidation(c.token())
-	if token != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+token)
-	}
+	c.setAuthHeaders(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -105,19 +86,12 @@ func (c *HelixStreamsClient) GetStreams(ctx context.Context, logins []string) ([
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		detail, err := readSmallBody(resp.Body)
-		if err != nil {
-			return nil, credentialSafeUserError("read Twitch stream status response", err, c.token())
-		}
-		if detail != "" {
-			detail = ": " + detail
-		}
-		return nil, credentialSafeUserError(
-			"lookup Twitch stream status",
-			fmt.Errorf("twitch Get Streams returned HTTP %d%s", resp.StatusCode, detail),
-			c.token(),
-		)
+	if !isHelixSuccess(resp) {
+		return nil, c.responseError(resp, helixErrorLabels{
+			action:     "lookup Twitch stream status",
+			readAction: "read Twitch stream status response",
+			endpoint:   "Get Streams",
+		})
 	}
 
 	var decoded helixStreamsResponse
@@ -174,13 +148,4 @@ type helixStream struct {
 	Type        string `json:"type"`
 	StartedAt   string `json:"started_at"`
 	ViewerCount int    `json:"viewer_count"`
-}
-
-// token returns the OAuth token to present on the next request, read now
-// rather than captured at construction so a mid-session refresh applies.
-func (c *HelixStreamsClient) token() string {
-	if c == nil || c.oauthTokenSource == nil {
-		return ""
-	}
-	return c.oauthTokenSource()
 }

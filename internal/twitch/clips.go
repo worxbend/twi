@@ -43,10 +43,8 @@ type HelixClipsClientConfig struct {
 
 // HelixClipsClient creates clips through Twitch Helix "Create Clip".
 type HelixClipsClient struct {
-	endpoint         string
-	httpClient       *http.Client
-	clientID         string
-	oauthTokenSource func() string
+	endpoint string
+	helixTransport
 }
 
 var _ ClipManager = (*HelixClipsClient)(nil)
@@ -54,19 +52,9 @@ var _ ClipManager = (*HelixClipsClient)(nil)
 // NewHelixClipsClient creates a ClipManager backed by Twitch Helix HTTP. The
 // returned client performs no network I/O until CreateClip is called.
 func NewHelixClipsClient(cfg HelixClipsClientConfig) *HelixClipsClient {
-	endpoint := strings.TrimSpace(cfg.Endpoint)
-	if endpoint == "" {
-		endpoint = defaultHelixClipsURL
-	}
-	httpClient := cfg.HTTPClient
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
 	return &HelixClipsClient{
-		endpoint:         endpoint,
-		httpClient:       httpClient,
-		clientID:         strings.TrimSpace(cfg.ClientID),
-		oauthTokenSource: resolveTokenSource(cfg.OAuthTokenSource, cfg.OAuthToken),
+		endpoint:       endpointOrDefault(cfg.Endpoint, defaultHelixClipsURL),
+		helixTransport: newHelixTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken),
 	}
 }
 
@@ -98,8 +86,8 @@ func (c *HelixClipsClient) CreateClip(ctx context.Context, broadcasterID string)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return Clip{}, c.responseError(resp, "create Twitch clip", "Create Clip")
+	if !isHelixSuccess(resp) {
+		return Clip{}, c.responseError(resp, clipErrorLabels("create Twitch clip", "Create Clip"))
 	}
 
 	var decoded helixCreateClipResponse
@@ -115,33 +103,17 @@ func (c *HelixClipsClient) CreateClip(ctx context.Context, broadcasterID string)
 	}, nil
 }
 
-func (c *HelixClipsClient) setAuthHeaders(req *http.Request) {
-	if c.clientID != "" {
-		req.Header.Set("Client-Id", c.clientID)
+// clipErrorLabels describes a failure from this adapter's Helix calls. Twitch
+// answers 401 for a token that is expired or missing the required scope and
+// 404 for a broadcaster that is not live; callers tell those apart to explain
+// the failure, so both arrive wrapped in a ChannelAPIError.
+func clipErrorLabels(action, endpoint string) helixErrorLabels {
+	return helixErrorLabels{
+		action:             action,
+		readAction:         "read Twitch clip response",
+		endpoint:           endpoint,
+		channelAPIStatuses: []int{http.StatusUnauthorized, http.StatusNotFound},
 	}
-	token := accessTokenForValidation(c.token())
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-}
-
-func (c *HelixClipsClient) responseError(resp *http.Response, action, endpointLabel string) error {
-	detail, err := readSmallBody(resp.Body)
-	if err != nil {
-		return credentialSafeUserError("read Twitch clip response", err, c.token())
-	}
-	if detail != "" {
-		detail = ": " + detail
-	}
-	wrapped := credentialSafeUserError(
-		action,
-		fmt.Errorf("twitch %s returned HTTP %d%s", endpointLabel, resp.StatusCode, detail),
-		c.token(),
-	)
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusNotFound {
-		return &ChannelAPIError{StatusCode: resp.StatusCode, err: wrapped}
-	}
-	return wrapped
 }
 
 // IsClipCreationUnavailable reports whether err is a 404 from Create Clip,
@@ -162,13 +134,4 @@ type helixCreateClipResponse struct {
 type helixClip struct {
 	ID      string `json:"id"`
 	EditURL string `json:"edit_url"`
-}
-
-// token returns the OAuth token to present on the next request, read now
-// rather than captured at construction so a mid-session refresh applies.
-func (c *HelixClipsClient) token() string {
-	if c == nil || c.oauthTokenSource == nil {
-		return ""
-	}
-	return c.oauthTokenSource()
 }

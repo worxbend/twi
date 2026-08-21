@@ -2,7 +2,6 @@ package twitch
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -49,10 +48,8 @@ type HelixGamesClientConfig struct {
 // HelixGamesClient searches Twitch categories/games through Helix Search
 // Categories.
 type HelixGamesClient struct {
-	endpoint         string
-	httpClient       *http.Client
-	clientID         string
-	oauthTokenSource func() string
+	endpoint string
+	helixTransport
 }
 
 var _ GameLookup = (*HelixGamesClient)(nil)
@@ -60,19 +57,9 @@ var _ GameLookup = (*HelixGamesClient)(nil)
 // NewHelixGamesClient creates a GameLookup backed by Twitch Helix HTTP. The
 // returned client performs no network I/O until SearchCategories is called.
 func NewHelixGamesClient(cfg HelixGamesClientConfig) *HelixGamesClient {
-	endpoint := strings.TrimSpace(cfg.Endpoint)
-	if endpoint == "" {
-		endpoint = defaultHelixSearchCategoriesURL
-	}
-	httpClient := cfg.HTTPClient
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
 	return &HelixGamesClient{
-		endpoint:         endpoint,
-		httpClient:       httpClient,
-		clientID:         strings.TrimSpace(cfg.ClientID),
-		oauthTokenSource: resolveTokenSource(cfg.OAuthTokenSource, cfg.OAuthToken),
+		endpoint:       endpointOrDefault(cfg.Endpoint, defaultHelixSearchCategoriesURL),
+		helixTransport: newHelixTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken),
 	}
 }
 
@@ -108,13 +95,7 @@ func (c *HelixGamesClient) SearchCategories(ctx context.Context, query string, l
 	if err != nil {
 		return nil, credentialSafeUserError("create Twitch category search request", err, c.token())
 	}
-	if c.clientID != "" {
-		httpReq.Header.Set("Client-Id", c.clientID)
-	}
-	token := accessTokenForValidation(c.token())
-	if token != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+token)
-	}
+	c.setAuthHeaders(httpReq)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -122,19 +103,12 @@ func (c *HelixGamesClient) SearchCategories(ctx context.Context, query string, l
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		detail, readErr := readSmallBody(resp.Body)
-		if readErr != nil {
-			return nil, credentialSafeUserError("read Twitch category search response", readErr, c.token())
-		}
-		if detail != "" {
-			detail = ": " + detail
-		}
-		return nil, credentialSafeUserError(
-			"search Twitch categories",
-			fmt.Errorf("twitch Search Categories returned HTTP %d%s", resp.StatusCode, detail),
-			c.token(),
-		)
+	if !isHelixSuccess(resp) {
+		return nil, c.responseError(resp, helixErrorLabels{
+			action:     "search Twitch categories",
+			readAction: "read Twitch category search response",
+			endpoint:   "Search Categories",
+		})
 	}
 
 	var decoded helixGamesResponse
@@ -160,13 +134,4 @@ type helixGamesResponse struct {
 type helixGame struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
-}
-
-// token returns the OAuth token to present on the next request, read now
-// rather than captured at construction so a mid-session refresh applies.
-func (c *HelixGamesClient) token() string {
-	if c == nil || c.oauthTokenSource == nil {
-		return ""
-	}
-	return c.oauthTokenSource()
 }
