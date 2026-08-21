@@ -200,6 +200,16 @@ func urlHasCredentialMarker(parsed *url.URL) bool {
 	return false
 }
 
+// containsCredentialMarker reports whether a debug-log attribute value looks
+// like it carries a credential.
+//
+// twi has three scanners of this shape -- this one, config.containsSecretMarker
+// and storage.containsCredentialCacheMarker -- and they look similar enough to
+// invite merging. They must not be merged. Each is tuned to a different input
+// and a different risk: this one reads free-form attribute values written by
+// twi itself, so it matches bare words like "authorization" that would be far
+// too broad elsewhere. Folding the three lists into one would silently widen
+// or narrow all of them at once.
 func containsCredentialMarker(value string) bool {
 	lower := strings.ToLower(strings.TrimSpace(value))
 	markers := []string{

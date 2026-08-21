@@ -720,6 +720,13 @@ func safeAssetPayloadIdentity(value string) bool {
 	return true
 }
 
+// containsCredentialCacheMarker reports whether a cache key or source URL
+// looks like it carries a credential, so it is never written to disk.
+//
+// See the note on debuglog.containsCredentialMarker: twi has three scanners of
+// this shape and they must stay separate. This one reads URLs and cache keys,
+// so alongside the OAuth terms it covers what a URL can leak that the other
+// two never see -- cookies, passwords, session and API-key parameters.
 func containsCredentialCacheMarker(lower string) bool {
 	markers := []string{
 		"oauth:",

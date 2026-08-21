@@ -487,6 +487,14 @@ func quote(value string) string {
 	return strconv.Quote(value)
 }
 
+// containsSecretMarker reports whether a config value looks like it carries a
+// credential, so `twi config show` prints a marker instead of the value.
+//
+// See the note on debuglog.containsCredentialMarker: twi has three scanners of
+// this shape and they must stay separate. This one reads config values, where
+// a credential arrives as an explicit "key=" or "key:" pair, so it matches
+// those forms and their hyphenated spellings rather than bare words -- a bare
+// "authorization" would redact a legitimate setting.
 func containsSecretMarker(value string) bool {
 	lower := strings.ToLower(value)
 	markers := []string{

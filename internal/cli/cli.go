@@ -350,57 +350,91 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-func runChat(args []string, stdout, stderr io.Writer) int {
+// chatOptions is the parsed command line of `twi chat`.
+type chatOptions struct {
+	channels   channelFlags
+	configPath string
+	mock       bool
+	debugFlags debugFlagOptions
+}
+
+// parseChatFlags parses the `twi chat` command line. ok is false when the
+// caller should return code immediately.
+func parseChatFlags(args []string, stderr io.Writer) (opts chatOptions, code int, ok bool) {
 	fs := flag.NewFlagSet("chat", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-
-	var channels channelFlags
-	var cfgPath string
-	var mock bool
-	var debugFlags debugFlagOptions
-	fs.Var(&channels, "channel", "Twitch channel to join; repeat for multiple channels")
-	fs.Var(&channels, "channels", "comma-separated Twitch channels to join (adds to --channel)")
-	fs.StringVar(&cfgPath, "config", "", "config file path")
-	fs.BoolVar(&mock, "mock", false, "run against the built-in mock chat source")
-	addDebugFlags(fs, &debugFlags)
+	fs.Var(&opts.channels, "channel", "Twitch channel to join; repeat for multiple channels")
+	fs.Var(&opts.channels, "channels", "comma-separated Twitch channels to join (adds to --channel)")
+	fs.StringVar(&opts.configPath, "config", "", "config file path")
+	fs.BoolVar(&opts.mock, "mock", false, "run against the built-in mock chat source")
+	addDebugFlags(fs, &opts.debugFlags)
 
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return opts, 2, false
 	}
+	return opts, 0, true
+}
 
+// chatConfig loads the effective configuration for `twi chat`, with any
+// channels named on the command line replacing the configured defaults.
+func chatConfig(opts chatOptions, stderr io.Writer) (config.Config, bool) {
 	overrides := config.Overrides{
-		ConfigPath: cfgPath,
-		Channels:   []string(channels),
+		ConfigPath: opts.configPath,
+		Channels:   []string(opts.channels),
 	}
-	applyDebugFlagOverrides(&overrides, debugFlags)
+	applyDebugFlagOverrides(&overrides, opts.debugFlags)
 	cfg, err := config.Load(os.Environ(), overrides)
 	if err != nil {
 		fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
+		return cfg, false
+	}
+	if len(opts.channels) > 0 {
+		cfg.DefaultChannels = []string(opts.channels)
+	}
+	return cfg, true
+}
+
+func runChat(args []string, stdout, stderr io.Writer) int {
+	opts, code, ok := parseChatFlags(args, stderr)
+	if !ok {
+		return code
+	}
+	cfg, ok := chatConfig(opts, stderr)
+	if !ok {
 		return 1
 	}
-	if len(channels) > 0 {
-		cfg.DefaultChannels = []string(channels)
+	if opts.mock {
+		return runMockChat(cfg, stdout, stderr)
 	}
+	return runLiveChatSession(cfg, stdout, stderr)
+}
 
-	if mock {
-		logger, closeLog, ok := openDebugLoggerOrReport(cfg, stderr)
-		if !ok {
-			return 1
-		}
-		defer closeLog()
-		logger.Log(context.Background(), "cli.chat.start",
-			slog.Bool("mock", true),
-			slog.Int("channel_count", len(cfg.DefaultChannels)),
-		)
-		if err := app.RunMockWithOptions(stdout, cfg, app.ClientOptions{DebugLogger: logger}); err != nil {
-			logger.Log(context.Background(), "cli.chat.failed", slog.String("error", err.Error()))
-			fmt.Fprintf(stderr, "mock chat: %v\n", err)
-			return 1
-		}
-		logger.Log(context.Background(), "cli.chat.complete", slog.Bool("mock", true))
-		return 0
+// runMockChat drives the shell against the built-in mock chat source, which
+// needs no credentials and no network. It is how the UI is exercised without
+// a Twitch account.
+func runMockChat(cfg config.Config, stdout, stderr io.Writer) int {
+	logger, closeLog, ok := openDebugLoggerOrReport(cfg, stderr)
+	if !ok {
+		return 1
 	}
+	defer closeLog()
+	logger.Log(context.Background(), "cli.chat.start",
+		slog.Bool("mock", true),
+		slog.Int("channel_count", len(cfg.DefaultChannels)),
+	)
+	if err := app.RunMockWithOptions(stdout, cfg, app.ClientOptions{DebugLogger: logger}); err != nil {
+		logger.Log(context.Background(), "cli.chat.failed", slog.String("error", err.Error()))
+		fmt.Fprintf(stderr, "mock chat: %v\n", err)
+		return 1
+	}
+	logger.Log(context.Background(), "cli.chat.complete", slog.Bool("mock", true))
+	return 0
+}
 
+// runLiveChatSession connects the shell to real Twitch chat: it loads stored
+// credentials, validates the token and resolves the login it belongs to, then
+// wires the transports and runs the UI.
+func runLiveChatSession(cfg config.Config, stdout, stderr io.Writer) int {
 	status, err := applyStoredCredentials(context.Background(), &cfg)
 	if err != nil {
 		fmt.Fprintf(stderr, "load credentials: %s\n", config.RedactDisplayValue(status.Err.Error()))
