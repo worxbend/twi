@@ -38,6 +38,12 @@ const (
 	ModeFast Mode = "fast"
 )
 
+// Modes lists every animation mode a config file may name, so that the code
+// which validates configuration does not repeat the strings.
+func Modes() []string {
+	return []string{string(ModeOff), string(ModeReduced), string(ModeFast)}
+}
+
 // Clock provides deterministic time for queues and tests.
 type Clock interface {
 	Now() time.Time

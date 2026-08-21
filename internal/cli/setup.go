@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/worxbend/twi/internal/animation"
 	"github.com/worxbend/twi/internal/config"
 )
 
@@ -38,9 +39,11 @@ const (
 	setupCredentialDryRun setupCredentialAction = "dry-run"
 )
 
+// The modes `twi setup` will accept, taken from the packages that own them so
+// the prompt cannot offer a set the rest of the program disagrees with.
 var (
-	setupAvatarModes    = []string{"off", "initials"}
-	setupAnimationModes = []string{"off", "reduced", "fast"}
+	setupAvatarModes    = config.AvatarModes()
+	setupAnimationModes = animation.Modes()
 )
 
 type setupFlagOptions struct {

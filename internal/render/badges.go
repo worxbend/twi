@@ -97,3 +97,9 @@ func badgeGlyphColor(setID string, palette theme.Palette) string {
 		return palette.Muted
 	}
 }
+
+// BadgeModes lists every badge mode a config file may name. See LayoutModes
+// for why the set lives with the type rather than with its validators.
+func BadgeModes() []string {
+	return []string{string(BadgeModeGlyph), string(BadgeModeText), string(BadgeModeOff)}
+}

@@ -147,6 +147,16 @@ const (
 // DefaultLayoutMode is used when a config value is missing or unrecognized.
 const DefaultLayoutMode = LayoutInline
 
+// LayoutModes lists every layout a config file may name.
+//
+// It exists so that whoever validates configuration -- `twi doctor`, `twi
+// setup` -- asks this package rather than repeating the strings. Those lists
+// had drifted before: a mode added here and not there makes doctor report a
+// perfectly valid config as "unknown".
+func LayoutModes() []string {
+	return []string{string(LayoutInline), string(LayoutGrouped), string(LayoutCompact)}
+}
+
 // NormalizeLayoutMode maps a config string onto a known layout, falling back
 // to DefaultLayoutMode so an unrecognized value degrades instead of failing.
 func NormalizeLayoutMode(value string) LayoutMode {

@@ -17,6 +17,14 @@ import (
 
 const redacted = "[redacted]"
 
+// The legal values for the settings whose meaning lives here rather than in a
+// package of their own. The ones that do belong elsewhere are published by
+// their owner: render.LayoutModes, render.BadgeModes, animation.Modes and
+// theme.PresetNames.
+func AvatarModes() []string            { return []string{"off", "initials"} }
+func StreamStatusModes() []string      { return []string{"auto", "off"} }
+func EmoteAutocompleteModes() []string { return []string{"auto", "off"} }
+
 // Config is the effective application configuration after merging defaults,
 // config file values, environment variables, and CLI overrides.
 type Config struct {

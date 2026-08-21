@@ -53,19 +53,7 @@ func NormalizeMessage(message gempir.Message) twitch.Event {
 }
 
 func NormalizePrivateMessage(message gempir.PrivateMessage) twitch.Event {
-	chat := normalizeChatMessage(
-		message.ID,
-		message.Channel,
-		message.RoomID,
-		message.Time,
-		message.User,
-		message.Message,
-		message.Emotes,
-		message.Reply,
-		message.Action,
-		message.Tags,
-	)
-	return twitch.Event{Kind: twitch.EventMessage, Message: chat}
+	return twitch.Event{Kind: twitch.EventMessage, Message: normalizeChatMessage(message)}
 }
 
 func NormalizeNoticeMessage(message gempir.NoticeMessage) twitch.Event {
@@ -286,19 +274,27 @@ func NormalizeRawMessage(message gempir.RawMessage) twitch.Event {
 // terminal with no interaction at all, so an ESC sequence pasted into chat
 // would otherwise be executed rather than shown. Sanitizing here, before the
 // fragments are cut, keeps the split points aligned with what is rendered.
-func normalizeChatMessage(id, channel, channelID string, timestamp time.Time, user gempir.User, text string, ircEmotes []*gempir.Emote, reply *gempir.Reply, action bool, tags map[string]string) twitch.ChatMessage {
-	emotes := normalizeEmotes(ircEmotes)
-	text = textsafe.Display(text)
+// It takes the whole message rather than ten positional arguments. Three of
+// those were adjacent bare strings -- id, channel, channelID -- so transposing
+// two of them type-checked and silently filed every message under a room ID,
+// in the one function that is this package's sanitization boundary. The
+// signature already accepted gempir.User, []*gempir.Emote and *gempir.Reply,
+// so taking the message it came from adds no coupling that was not there.
+func normalizeChatMessage(message gempir.PrivateMessage) twitch.ChatMessage {
+	emotes := normalizeEmotes(message.Emotes)
+	text := textsafe.Display(message.Message)
+	user := message.User
+	tags := message.Tags
 	messageType := twitch.MessageTypeChat
-	if action {
+	if message.Action {
 		messageType = twitch.MessageTypeAction
 	}
 
 	return twitch.ChatMessage{
-		ID:           id,
-		Channel:      channel,
-		ChannelID:    channelID,
-		Timestamp:    timestamp,
+		ID:           message.ID,
+		Channel:      message.Channel,
+		ChannelID:    message.RoomID,
+		Timestamp:    message.Time,
 		AuthorLogin:  textsafe.Display(user.Name),
 		AuthorID:     user.ID,
 		DisplayName:  textsafe.Display(user.DisplayName),
@@ -307,7 +303,7 @@ func normalizeChatMessage(id, channel, channelID string, timestamp time.Time, us
 		Text:         text,
 		Fragments:    normalizeMessageFragments(text, emotes),
 		Emotes:       emotes,
-		Reply:        normalizeReply(reply),
+		Reply:        normalizeReply(message.Reply),
 		Type:         messageType,
 		Bits:         parseBitsTag(tags),
 		FirstMessage: parseFirstMessageTag(tags),

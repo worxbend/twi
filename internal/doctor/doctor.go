@@ -22,8 +22,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/worxbend/twi/internal/animation"
 	"github.com/worxbend/twi/internal/auth"
 	"github.com/worxbend/twi/internal/config"
+	"github.com/worxbend/twi/internal/render"
 	"github.com/worxbend/twi/internal/storage"
 	"github.com/worxbend/twi/internal/theme"
 	"github.com/worxbend/twi/internal/twitch"
@@ -428,27 +430,34 @@ func featureModesCheck(features config.FeatureConfig) Check {
 	return okCheck("feature modes", detail)
 }
 
+// unknownFeatureModes names any feature setting whose value is not one the
+// program understands.
+//
+// Every legal set comes from the package that owns the setting, so a mode
+// added there cannot be missed here -- which used to make doctor report a
+// valid config as "unknown". The labels stay short and hand-written, because
+// they are what the user reads.
 func unknownFeatureModes(features config.FeatureConfig) []string {
 	var unknown []string
-	if !oneOf(features.AvatarMode, "off", "initials") {
+	if !oneOf(features.AvatarMode, config.AvatarModes()...) {
 		unknown = append(unknown, "avatar="+features.AvatarMode)
 	}
-	if !oneOf(features.AnimationMode, "off", "reduced", "fast") {
+	if !oneOf(features.AnimationMode, animation.Modes()...) {
 		unknown = append(unknown, "animation="+features.AnimationMode)
 	}
 	if strings.TrimSpace(features.ThemeName) != "" && !oneOf(features.ThemeName, append(theme.PresetNames(), "custom")...) {
 		unknown = append(unknown, "theme="+features.ThemeName)
 	}
-	if !oneOf(features.StreamStatusMode, "auto", "off") {
+	if !oneOf(features.StreamStatusMode, config.StreamStatusModes()...) {
 		unknown = append(unknown, "stream_status="+features.StreamStatusMode)
 	}
-	if !oneOf(features.EmoteAutocompleteMode, "auto", "off") {
+	if !oneOf(features.EmoteAutocompleteMode, config.EmoteAutocompleteModes()...) {
 		unknown = append(unknown, "emote_autocomplete="+features.EmoteAutocompleteMode)
 	}
-	if !oneOf(features.MessageLayout, "inline", "grouped", "compact") {
+	if !oneOf(features.MessageLayout, render.LayoutModes()...) {
 		unknown = append(unknown, "message_layout="+features.MessageLayout)
 	}
-	if !oneOf(features.BadgeMode, "glyph", "text", "off") {
+	if !oneOf(features.BadgeMode, render.BadgeModes()...) {
 		unknown = append(unknown, "badge_mode="+features.BadgeMode)
 	}
 	return unknown
