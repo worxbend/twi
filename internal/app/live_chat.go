@@ -303,6 +303,31 @@ func (c *LiveChatClient) Reconnect(ctx context.Context) error {
 // reconnect restarts the transport. kind distinguishes a user pressing ctrl+r
 // from the automatic retry loop, and only changes the wording of the states
 // it emits.
+// logReconnectFailure records a failed reconnect in the debug log and hands
+// the error back for the caller to return.
+func (c *LiveChatClient) logReconnectFailure(err error) error {
+	c.debugLiveEvent("live_chat.reconnect.failed", slog.String("error", err.Error()))
+	return err
+}
+
+// failReconnect reports a reconnect failure to the user as well as the log:
+// it puts the connection into the failed state with a reason and a way
+// forward, then returns the error.
+//
+// The state is emitted on a background context rather than the reconnect's
+// own, because the most common reason to be here is that context having been
+// cancelled -- and emitting on a cancelled context would drop the very
+// message that explains why chat stopped reconnecting.
+func (c *LiveChatClient) failReconnect(detail string, err error) error {
+	c.emitState(context.Background(), ConnectionState{
+		Status: ConnectionFailed,
+		Detail: detail,
+		Err:    err,
+		At:     time.Now(),
+	})
+	return c.logReconnectFailure(err)
+}
+
 func (c *LiveChatClient) reconnect(ctx context.Context, kind string) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -331,59 +356,33 @@ func (c *LiveChatClient) reconnect(ctx context.Context, kind string) error {
 	})
 	c.debugLiveEvent("live_chat.reconnect.start")
 
+	// Tear the old session down before starting a replacement, so the two
+	// never hold a connection to Twitch at the same time.
 	old := c.swapSession(nil)
 	if err := old.stop(true); err != nil {
-		safeErr := credentialSafeError(err)
-		c.debugLiveEvent("live_chat.reconnect.failed", slog.String("error", safeErr.Error()))
-		return safeErr
+		return c.logReconnectFailure(credentialSafeError(err))
 	}
 	if err := ctx.Err(); err != nil {
-		c.emitState(context.Background(), ConnectionState{
-			Status: ConnectionFailed,
-			Detail: kind + " reconnect canceled; retry with ctrl+r",
-			Err:    err,
-			At:     time.Now(),
-		})
-		c.debugLiveEvent("live_chat.reconnect.failed", slog.String("error", err.Error()))
-		return err
+		return c.failReconnect(kind+" reconnect canceled; retry with ctrl+r", err)
 	}
 
 	session, err := c.newSession(ctx, c.factory)
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			c.emitState(context.Background(), ConnectionState{
-				Status: ConnectionFailed,
-				Detail: kind + " reconnect canceled; retry with ctrl+r",
-				Err:    err,
-				At:     time.Now(),
-			})
-			c.debugLiveEvent("live_chat.reconnect.failed", slog.String("error", err.Error()))
-			return err
+		switch {
+		case errors.Is(err, context.Canceled):
+			return c.failReconnect(kind+" reconnect canceled; retry with ctrl+r", err)
+		case errors.Is(err, context.DeadlineExceeded):
+			return c.failReconnect(kind+" reconnect timed out; retry with ctrl+r", err)
+		default:
+			safeErr := credentialSafeError(err)
+			return c.failReconnect("manual reconnect failed: "+safeErr.Error()+"; retry with ctrl+r", safeErr)
 		}
-		if errors.Is(err, context.DeadlineExceeded) {
-			c.emitState(context.Background(), ConnectionState{
-				Status: ConnectionFailed,
-				Detail: kind + " reconnect timed out; retry with ctrl+r",
-				Err:    err,
-				At:     time.Now(),
-			})
-			c.debugLiveEvent("live_chat.reconnect.failed", slog.String("error", err.Error()))
-			return err
-		}
-		safeErr := credentialSafeError(err)
-		c.emitState(ctx, ConnectionState{
-			Status: ConnectionFailed,
-			Detail: "manual reconnect failed: " + safeErr.Error() + "; retry with ctrl+r",
-			Err:    safeErr,
-			At:     time.Now(),
-		})
-		c.debugLiveEvent("live_chat.reconnect.failed", slog.String("error", safeErr.Error()))
-		return safeErr
 	}
+	// The client can be closed while the replacement session is being built;
+	// if it was, stop the session rather than installing it.
 	if err := c.ensureOpen(); err != nil {
 		_ = session.stop(true)
-		c.debugLiveEvent("live_chat.reconnect.failed", slog.String("error", err.Error()))
-		return err
+		return c.logReconnectFailure(err)
 	}
 	c.setSession(session)
 	go c.bridge(session)
