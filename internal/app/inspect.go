@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/worxbend/twi/internal/config"
+	"github.com/worxbend/twi/internal/textsafe"
 	"github.com/worxbend/twi/internal/twitch"
 )
 
@@ -142,7 +143,10 @@ func inspectBadgesLine(badges []twitch.Badge) string {
 	}
 	parts := make([]string, 0, len(badges))
 	for _, badge := range badges {
-		label := emptyFallback(badge.SetID, "unknown") + "/" + emptyFallback(badge.ID, "unknown")
+		// safeDiagnosticValue, not emptyFallback: every value on this pane
+		// comes off the wire and has to be sanitized. These two were the
+		// only fields reaching the screen unfiltered.
+		label := safeDiagnosticValue(badge.SetID) + "/" + safeDiagnosticValue(badge.ID)
 		if badge.Info != "" {
 			label += "(" + safeDiagnosticValue(badge.Info) + ")"
 		}
@@ -235,8 +239,18 @@ func safeDiagnosticValue(value string) string {
 	return redactDiagnosticText(emptyFallback(value, "unknown"))
 }
 
+// redactDiagnosticText makes a raw protocol value safe to print.
+//
+// Two separate hazards, in this order. textsafe.Display removes the control
+// characters: the inspect panel is the one view that deliberately shows what
+// Twitch actually sent -- raw IRC tags included -- so unlike every other pane
+// its input has not been through the normal rendering path, and a tag value is
+// whatever the sender put in it. Without this a message could clear the
+// screen, move the cursor, or set a scroll region simply by being inspected.
+// redactSensitive then removes anything credential-shaped, which matters
+// because reply and system tags can quote text the user typed.
 func redactDiagnosticText(value string) string {
-	return redactSensitive(value, config.Config{})
+	return redactSensitive(textsafe.Display(value), config.Config{})
 }
 
 func sensitiveDiagnosticKey(key string) bool {

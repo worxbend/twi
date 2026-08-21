@@ -784,3 +784,27 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	c.count.Add(int64(n))
 	return n, err
 }
+
+// TestNormalizeChannelTrimsWhitespaceBeforeTheHash is a regression test for a
+// channel name with leading whitespace keeping its "#".
+//
+// The trims used to run innermost-first, so TrimPrefix inspected a string that
+// still began with a space, found no "#", and left it in place. " #foo" then
+// normalized to "#foo" while the UI recorded the same channel as "foo", and
+// the two never matched again.
+func TestNormalizeChannelTrimsWhitespaceBeforeTheHash(t *testing.T) {
+	tests := map[string]string{
+		"#Foo":     "foo",
+		" #Foo":    "foo",
+		"\t#foo\n": "foo",
+		" Foo ":    "foo",
+		"foo":      "foo",
+		"":         "",
+		"#":        "",
+	}
+	for in, want := range tests {
+		if got := normalizeChannel(in); got != want {
+			t.Errorf("normalizeChannel(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

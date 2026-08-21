@@ -589,8 +589,19 @@ func normalizeChannels(values []string) []string {
 	return channels
 }
 
+// normalizeChannel turns a channel name in any of the forms a user or a
+// config file might supply it into the form Twitch IRC expects.
+//
+// The trims run outermost-first: whitespace, then the optional "#" prefix.
+// The other order silently fails on a value with leading whitespace -- " #foo"
+// keeps its "#", because TrimPrefix sees a space -- and the result then never
+// matches the same channel as recorded by the UI.
+//
+// The lowercasing is a wire requirement, not a formatting choice: IRC channel
+// names are case-insensitive, so "#Foo" and "#foo" are one channel. Do not
+// reuse this for anything the user sees, which should keep their capitals.
 func normalizeChannel(value string) string {
-	return strings.ToLower(strings.TrimSpace(strings.TrimPrefix(value, "#")))
+	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(value), "#"))
 }
 
 type oauthRefreshConfig struct {
