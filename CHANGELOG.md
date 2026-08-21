@@ -11,6 +11,8 @@ constant in the source tree.
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-08-21
+
 ### Fixed
 
 - **Quitting could hang forever.** Closing the chat client while a reconnect
@@ -32,10 +34,31 @@ constant in the source tree.
   terminal.** It deliberately shows a message exactly as Twitch delivered it,
   raw IRC tags included, and those were filtered for credentials but not for
   control characters.
+- **`twi config show` left out seven settings** — `message_layout`,
+  `badge_mode`, `highlight_emotes`, `full_username`, `sidebar_width`,
+  `activity_width` and `scrollback_limit`. Setting them worked, but the command
+  whose job is to tell you your configuration never mentioned them, so there
+  was no way to confirm a value had been picked up.
+- **A failed automatic reconnect reported itself as a manual one,** saying
+  "manual reconnect failed" about something you had not done.
 - **A channel name with leading whitespace kept its `#`,** so it never matched
   the same channel elsewhere in the program.
 - **The IRC client could leak a connection** when closed at the moment a token
   refresh was installing a replacement session.
+- **`space i` (inspect) appeared in no help screen,** and `space a` (show or
+  hide the activity column) had fallen out of the developer documentation. The
+  space leader chord is the least discoverable input twi has, so a binding
+  missing from the help is a feature nobody finds.
+
+### Changed
+
+- **Redacted credentials read `<redacted>` consistently.** IRC connection
+  errors previously printed `oauth:<redacted>`, keeping the prefix.
+- **The debug log records a reply as a send.** `twitch.irc.reply` is gone;
+  replies are `twitch.irc.send` with a `reply_to_message_id` field, and every
+  send now also records whether it was a `/me` action, which was previously
+  not observable.
+- The Go toolchain is pinned to 1.26.6.
 
 ### Removed
 
@@ -49,6 +72,16 @@ constant in the source tree.
   `<cache>/assets` directory from an older version, with its size, and leaves
   removing it to you -- `doctor` is a diagnostic command and should not delete
   your files as a side effect of being asked for a report.
+
+### Internal
+
+- The Twitch integration is split into a domain model (`internal/twitch`) and
+  its transports (`internal/twitch/helix`, `internal/twitch/irc`), with an
+  import test enforcing that the model depends on neither. `twi doctor` moved
+  out of the terminal UI package into `internal/doctor`. Roughly 1,400 lines of
+  duplicated and dead code were removed, and the test suite gained coverage for
+  several contracts that could previously be deleted without failing anything.
+
 
 ## [0.16.0] — 2026-08-18
 
@@ -454,7 +487,8 @@ Releases before `0.8.0` predate this changelog; see the
 [commit history](https://github.com/worxbend/twi/commits/main) and the
 [releases page](https://github.com/worxbend/twi/releases).
 
-[Unreleased]: https://github.com/worxbend/twi/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/worxbend/twi/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/worxbend/twi/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/worxbend/twi/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/worxbend/twi/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/worxbend/twi/compare/v0.13.0...v0.14.0
