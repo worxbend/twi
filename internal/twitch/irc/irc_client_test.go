@@ -431,10 +431,15 @@ type fakeIRCSession struct {
 	disconnects      int
 	onConnect        func()
 	onPrivateMessage func(gempir.PrivateMessage)
-	says             []string
-	replies          []string
-	joined           []string
-	departed         []string
+	// holdConnection, when set, makes Connect block until Disconnect is
+	// called, which is what the real session does: it returns only when the
+	// connection ends. A fake that returns immediately makes the client tear
+	// the event channel down while the test is still delivering into it.
+	holdConnection chan struct{}
+	says           []string
+	replies        []string
+	joined         []string
+	departed       []string
 }
 
 var _ chatSession = (*fakeIRCSession)(nil)
@@ -456,17 +461,34 @@ func (s *fakeIRCSession) Connect() error {
 	s.connects++
 	err := s.connectErr
 	onConnect := s.onConnect
+	hold := s.holdConnection
 	s.mu.Unlock()
 	if err == nil && onConnect != nil {
 		onConnect()
 	}
+	if err == nil && hold != nil {
+		<-hold
+	}
 	return err
+}
+
+// holdOpen makes this session behave like a live one: Connect blocks until
+// Disconnect, so the client keeps its event channel open in between.
+func (s *fakeIRCSession) holdOpen() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.holdConnection = make(chan struct{})
 }
 
 func (s *fakeIRCSession) Disconnect() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.disconnects++
+	hold := s.holdConnection
+	s.holdConnection = nil
+	s.mu.Unlock()
+	if hold != nil {
+		close(hold)
+	}
 	return nil
 }
 
@@ -872,6 +894,10 @@ func TestEmitDropsOldestEventWhenTheConsumerFallsBehind(t *testing.T) {
 	oldNewSession := newSession
 	t.Cleanup(func() { newSession = oldNewSession })
 	session := &fakeIRCSession{}
+	// Hold the connection open for the test: a session whose Connect
+	// returns immediately makes the client close the event channel while
+	// this test is still delivering into it.
+	session.holdOpen()
 	newSession = func(string, string, []string) chatSession { return session }
 
 	client, err := NewClient(Config{
@@ -929,6 +955,10 @@ func TestEmitDoesNotDropWhenTheConsumerKeepsUp(t *testing.T) {
 	oldNewSession := newSession
 	t.Cleanup(func() { newSession = oldNewSession })
 	session := &fakeIRCSession{}
+	// Hold the connection open for the test: a session whose Connect
+	// returns immediately makes the client close the event channel while
+	// this test is still delivering into it.
+	session.holdOpen()
 	newSession = func(string, string, []string) chatSession { return session }
 
 	client, err := NewClient(Config{
