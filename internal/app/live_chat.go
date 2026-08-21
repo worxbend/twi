@@ -960,7 +960,7 @@ func stateFromConnectionEvent(event twitch.ConnectionEvent) ConnectionState {
 func stateFromNotice(notice twitch.Notice) ConnectionState {
 	detail := detailOrFallback(notice.Text, "Twitch notice")
 	status := ConnectionConnected
-	if isAuthNotice(notice) {
+	if notice.AuthFailed {
 		status = ConnectionFailed
 		detail = "Twitch IRC authentication failed; verify username, OAuth token, and chat:read scope"
 	}
@@ -1016,19 +1016,26 @@ func userNoticeSystemEventID(notice twitch.UserNotice) string {
 	return strings.TrimSpace(notice.RawTags["msg-id"])
 }
 
+// userNoticeRawTags carries a user notice's IRC tags through for the inspect
+// panel, backfilling msg-id when Twitch omitted it.
+//
+// It used to add two tags of twi's own invention, "twi.kind" and "twi.event".
+// Nothing ever read twi.event, and the single reader of twi.kind tested it for
+// the value "error" -- which this, its only writer, never set. Inventing
+// protocol tags to pass information between twi's own layers also worked
+// against the rule stated on every RawTags field in the domain, that they are
+// diagnostics only; SystemEventID is the typed field that carries this.
 func userNoticeRawTags(notice twitch.UserNotice, systemEventID string) map[string]string {
 	tags := cloneAppStringMap(notice.RawTags)
 	if systemEventID == "" {
 		return tags
 	}
 	if tags == nil {
-		tags = make(map[string]string, 3)
+		tags = make(map[string]string, 1)
 	}
 	if _, ok := tags["msg-id"]; !ok {
 		tags["msg-id"] = systemEventID
 	}
-	tags["twi.kind"] = "user_notice"
-	tags["twi.event"] = systemEventID
 	return tags
 }
 
@@ -1041,36 +1048,6 @@ func cloneAppStringMap(in map[string]string) map[string]string {
 		out[key] = value
 	}
 	return out
-}
-
-// authNoticeTexts are the NOTICE bodies Twitch sends when login itself fails.
-//
-// These arrive before registration completes, on the "*" channel, with no
-// msg-id, so the text is the only signal available. Every tagged notice --
-// msg_banned, no_permission, msg_channel_suspended and the rest -- describes
-// channel or account state on a connection that authenticated fine, and none
-// of them belong here.
-var authNoticeTexts = []string{
-	"login authentication failed",
-	"login unsuccessful",
-	"improperly formatted auth",
-}
-
-// isAuthNotice reports whether a NOTICE means the credentials were rejected.
-//
-// It matches the specific bodies Twitch sends for a failed login rather than
-// searching for "auth", "invalid", "permission" or "scope" anywhere in the
-// notice. That broad matching flipped the whole client to ConnectionFailed --
-// red status bar, "verify your OAuth token" -- on an ordinary no_permission
-// notice, while the connection was perfectly healthy.
-func isAuthNotice(notice twitch.Notice) bool {
-	text := strings.ToLower(strings.TrimSpace(notice.Text))
-	if text == "" {
-		return false
-	}
-	return slices.ContainsFunc(authNoticeTexts, func(known string) bool {
-		return strings.Contains(text, known)
-	})
 }
 
 func isTerminalEvent(event twitch.Event) bool {

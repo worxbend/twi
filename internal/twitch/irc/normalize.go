@@ -2,6 +2,7 @@ package irc
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -71,12 +72,44 @@ func NormalizeNoticeMessage(message gempir.NoticeMessage) twitch.Event {
 	return twitch.Event{
 		Kind: twitch.EventNotice,
 		Notice: twitch.Notice{
-			Channel: message.Channel,
-			ID:      message.MsgID,
-			Text:    textsafe.Display(message.Message),
-			RawTags: cloneStringMap(message.Tags),
+			Channel:    message.Channel,
+			ID:         message.MsgID,
+			Text:       textsafe.Display(message.Message),
+			AuthFailed: isAuthNoticeText(message.Message),
+			RawTags:    cloneStringMap(message.Tags),
 		},
 	}
+}
+
+// authNoticeTexts are the NOTICE bodies Twitch sends when login itself fails.
+//
+// These arrive before registration completes, on the "*" channel, with no
+// msg-id, so the text is the only signal available. Every tagged notice --
+// msg_banned, no_permission, msg_channel_suspended and the rest -- describes
+// channel or account state on a connection that authenticated fine, and none
+// of them belong here.
+var authNoticeTexts = []string{
+	"login authentication failed",
+	"login unsuccessful",
+	"improperly formatted auth",
+}
+
+// isAuthNoticeText reports whether a NOTICE body means the credentials were
+// rejected.
+//
+// It matches the specific bodies Twitch sends for a failed login rather than
+// searching for "auth", "invalid", "permission" or "scope" anywhere in the
+// notice. That broad matching flipped the whole client to a failed state --
+// red status bar, "verify your OAuth token" -- on an ordinary no_permission
+// notice, while the connection was perfectly healthy.
+func isAuthNoticeText(text string) bool {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return false
+	}
+	return slices.ContainsFunc(authNoticeTexts, func(known string) bool {
+		return strings.Contains(text, known)
+	})
 }
 
 func NormalizeUserNoticeMessage(message gempir.UserNoticeMessage) twitch.Event {

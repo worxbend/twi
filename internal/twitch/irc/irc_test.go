@@ -316,3 +316,39 @@ func TestNormalizePrivateMessageCarriesFirstMessage(t *testing.T) {
 		t.Fatal("first-msg tag did not reach ChatMessage.FirstMessage")
 	}
 }
+
+// TestNoticeAuthFailureIsClassifiedByTheTransport covers the boundary rule the
+// domain documents: an adapter classifies a failure before it crosses, so
+// consumers act on a flag rather than re-deriving it from wire text.
+//
+// The matching is deliberately narrow. Broad matching on "auth", "invalid",
+// "permission" or "scope" used to flip the whole client to a failed state --
+// red status bar, "verify your OAuth token" -- on an ordinary no_permission
+// notice arriving over a perfectly healthy connection.
+func TestNoticeAuthFailureIsClassifiedByTheTransport(t *testing.T) {
+	authFailures := []string{
+		"Login authentication failed",
+		"Login unsuccessful",
+		"Improperly formatted auth",
+	}
+	for _, text := range authFailures {
+		event := NormalizeNoticeMessage(gempir.NoticeMessage{Channel: "*", Message: text})
+		if !event.Notice.AuthFailed {
+			t.Errorf("NormalizeNoticeMessage(%q).AuthFailed = false, want true", text)
+		}
+	}
+
+	healthy := []string{
+		"You don't have permission to perform that action.",
+		"This channel has been suspended.",
+		"You are permanently banned from talking in channel.",
+		"Your message was not sent because it is identical to the previous one.",
+		"",
+	}
+	for _, text := range healthy {
+		event := NormalizeNoticeMessage(gempir.NoticeMessage{Channel: "example", Message: text})
+		if event.Notice.AuthFailed {
+			t.Errorf("NormalizeNoticeMessage(%q).AuthFailed = true; this notice arrives on a connection that authenticated fine", text)
+		}
+	}
+}

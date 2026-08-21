@@ -64,39 +64,13 @@ func TestCredentialSafeErrorStillRedacts(t *testing.T) {
 	}
 }
 
-// TestIsAuthNoticeIgnoresOrdinaryNotices covers the other half of the
-// substring problem: matching "permission", "invalid" or "scope" anywhere in
-// a notice flipped the whole client to a red ConnectionFailed state while the
-// connection was healthy.
-func TestIsAuthNoticeIgnoresOrdinaryNotices(t *testing.T) {
-	for _, notice := range []twitch.Notice{
-		{ID: "no_permission", Text: "You don't have permission to perform that action."},
-		{ID: "msg_banned", Text: "You are banned from talking in this channel."},
-		{ID: "invalid_user", Text: "Invalid username: someone"},
-		{ID: "msg_channel_suspended", Text: "This channel has been suspended."},
-		{ID: "msg_slowmode", Text: "This room is in slow mode."},
-	} {
-		if isAuthNotice(notice) {
-			t.Errorf("isAuthNotice(%q/%q) = true, want false; the connection is authenticated fine",
-				notice.ID, notice.Text)
-		}
-	}
-}
-
-func TestIsAuthNoticeMatchesRealLoginFailures(t *testing.T) {
-	for _, notice := range []twitch.Notice{
-		{Channel: "*", Text: "Login authentication failed"},
-		{Channel: "*", Text: "Login unsuccessful"},
-		{Channel: "*", Text: "Improperly formatted auth"},
-	} {
-		if !isAuthNotice(notice) {
-			t.Errorf("isAuthNotice(%q) = false, want true", notice.Text)
-		}
-	}
-}
-
 // TestStateFromNoticeKeepsHealthyConnectionsConnected pins the user-visible
 // consequence: an ordinary notice must not turn the status bar red.
+//
+// Which notices mean "the credentials were rejected" is decided by the
+// transport and arrives on Notice.AuthFailed; the tests for that live in
+// internal/twitch/irc, where the wire text is known. This asserts what the app
+// does with the answer.
 func TestStateFromNoticeKeepsHealthyConnectionsConnected(t *testing.T) {
 	state := stateFromNotice(twitch.Notice{
 		Channel: "example",
@@ -108,5 +82,22 @@ func TestStateFromNoticeKeepsHealthyConnectionsConnected(t *testing.T) {
 	}
 	if !strings.Contains(state.Detail, "permission") {
 		t.Fatalf("detail = %q, want the notice text preserved", state.Detail)
+	}
+}
+
+// TestStateFromNoticeReportsAuthFailure is the other half: when the transport
+// says the credentials were rejected, the app must surface it as a failure
+// with guidance rather than as an ordinary notice.
+func TestStateFromNoticeReportsAuthFailure(t *testing.T) {
+	state := stateFromNotice(twitch.Notice{
+		Channel:    "*",
+		Text:       "Login authentication failed",
+		AuthFailed: true,
+	})
+	if state.Status != ConnectionFailed {
+		t.Fatalf("status = %q, want failed for a rejected login", state.Status)
+	}
+	if !strings.Contains(state.Detail, "chat:read") {
+		t.Errorf("detail = %q, want actionable scope guidance", state.Detail)
 	}
 }

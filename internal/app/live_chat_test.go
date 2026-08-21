@@ -91,7 +91,7 @@ func TestLiveChatClientBridgesTransportEvents(t *testing.T) {
 			RawTags:     map[string]string{"msg-id": "raid"},
 		},
 	})
-	if got := <-client.Messages(); got.Type != twitch.MessageTypeNotice || got.ChannelID != "141981764" || got.SystemEventID != "raid" || got.RawTags["twi.kind"] != "user_notice" {
+	if got := <-client.Messages(); got.Type != twitch.MessageTypeNotice || got.ChannelID != "141981764" || got.SystemEventID != "raid" {
 		t.Fatalf("user notice message = %#v, want room ID and normalized system event propagated", got)
 	}
 

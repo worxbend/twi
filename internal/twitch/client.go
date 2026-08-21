@@ -57,6 +57,17 @@ type Notice struct {
 	Channel string
 	ID      string
 	Text    string
+	// AuthFailed marks a notice that means Twitch rejected the credentials,
+	// as opposed to one describing channel or account state on a connection
+	// that authenticated fine.
+	//
+	// The transport sets it, because recognising it requires knowing what
+	// Twitch's login failures look like on the wire -- these arrive before
+	// registration completes, on the "*" channel, with no msg-id, so the
+	// message text is the only signal. Consumers act on the flag rather than
+	// re-deriving it, which is the same rule ErrAuthFailed follows for
+	// connection errors.
+	AuthFailed bool
 	// RawTags is retained only for diagnostics/debug views.
 	RawTags map[string]string
 }

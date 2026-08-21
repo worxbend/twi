@@ -197,7 +197,10 @@ func messageIsError(message twitch.ChatMessage) bool {
 	for key, value := range message.RawTags {
 		key = strings.ToLower(strings.TrimSpace(key))
 		value = strings.ToLower(strings.TrimSpace(value))
-		if (key == "level" || key == "severity" || key == "twi.kind" || key == "twi_type") && value == "error" {
+		// "twi.kind" was also matched here, against a value its only writer
+		// never produced. These three remain because a caller can construct a
+		// message carrying them, and the filter is meant to honour that.
+		if (key == "level" || key == "severity" || key == "twi_type") && value == "error" {
 			return true
 		}
 		if (key == "msg-id" || key == "notice-id" || key == "system-msg") && hasErrorMarker(value) {
