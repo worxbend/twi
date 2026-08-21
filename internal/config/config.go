@@ -186,55 +186,18 @@ func WriteNonSecretFile(path string, cfg Config) error {
 	if strings.TrimSpace(path) == "" {
 		return errors.New("config path is required")
 	}
-	updates := map[string]string{
-		"twitch_username":         quote(strings.TrimSpace(cfg.Twitch.Username)),
-		"twitch_client_id":        quote(strings.TrimSpace(cfg.Twitch.ClientID)),
-		"twitch_redirect_url":     quote(strings.TrimSpace(cfg.Twitch.RedirectURL)),
-		"default_channels":        quote(strings.Join(normalizeChannels(cfg.DefaultChannels), ",")),
-		"enable_mouse":            strconv.FormatBool(cfg.Features.EnableMouse),
-		"avatar_mode":             quote(strings.TrimSpace(cfg.Features.AvatarMode)),
-		"animation_mode":          quote(strings.TrimSpace(cfg.Features.AnimationMode)),
-		"theme_name":              quote(strings.TrimSpace(cfg.Features.ThemeName)),
-		"theme_background":        quote(strings.TrimSpace(cfg.Features.ThemeCustom.Background)),
-		"theme_foreground":        quote(strings.TrimSpace(cfg.Features.ThemeCustom.Foreground)),
-		"theme_accent":            quote(strings.TrimSpace(cfg.Features.ThemeCustom.Accent)),
-		"theme_muted":             quote(strings.TrimSpace(cfg.Features.ThemeCustom.Muted)),
-		"theme_border":            quote(strings.TrimSpace(cfg.Features.ThemeCustom.Border)),
-		"theme_surface":           quote(strings.TrimSpace(cfg.Features.ThemeCustom.Surface)),
-		"theme_warning":           quote(strings.TrimSpace(cfg.Features.ThemeCustom.Warning)),
-		"theme_error":             quote(strings.TrimSpace(cfg.Features.ThemeCustom.Error)),
-		"theme_success":           quote(strings.TrimSpace(cfg.Features.ThemeCustom.Success)),
-		"stream_status_mode":      quote(strings.TrimSpace(cfg.Features.StreamStatusMode)),
-		"emote_autocomplete_mode": quote(strings.TrimSpace(cfg.Features.EmoteAutocompleteMode)),
-		"message_layout":          quote(strings.TrimSpace(cfg.Features.MessageLayout)),
-		"badge_mode":              quote(strings.TrimSpace(cfg.Features.BadgeMode)),
-		"highlight_emotes":        strconv.FormatBool(cfg.Features.HighlightEmotes),
-		"full_username":           strconv.FormatBool(cfg.Features.FullUsername),
-	}
-	order := []string{
-		"twitch_username",
-		"twitch_client_id",
-		"twitch_redirect_url",
-		"default_channels",
-		"enable_mouse",
-		"avatar_mode",
-		"animation_mode",
-		"theme_name",
-		"theme_background",
-		"theme_foreground",
-		"theme_accent",
-		"theme_muted",
-		"theme_border",
-		"theme_surface",
-		"theme_warning",
-		"theme_error",
-		"theme_success",
-		"stream_status_mode",
-		"emote_autocomplete_mode",
-		"message_layout",
-		"badge_mode",
-		"highlight_emotes",
-		"full_username",
+	// The values and their order both come from the settings table, so a
+	// setting cannot end up in one and be missing from the other -- which,
+	// with the two written out separately, silently dropped it from the
+	// file.
+	order := make([]string, 0, len(settings))
+	updates := make(map[string]string, len(settings))
+	for _, s := range settings {
+		if !s.persisted {
+			continue
+		}
+		order = append(order, s.key)
+		updates[s.key] = s.format(cfg)
 	}
 	return writeFlatConfigUpdates(path, order, updates)
 }
@@ -412,6 +375,26 @@ func applyFile(cfg *Config, path string) error {
 	return nil
 }
 
+// legacyEnvAliases are the environment variables twi honoured before the
+// TWI_ prefix existed. They are kept working, but are listed apart from the
+// settings table because they are not a naming pattern to extend -- and
+// because TWITCH_ACCESS_TOKEN accepts a token without the "oauth:" prefix
+// that Twitch IRC requires, and adds it.
+var legacyEnvAliases = map[string]func(cfg *Config, value string){
+	"TWITCH_USERNAME":      func(cfg *Config, v string) { cfg.Twitch.Username = v },
+	"TWITCH_ACCESS_TOKEN":  func(cfg *Config, v string) { cfg.Twitch.OAuthToken = normalizeIRCOAuthToken(v) },
+	"TWITCH_REFRESH_TOKEN": func(cfg *Config, v string) { cfg.Twitch.RefreshToken = v },
+	"TWITCH_CLIENT_ID":     func(cfg *Config, v string) { cfg.Twitch.ClientID = v },
+	"TWITCH_CLIENT_SECRET": func(cfg *Config, v string) { cfg.Twitch.ClientSecret = v },
+	"TWITCH_REDIRECT_URL":  func(cfg *Config, v string) { cfg.Twitch.RedirectURL = v },
+}
+
+// applyEnv applies every recognized environment variable to cfg.
+//
+// The variables are applied in sorted order, which is what decides the winner
+// when a setting is given both ways: "TWITCH_USERNAME" sorts before
+// "TWI_TWITCH_USERNAME", so the modern TWI_-prefixed name is applied second
+// and wins. Blank values are skipped rather than clearing a configured value.
 func applyEnv(cfg *Config, environ []string) {
 	env := map[string]string{}
 	for _, entry := range environ {
@@ -432,81 +415,12 @@ func applyEnv(cfg *Config, environ []string) {
 		if strings.TrimSpace(value) == "" {
 			continue
 		}
-		switch key {
-		case "TWITCH_USERNAME":
-			cfg.Twitch.Username = value
-		case "TWITCH_ACCESS_TOKEN":
-			cfg.Twitch.OAuthToken = normalizeIRCOAuthToken(value)
-		case "TWITCH_REFRESH_TOKEN":
-			cfg.Twitch.RefreshToken = value
-		case "TWITCH_CLIENT_ID":
-			cfg.Twitch.ClientID = value
-		case "TWITCH_CLIENT_SECRET":
-			cfg.Twitch.ClientSecret = value
-		case "TWITCH_REDIRECT_URL":
-			cfg.Twitch.RedirectURL = value
-		case "TWI_TWITCH_USERNAME":
-			cfg.Twitch.Username = value
-		case "TWI_TWITCH_OAUTH_TOKEN":
-			cfg.Twitch.OAuthToken = value
-		case "TWI_TWITCH_REFRESH_TOKEN":
-			cfg.Twitch.RefreshToken = value
-		case "TWI_TWITCH_CLIENT_ID":
-			cfg.Twitch.ClientID = value
-		case "TWI_TWITCH_CLIENT_SECRET":
-			cfg.Twitch.ClientSecret = value
-		case "TWI_TWITCH_REDIRECT_URL":
-			cfg.Twitch.RedirectURL = value
-		case "TWI_DEFAULT_CHANNELS":
-			cfg.DefaultChannels = splitList(value)
-		case "TWI_ENABLE_MOUSE":
-			cfg.Features.EnableMouse = parseBool(value, cfg.Features.EnableMouse)
-		case "TWI_AVATAR_MODE":
-			cfg.Features.AvatarMode = value
-		case "TWI_ANIMATION_MODE":
-			cfg.Features.AnimationMode = value
-		case "TWI_THEME_NAME":
-			cfg.Features.ThemeName = value
-		case "TWI_THEME_BACKGROUND":
-			cfg.Features.ThemeCustom.Background = value
-		case "TWI_THEME_FOREGROUND":
-			cfg.Features.ThemeCustom.Foreground = value
-		case "TWI_THEME_ACCENT":
-			cfg.Features.ThemeCustom.Accent = value
-		case "TWI_THEME_MUTED":
-			cfg.Features.ThemeCustom.Muted = value
-		case "TWI_THEME_BORDER":
-			cfg.Features.ThemeCustom.Border = value
-		case "TWI_THEME_SURFACE":
-			cfg.Features.ThemeCustom.Surface = value
-		case "TWI_THEME_WARNING":
-			cfg.Features.ThemeCustom.Warning = value
-		case "TWI_THEME_ERROR":
-			cfg.Features.ThemeCustom.Error = value
-		case "TWI_THEME_SUCCESS":
-			cfg.Features.ThemeCustom.Success = value
-		case "TWI_STREAM_STATUS_MODE":
-			cfg.Features.StreamStatusMode = value
-		case "TWI_MESSAGE_LAYOUT":
-			cfg.Features.MessageLayout = value
-		case "TWI_BADGE_MODE":
-			cfg.Features.BadgeMode = value
-		case "TWI_HIGHLIGHT_EMOTES":
-			cfg.Features.HighlightEmotes = parseBool(value, cfg.Features.HighlightEmotes)
-		case "TWI_FULL_USERNAME":
-			cfg.Features.FullUsername = parseBool(value, cfg.Features.FullUsername)
-		case "TWI_SIDEBAR_WIDTH":
-			cfg.Features.SidebarWidth = parseInt(value, cfg.Features.SidebarWidth)
-		case "TWI_ACTIVITY_WIDTH":
-			cfg.Features.ActivityWidth = parseInt(value, cfg.Features.ActivityWidth)
-		case "TWI_SCROLLBACK_LIMIT":
-			cfg.Features.ScrollbackLimit = parseInt(value, cfg.Features.ScrollbackLimit)
-		case "TWI_EMOTE_AUTOCOMPLETE_MODE":
-			cfg.Features.EmoteAutocompleteMode = value
-		case "TWI_DEBUG_LOG":
-			cfg.Debug.Enabled = parseBool(value, cfg.Debug.Enabled)
-		case "TWI_DEBUG_LOG_PATH":
-			cfg.Debug.LogPath = value
+		if apply, ok := legacyEnvAliases[key]; ok {
+			apply(cfg, value)
+			continue
+		}
+		if s, ok := settingsByEnv[key]; ok {
+			s.apply(cfg, value)
 		}
 	}
 }
@@ -520,70 +434,12 @@ func applyOverrides(cfg *Config, overrides Overrides) {
 	}
 }
 
+// applyKey applies one `key = value` line from a config file.
+// An unrecognized key is ignored, so a config written by a newer twi still
+// loads in an older one.
 func applyKey(cfg *Config, key, value string) {
-	switch key {
-	case "twitch_username":
-		cfg.Twitch.Username = value
-	case "twitch_oauth_token":
-		cfg.Twitch.OAuthToken = value
-	case "twitch_refresh_token":
-		cfg.Twitch.RefreshToken = value
-	case "twitch_client_id":
-		cfg.Twitch.ClientID = value
-	case "twitch_client_secret":
-		cfg.Twitch.ClientSecret = value
-	case "twitch_redirect_url":
-		cfg.Twitch.RedirectURL = value
-	case "default_channels":
-		cfg.DefaultChannels = splitList(value)
-	case "enable_mouse":
-		cfg.Features.EnableMouse = parseBool(value, cfg.Features.EnableMouse)
-	case "avatar_mode":
-		cfg.Features.AvatarMode = value
-	case "animation_mode":
-		cfg.Features.AnimationMode = value
-	case "theme_name":
-		cfg.Features.ThemeName = value
-	case "theme_background":
-		cfg.Features.ThemeCustom.Background = value
-	case "theme_foreground":
-		cfg.Features.ThemeCustom.Foreground = value
-	case "theme_accent":
-		cfg.Features.ThemeCustom.Accent = value
-	case "theme_muted":
-		cfg.Features.ThemeCustom.Muted = value
-	case "theme_border":
-		cfg.Features.ThemeCustom.Border = value
-	case "theme_surface":
-		cfg.Features.ThemeCustom.Surface = value
-	case "theme_warning":
-		cfg.Features.ThemeCustom.Warning = value
-	case "theme_error":
-		cfg.Features.ThemeCustom.Error = value
-	case "theme_success":
-		cfg.Features.ThemeCustom.Success = value
-	case "stream_status_mode":
-		cfg.Features.StreamStatusMode = value
-	case "emote_autocomplete_mode":
-		cfg.Features.EmoteAutocompleteMode = value
-	case "message_layout":
-		cfg.Features.MessageLayout = value
-	case "badge_mode":
-		cfg.Features.BadgeMode = value
-	case "highlight_emotes":
-		cfg.Features.HighlightEmotes = parseBool(value, cfg.Features.HighlightEmotes)
-	case "full_username":
-		cfg.Features.FullUsername = parseBool(value, cfg.Features.FullUsername)
-	case "sidebar_width":
-		cfg.Features.SidebarWidth = parseInt(value, cfg.Features.SidebarWidth)
-	case "activity_width":
-		cfg.Features.ActivityWidth = parseInt(value, cfg.Features.ActivityWidth)
-	case "scrollback_limit":
-		cfg.Features.ScrollbackLimit = parseInt(value, cfg.Features.ScrollbackLimit)
-	case "debug_logging":
-		cfg.Debug.Enabled = parseBool(value, cfg.Debug.Enabled)
-	case "debug_log_path":
-		cfg.Debug.LogPath = value
+	if s, ok := settingsByKey[key]; ok {
+		s.apply(cfg, value)
 	}
 }
 
