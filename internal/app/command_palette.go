@@ -77,7 +77,7 @@ func (m *shellModel) toggleCommandPalette() {
 		m.palette = commandPaletteState{}
 		return
 	}
-	m.closeOtherOverlays("palette")
+	m.closeOtherOverlays(overlayPalette)
 	m.palette = commandPaletteState{open: true}
 	m.refreshPaletteReveal(time.Now())
 }

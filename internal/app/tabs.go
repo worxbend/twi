@@ -16,7 +16,7 @@ func (m shellModel) switchToTab(tab shellTab) (shellModel, tea.Cmd) {
 	if m.activeTab == tab {
 		return m, nil
 	}
-	m.closeOtherOverlays("")
+	m.closeOtherOverlays(overlayNone)
 	m.activeTab = tab
 	m.clampScroll()
 	switch tab {

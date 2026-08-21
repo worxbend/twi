@@ -44,7 +44,7 @@ type categoryPickerResultsMsg struct {
 // kicks off that initial search without debouncing (unlike per-keystroke
 // typing, opening the picker is one deliberate action).
 func (m *shellModel) openCategoryPicker() tea.Cmd {
-	m.closeOtherOverlays("category")
+	m.closeOtherOverlays(overlayCategory)
 	query := strings.TrimSpace(m.streamInfo.category)
 	m.categoryPicker = categoryPickerState{open: true, query: query}
 	return m.scheduleCategorySearch()

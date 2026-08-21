@@ -9,27 +9,47 @@ func (m shellModel) anyOverlayOpen() bool {
 		m.channelPicker.open || m.categoryPicker.open
 }
 
-// closeOtherOverlays closes every overlay except the one named by keep
-// ("palette", "inspect", "theme", "emotes", "channels", "category", or ""
-// to close all).
-// Overlays are mutually exclusive: opening one always closes the others.
-func (m *shellModel) closeOtherOverlays(keep string) {
-	if keep != "palette" {
+// overlayKind names one of the mutually exclusive overlays that can cover the
+// chat view.
+//
+// It is a type rather than a bare string because closeOtherOverlays is driven
+// entirely by which one to keep, and the names did not visibly match the
+// fields they guarded -- "emotes" kept m.emotePicker, "channels" kept
+// m.channelPicker. A typo in an untyped literal compiles happily and closes
+// the overlay that was just opened, which looks like the key press being
+// ignored. With a named type the compiler catches it.
+type overlayKind string
+
+const (
+	// overlayNone keeps nothing open: every overlay is closed.
+	overlayNone     overlayKind = ""
+	overlayPalette  overlayKind = "palette"
+	overlayInspect  overlayKind = "inspect"
+	overlayTheme    overlayKind = "theme"
+	overlayEmotes   overlayKind = "emotes"
+	overlayChannels overlayKind = "channels"
+	overlayCategory overlayKind = "category"
+)
+
+// closeOtherOverlays closes every overlay except keep. Overlays are mutually
+// exclusive: opening one always closes the others.
+func (m *shellModel) closeOtherOverlays(keep overlayKind) {
+	if keep != overlayPalette {
 		m.palette = commandPaletteState{}
 	}
-	if keep != "inspect" {
+	if keep != overlayInspect {
 		m.inspectOpen = false
 	}
-	if keep != "theme" {
+	if keep != overlayTheme {
 		m.themeSettings = themeSettingsState{}
 	}
-	if keep != "emotes" {
+	if keep != overlayEmotes {
 		m.emotePicker = emotePickerState{}
 	}
-	if keep != "channels" {
+	if keep != overlayChannels {
 		m.channelPicker = channelPickerState{}
 	}
-	if keep != "category" {
+	if keep != overlayCategory {
 		m.categoryPicker = categoryPickerState{}
 	}
 }

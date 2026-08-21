@@ -52,7 +52,7 @@ func isInsertRune(r rune) bool {
 func (m *shellModel) toggleInspect() {
 	m.inspectOpen = !m.inspectOpen
 	if m.inspectOpen {
-		m.closeOtherOverlays("inspect")
+		m.closeOtherOverlays(overlayInspect)
 	}
 	m.clampScroll()
 }

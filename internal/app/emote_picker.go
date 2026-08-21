@@ -21,7 +21,7 @@ func (m *shellModel) toggleEmotePicker() {
 		m.emotePicker = emotePickerState{}
 		return
 	}
-	m.closeOtherOverlays("emotes")
+	m.closeOtherOverlays(overlayEmotes)
 	m.emotePicker = emotePickerState{open: true}
 }
 

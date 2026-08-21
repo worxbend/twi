@@ -631,13 +631,7 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.nextIncoming++
 			cmds = append(cmds, m.nextIncomingCommand())
 		}
-		if revealCmd := m.enqueueMessage(msg.message); revealCmd != nil {
-			cmds = append(cmds, revealCmd)
-		}
-		m.recordActivityFromMessage(msg.message)
-		if notificationCmd := m.maybeNotifyForSystemEvent(msg.message); notificationCmd != nil {
-			cmds = append(cmds, notificationCmd)
-		}
+		cmds = append(cmds, m.ingestMessage(msg.message)...)
 		m.clampScroll()
 		return m.withAsyncAssetCommands(cmds...)
 	case chatClientMessageMsg:
@@ -652,14 +646,7 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.debugChatMessage("app.message.received", msg.message)
-		var cmds []tea.Cmd
-		if revealCmd := m.enqueueMessage(msg.message); revealCmd != nil {
-			cmds = append(cmds, revealCmd)
-		}
-		m.recordActivityFromMessage(msg.message)
-		if notificationCmd := m.maybeNotifyForSystemEvent(msg.message); notificationCmd != nil {
-			cmds = append(cmds, notificationCmd)
-		}
+		cmds := m.ingestMessage(msg.message)
 		cmds = append(cmds, m.nextClientMessageCommand())
 		m.clampScroll()
 		return m.withAsyncAssetCommands(cmds...)
@@ -2644,6 +2631,30 @@ func (m *shellModel) applyUserState(state twitch.UserState) {
 	}
 }
 
+// ingestMessage folds one arriving chat message into the shell: it queues the
+// message for display, records it in the activity column, and raises a desktop
+// notification if it is one of the system events worth interrupting for.
+//
+// Both message sources -- the mock chat used by `twi chat --mock` and the live
+// transport -- ran these three steps inline in their own Update arm. Having
+// them written twice meant a fourth step added to the live arm would silently
+// not happen under --mock, which is the path least likely to be hand-tested.
+//
+// It returns the commands to batch rather than running them, because the
+// caller has its own commands to add and the order they are batched in is the
+// caller's business.
+func (m *shellModel) ingestMessage(message twitch.ChatMessage) []tea.Cmd {
+	var cmds []tea.Cmd
+	if revealCmd := m.enqueueMessage(message); revealCmd != nil {
+		cmds = append(cmds, revealCmd)
+	}
+	m.recordActivityFromMessage(message)
+	if notificationCmd := m.maybeNotifyForSystemEvent(message); notificationCmd != nil {
+		cmds = append(cmds, notificationCmd)
+	}
+	return cmds
+}
+
 func (m *shellModel) enqueueMessage(message twitch.ChatMessage) tea.Cmd {
 	if state := m.channels.ensure(message.Channel); state != nil {
 		state.removeLocalEcho(message.ID)
@@ -3498,9 +3509,23 @@ func (m shellModel) helpLines(width, height int) []string {
 		return []string{line}
 	}
 
-	// Generated from keyBindings so help cannot drift from the keymap. The
-	// three surfaces that document keys used to be three hand-maintained
-	// lists, and ctrl+e had already fallen out of all of them.
+	// Below 38 columns there is no room for the generated groups, so the help
+	// falls back to a hand-picked set of the five keys that matter most on a
+	// very narrow terminal. This is a deliberate editorial choice rather than
+	// a projection of the keymap, which is why it is written out; checking the
+	// width first keeps it from looking like the generated lines are being
+	// discarded.
+	if width < 38 {
+		return []string{
+			" ctrl+p: commands",
+			" i/esc | tab | jk",
+			" ?: help | ctrl+c: quit",
+		}
+	}
+
+	// The wide help is generated from keyBindings so it cannot drift from the
+	// keymap. The three surfaces that document keys used to be three
+	// hand-maintained lists, and ctrl+e had already fallen out of all of them.
 	lines := []string{
 		helpGroupLine(keyGroupChat),
 		helpGroupLine(keyGroupChannels),
@@ -3509,13 +3534,6 @@ func (m shellModel) helpLines(width, height int) []string {
 		// Display toggles go last: when a short terminal truncates the help,
 		// the navigation keys are the ones that must survive.
 		helpGroupLine(keyGroupDisplay),
-	}
-	if width < 38 {
-		lines = []string{
-			" ctrl+p: commands",
-			" i/esc | tab | jk",
-			" ?: help | ctrl+c: quit",
-		}
 	}
 	if len(lines) > height {
 		return lines[:height]

@@ -41,7 +41,7 @@ func (m *shellModel) toggleThemeSettings() {
 		m.themeSettings = themeSettingsState{}
 		return
 	}
-	m.closeOtherOverlays("theme")
+	m.closeOtherOverlays(overlayTheme)
 	names := themeSettingsNames()
 	selected := 0
 	for i, name := range names {

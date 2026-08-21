@@ -58,7 +58,7 @@ func (m *shellModel) openChannelPicker() tea.Cmd {
 		m.channelPicker = channelPickerState{}
 		return nil
 	}
-	m.closeOtherOverlays("channels")
+	m.closeOtherOverlays(overlayChannels)
 	m.channelPicker = channelPickerState{open: true}
 	return m.scheduleFollowedChannelsLookup()
 }
