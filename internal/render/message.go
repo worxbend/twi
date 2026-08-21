@@ -549,60 +549,89 @@ func humanizeDuration(d time.Duration) string {
 	}
 }
 
+// prefixDecorations records which of the optional parts of a message prefix
+// -- the avatar, the timestamp, the badges, the first-message mark -- are
+// being drawn for one message.
+type prefixDecorations struct {
+	avatar       bool
+	timestamp    bool
+	badges       bool
+	firstMessage bool
+}
+
+// chooseDecorations decides which decorations a message's prefix can afford.
+//
+// It starts from what the layout and the message allow, then drops
+// decorations until the prefix plus the author's name fits the available
+// width. The drop order is deliberate: badges go first because they are the
+// widest and the most redundant (a moderator is usually recognisable by name
+// to the person reading), then the avatar, then the timestamp, which is the
+// one people scan for. If nothing is left to drop, the prefix is allowed to
+// overflow rather than losing the author's name.
+func chooseDecorations(msg twitch.ChatMessage, opts Options, author string) prefixDecorations {
+	compact := opts.layout() == LayoutCompact
+	d := prefixDecorations{
+		// LayoutCompact trades every decoration for message text.
+		timestamp:    !compact && opts.Width >= 16,
+		badges:       !compact && opts.Width >= 28 && len(msg.Badges) > 0 && opts.badgeMode() != BadgeModeOff,
+		avatar:       !compact && opts.Assets.ShowAvatars && opts.Width >= 24,
+		firstMessage: msg.FirstMessage && !compact && opts.Width >= 24,
+	}
+
+	for {
+		if d.width(msg, opts)+textWidth(author) <= opts.Width {
+			return d
+		}
+		switch {
+		case d.badges:
+			d.badges = false
+		case d.avatar:
+			d.avatar = false
+		case d.timestamp:
+			d.timestamp = false
+		default:
+			// Nothing left to give up; the name matters more than the fit.
+			return d
+		}
+	}
+}
+
+// width is the number of cells the decorations and the fixed punctuation of
+// the prefix occupy, excluding the author's name.
+func (d prefixDecorations) width(msg twitch.ChatMessage, opts Options) int {
+	// The trailing separator is ": ", or " " plus the "* " action marker.
+	width := 2
+	if msg.Type == twitch.MessageTypeAction {
+		width = 3
+	}
+	if d.firstMessage {
+		width += 2
+	}
+	if d.timestamp {
+		width += 6
+	}
+	if d.badges {
+		width += badgeSetWidth(msg.Badges, opts)
+	}
+	if d.avatar {
+		width += opts.Assets.AvatarWidthCells
+	}
+	return width
+}
+
 func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 	foreground := opts.Palette.Foreground
 	muted := opts.Palette.Muted
 	accent := opts.Palette.Accent
 
 	author := displayAuthor(msg)
-	avatarAuthor := author
-	includeTimestamp := opts.Width >= 16
-	includeBadges := opts.Width >= 28 && len(msg.Badges) > 0 && opts.badgeMode() != BadgeModeOff
-	includeAvatar := opts.Assets.ShowAvatars && opts.Width >= 24
-	// LayoutCompact trades every decoration for message text.
-	if opts.layout() == LayoutCompact {
-		includeTimestamp, includeBadges, includeAvatar = false, false, false
-	}
-
-	includeFirstMessage := msg.FirstMessage && opts.layout() != LayoutCompact && opts.Width >= 24
-
-	for {
-		fixedWidth := 2
-		if msg.Type == twitch.MessageTypeAction {
-			fixedWidth = 3
-		}
-		if includeFirstMessage {
-			fixedWidth += 2
-		}
-		if includeTimestamp {
-			fixedWidth += 6
-		}
-		if includeBadges {
-			fixedWidth += badgeSetWidth(msg.Badges, opts)
-		}
-		if includeAvatar {
-			fixedWidth += opts.Assets.AvatarWidthCells
-		}
-
-		if fixedWidth+textWidth(author) <= opts.Width || (!includeAvatar && !includeBadges && !includeTimestamp) {
-			break
-		}
-		if includeBadges {
-			includeBadges = false
-			continue
-		}
-		if includeAvatar {
-			includeAvatar = false
-			continue
-		}
-		includeTimestamp = false
-	}
+	decorations := chooseDecorations(msg, opts, author)
 
 	var fragments []Fragment
-	if includeAvatar {
-		fragments = append(fragments, avatarFallbackFragment(msg, opts, avatarAuthor))
+	if decorations.avatar {
+		fragments = append(fragments, avatarFallbackFragment(msg, opts, author))
 	}
-	if includeTimestamp {
+	if decorations.timestamp {
 		fragments = append(fragments, Fragment{
 			Kind: FragmentTimestamp,
 			Text: timestampText(msg.Timestamp) + " ",
@@ -611,7 +640,7 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 			},
 		})
 	}
-	if includeBadges {
+	if decorations.badges {
 		fragments = append(fragments, badgeFragments(msg, opts)...)
 	}
 	// A first-ever message in the channel is marked before the name, where it
@@ -619,7 +648,7 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 	// Greeting a newcomer is one of the few things a streamer must do while
 	// it is still on screen, and Twitch's own tag is the only reliable
 	// source: a local roster cannot know about a viewer's first visit.
-	if includeFirstMessage {
+	if decorations.firstMessage {
 		fragments = append(fragments, Fragment{
 			Kind: FragmentFirstMessage,
 			Text: "✦ ",

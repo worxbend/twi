@@ -197,13 +197,11 @@ func tabForShortcutRune(r rune) (shellTab, bool) {
 	if r < '1' || r > '9' {
 		return 0, false
 	}
-	index := int(r-'1') + 1
-	for _, entry := range shellTabs {
-		if int(entry.tab)+1 == index {
-			return entry.tab, true
-		}
+	index := int(r - '1')
+	if index >= len(shellTabs) {
+		return 0, false
 	}
-	return 0, false
+	return shellTabs[index].tab, true
 }
 
 type shellFocus int
