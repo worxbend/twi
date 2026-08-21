@@ -174,9 +174,8 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "Config already exists at %s; left unchanged.\n", config.RedactDisplayValue(cfg.Path))
 		}
 	}
-	logger, closeLog, err := openDebugLogger(cfg)
-	if err != nil {
-		fmt.Fprintf(stderr, "open debug log: %s\n", config.RedactDisplayValue(err.Error()))
+	logger, closeLog, ok := openDebugLoggerOrReport(cfg, stderr)
+	if !ok {
 		return 1
 	}
 	defer closeLog()

@@ -381,9 +381,8 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if mock {
-		logger, closeLog, err := openDebugLogger(cfg)
-		if err != nil {
-			fmt.Fprintf(stderr, "open debug log: %s\n", config.RedactDisplayValue(err.Error()))
+		logger, closeLog, ok := openDebugLoggerOrReport(cfg, stderr)
+		if !ok {
 			return 1
 		}
 		defer closeLog()
@@ -405,9 +404,8 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "load credentials: %s\n", config.RedactDisplayValue(status.Err.Error()))
 		return 1
 	}
-	logger, closeLog, err := openDebugLogger(cfg)
-	if err != nil {
-		fmt.Fprintf(stderr, "open debug log: %s\n", config.RedactDisplayValue(err.Error()))
+	logger, closeLog, ok := openDebugLoggerOrReport(cfg, stderr)
+	if !ok {
 		return 1
 	}
 	defer closeLog()
@@ -771,9 +769,8 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 	if credentialErr != nil {
 		credentialStatus.Err = credentialErr
 	}
-	logger, closeLog, err := openDebugLogger(cfg)
-	if err != nil {
-		fmt.Fprintf(stderr, "open debug log: %s\n", config.RedactDisplayValue(err.Error()))
+	logger, closeLog, ok := openDebugLoggerOrReport(cfg, stderr)
+	if !ok {
 		return 1
 	}
 	defer closeLog()

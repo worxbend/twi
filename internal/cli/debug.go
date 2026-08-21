@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -147,4 +148,19 @@ func closeDebugLogFileWithError(file *os.File, err error) (*os.File, error) {
 func withDebugLogger(opts app.ClientOptions, logger debuglog.Logger) app.ClientOptions {
 	opts.DebugLogger = logger
 	return opts
+}
+
+// openDebugLoggerOrReport opens the debug logger for a command, reporting any
+// failure to stderr. ok is false when the command should exit with status 1.
+//
+// The close function is returned for the caller to defer rather than deferred
+// here: a defer runs when this function returns, which would close the log
+// before the command had written anything to it.
+func openDebugLoggerOrReport(cfg config.Config, stderr io.Writer) (logger debuglog.Logger, closeLog func(), ok bool) {
+	logger, closeLog, err := openDebugLogger(cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "open debug log: %s\n", config.RedactDisplayValue(err.Error()))
+		return logger, closeLog, false
+	}
+	return logger, closeLog, true
 }
