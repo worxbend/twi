@@ -44,6 +44,7 @@ var keyBindings = []keyBinding{
 	{Keys: "space c", Description: "open channel", Group: keyGroupChannels},
 	{Keys: "space x", Description: "close channel", Group: keyGroupChannels},
 	{Keys: "space a", Description: "activity column", Group: keyGroupChannels},
+	{Keys: "space i", Description: "inspect", Group: keyGroupChannels},
 	{Keys: "[/]", Description: "switch", Group: keyGroupChannels},
 
 	{Keys: "1-4", Description: "filters", Group: keyGroupView},

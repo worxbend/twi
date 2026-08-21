@@ -145,3 +145,39 @@ func TestCommandPaletteShortcutsAreDocumentedKeys(t *testing.T) {
 		}
 	}
 }
+
+// TestEveryLeaderChordIsDocumented keeps the in-app help honest about the
+// space-leader bindings.
+//
+// The leader chord is the least discoverable input twi has: nothing on screen
+// hints that space is a prefix, so a binding missing from the help is a
+// feature nobody finds. `space a`, which shows and hides the activity column,
+// had fallen out of the developer documentation exactly that way.
+func TestEveryLeaderChordIsDocumented(t *testing.T) {
+	chords := map[rune]string{
+		leaderSidebarRune:       "channel sidebar",
+		leaderChannelPickerRune: "open channel",
+		leaderCloseChannelRune:  "close channel",
+		leaderInspectRune:       "inspect",
+		leaderActivityRune:      "activity column",
+	}
+
+	documented := documentedKeys()
+	for chord, what := range chords {
+		key := "space " + string(chord)
+		if !documented[key] {
+			t.Errorf("leader chord %q (%s) is not in keyBindings, so the help never mentions it", key, what)
+		}
+	}
+}
+
+// TestPaneSizingKeysAreDocumented covers the other half of the pane controls,
+// which are ordinary runes rather than a chord but equally easy to omit.
+func TestPaneSizingKeysAreDocumented(t *testing.T) {
+	documented := documentedKeys()
+	for _, key := range []string{"<", ">", "="} {
+		if !documented[key] {
+			t.Errorf("pane key %q is handled but not documented in keyBindings", key)
+		}
+	}
+}
