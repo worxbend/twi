@@ -109,25 +109,10 @@ func (c *MarkersClient) GetStreamMarkers(ctx context.Context, userID string, lim
 	q.Set("first", strconv.Itoa(limit))
 	parsed.RawQuery = q.Encode()
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	decoded, err := getJSON[helixStreamMarkersListResponse](ctx, c.transport, parsed.String(),
+		markerErrorLabels("get Twitch stream markers", "Get Stream Markers"))
 	if err != nil {
-		return nil, credentialSafeUserError("create Twitch stream markers request", err, c.token())
-	}
-	c.setAuthHeaders(httpReq)
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, credentialSafeUserError("get Twitch stream markers", err, c.token())
-	}
-	defer resp.Body.Close()
-
-	if !isSuccess(resp) {
-		return nil, c.responseError(resp, markerErrorLabels("get Twitch stream markers", "Get Stream Markers"))
-	}
-
-	var decoded helixStreamMarkersListResponse
-	if err := decodeJSONBody(resp.Body, maxResponseBodySize, &decoded); err != nil {
-		return nil, credentialSafeUserError("decode Twitch stream markers response", err, c.token())
+		return nil, err
 	}
 	if len(decoded.Data) == 0 || len(decoded.Data[0].Videos) == 0 {
 		return nil, nil

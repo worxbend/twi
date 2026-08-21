@@ -103,33 +103,17 @@ func (c *FollowedChannelsClient) fetchPage(ctx context.Context, userID, cursor s
 	}
 	parsed.RawQuery = q.Encode()
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	decoded, err := getJSON[helixFollowedChannelsResponse](ctx, c.transport, parsed.String(), errorLabels{
+		action:     "get Twitch followed channels",
+		readAction: "read Twitch followed channels response",
+		endpoint:   "Get Followed Channels",
+
+		channelAPIReasons: map[int]twitch.ChannelAPIReason{
+			http.StatusUnauthorized: twitch.ChannelAPIMissingScope,
+		},
+	})
 	if err != nil {
-		return empty, credentialSafeUserError("create Twitch followed channels request", err, c.token())
-	}
-	c.setAuthHeaders(httpReq)
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return empty, credentialSafeUserError("get Twitch followed channels", err, c.token())
-	}
-	defer resp.Body.Close()
-
-	if !isSuccess(resp) {
-		return empty, c.responseError(resp, errorLabels{
-			action:     "get Twitch followed channels",
-			readAction: "read Twitch followed channels response",
-			endpoint:   "Get Followed Channels",
-
-			channelAPIReasons: map[int]twitch.ChannelAPIReason{
-				http.StatusUnauthorized: twitch.ChannelAPIMissingScope,
-			},
-		})
-	}
-
-	var decoded helixFollowedChannelsResponse
-	if err := decodeJSONBody(resp.Body, maxResponseBodySize, &decoded); err != nil {
-		return empty, credentialSafeUserError("decode Twitch followed channels response", err, c.token())
+		return empty, err
 	}
 	return decoded, nil
 }

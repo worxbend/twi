@@ -2,7 +2,6 @@ package helix
 
 import (
 	"context"
-	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -47,29 +46,13 @@ func (c *StreamsClient) GetStreams(ctx context.Context, logins []string) ([]twit
 	if err != nil {
 		return nil, credentialSafeUserError("create Twitch stream status request", err, c.token())
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	decoded, err := getJSON[helixStreamsResponse](ctx, c.transport, endpoint, errorLabels{
+		action:     "lookup Twitch stream status",
+		readAction: "read Twitch stream status response",
+		endpoint:   "Get Streams",
+	})
 	if err != nil {
-		return nil, credentialSafeUserError("create Twitch stream status request", err, c.token())
-	}
-	c.setAuthHeaders(httpReq)
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, credentialSafeUserError("lookup Twitch stream status", err, c.token())
-	}
-	defer resp.Body.Close()
-
-	if !isSuccess(resp) {
-		return nil, c.responseError(resp, errorLabels{
-			action:     "lookup Twitch stream status",
-			readAction: "read Twitch stream status response",
-			endpoint:   "Get Streams",
-		})
-	}
-
-	var decoded helixStreamsResponse
-	if err := decodeJSONBody(resp.Body, maxResponseBodySize, &decoded); err != nil {
-		return nil, credentialSafeUserError("decode Twitch stream status response", err, c.token())
+		return nil, err
 	}
 
 	live := make(map[string]helixStream, len(decoded.Data))

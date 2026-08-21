@@ -66,33 +66,17 @@ func (c *FollowersClient) GetChannelFollowers(ctx context.Context, broadcasterID
 	q.Set("first", strconv.Itoa(limit))
 	parsed.RawQuery = q.Encode()
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	decoded, err := getJSON[helixFollowersResponse](ctx, c.transport, parsed.String(), errorLabels{
+		action:     "get Twitch channel followers",
+		readAction: "read Twitch channel followers response",
+		endpoint:   "Get Channel Followers",
+
+		channelAPIReasons: map[int]twitch.ChannelAPIReason{
+			http.StatusUnauthorized: twitch.ChannelAPIMissingScope,
+		},
+	})
 	if err != nil {
-		return twitch.FollowersPage{}, credentialSafeUserError("create Twitch channel followers request", err, c.token())
-	}
-	c.setAuthHeaders(httpReq)
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return twitch.FollowersPage{}, credentialSafeUserError("get Twitch channel followers", err, c.token())
-	}
-	defer resp.Body.Close()
-
-	if !isSuccess(resp) {
-		return twitch.FollowersPage{}, c.responseError(resp, errorLabels{
-			action:     "get Twitch channel followers",
-			readAction: "read Twitch channel followers response",
-			endpoint:   "Get Channel Followers",
-
-			channelAPIReasons: map[int]twitch.ChannelAPIReason{
-				http.StatusUnauthorized: twitch.ChannelAPIMissingScope,
-			},
-		})
-	}
-
-	var decoded helixFollowersResponse
-	if err := decodeJSONBody(resp.Body, maxResponseBodySize, &decoded); err != nil {
-		return twitch.FollowersPage{}, credentialSafeUserError("decode Twitch channel followers response", err, c.token())
+		return twitch.FollowersPage{}, err
 	}
 	followers := make([]twitch.Follower, 0, len(decoded.Data))
 	for _, item := range decoded.Data {

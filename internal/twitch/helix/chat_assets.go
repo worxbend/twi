@@ -2,8 +2,6 @@ package helix
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -57,8 +55,8 @@ func NewChatAssetsClient(cfg ChatAssetsClientConfig) *ChatAssetsClient {
 }
 
 func (c *ChatAssetsClient) GetGlobalEmotes(ctx context.Context) ([]twitch.EmoteMetadata, error) {
-	var decoded helixEmotesResponse
-	if err := c.getJSON(ctx, c.globalEmotesEndpoint, "", &decoded); err != nil {
+	decoded, err := fetchChatAsset[helixEmotesResponse](ctx, c, c.globalEmotesEndpoint, "")
+	if err != nil {
 		return nil, err
 	}
 	return decoded.emotes(), nil
@@ -69,16 +67,16 @@ func (c *ChatAssetsClient) GetChannelEmotes(ctx context.Context, broadcasterID s
 	if broadcasterID == "" {
 		return nil, nil
 	}
-	var decoded helixEmotesResponse
-	if err := c.getJSON(ctx, c.channelEmotesEndpoint, broadcasterID, &decoded); err != nil {
+	decoded, err := fetchChatAsset[helixEmotesResponse](ctx, c, c.channelEmotesEndpoint, broadcasterID)
+	if err != nil {
 		return nil, err
 	}
 	return decoded.emotes(), nil
 }
 
 func (c *ChatAssetsClient) GetGlobalBadges(ctx context.Context) ([]twitch.BadgeMetadata, error) {
-	var decoded helixBadgesResponse
-	if err := c.getJSON(ctx, c.globalBadgesEndpoint, "", &decoded); err != nil {
+	decoded, err := fetchChatAsset[helixBadgesResponse](ctx, c, c.globalBadgesEndpoint, "")
+	if err != nil {
 		return nil, err
 	}
 	return decoded.badges(), nil
@@ -89,51 +87,34 @@ func (c *ChatAssetsClient) GetChannelBadges(ctx context.Context, broadcasterID s
 	if broadcasterID == "" {
 		return nil, nil
 	}
-	var decoded helixBadgesResponse
-	if err := c.getJSON(ctx, c.channelBadgesEndpoint, broadcasterID, &decoded); err != nil {
+	decoded, err := fetchChatAsset[helixBadgesResponse](ctx, c, c.channelBadgesEndpoint, broadcasterID)
+	if err != nil {
 		return nil, err
 	}
 	return decoded.badges(), nil
 }
 
-func (c *ChatAssetsClient) getJSON(ctx context.Context, endpoint, broadcasterID string, out any) error {
+// chatAssetLabels reports every chat-asset lookup under one set of labels.
+// The four endpoints -- global and channel emotes, global and channel badges
+// -- are one feature to a reader of the error, so they are not distinguished.
+var chatAssetLabels = errorLabels{
+	action:     "lookup Twitch chat assets",
+	readAction: "read Twitch chat asset response",
+	endpoint:   "chat asset lookup",
+}
+
+// fetchChatAsset resolves one of the four chat-asset endpoints and decodes it.
+// broadcasterID is empty for the global endpoints.
+func fetchChatAsset[T any](ctx context.Context, c *ChatAssetsClient, endpoint, broadcasterID string) (T, error) {
+	var decoded T
 	if err := ctx.Err(); err != nil {
-		return err
+		return decoded, err
 	}
-	endpoint, err := helixChatAssetURL(endpoint, broadcasterID)
+	url, err := helixChatAssetURL(endpoint, broadcasterID)
 	if err != nil {
-		return credentialSafeChatAssetError("create Twitch chat asset request", err, c.token())
+		return decoded, credentialSafeUserError("create Twitch chat asset request", err, c.token())
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return credentialSafeChatAssetError("create Twitch chat asset request", err, c.token())
-	}
-	c.setAuthHeaders(req)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return credentialSafeChatAssetError("lookup Twitch chat assets", err, c.token())
-	}
-	defer resp.Body.Close()
-
-	if !isSuccess(resp) {
-		detail, err := readSmallBody(resp.Body)
-		if err != nil {
-			return credentialSafeChatAssetError("read Twitch chat asset response", err, c.token())
-		}
-		if detail != "" {
-			detail = ": " + detail
-		}
-		return credentialSafeChatAssetError(
-			"lookup Twitch chat assets",
-			fmt.Errorf("twitch chat asset lookup returned HTTP %d%s", resp.StatusCode, detail),
-			c.token(),
-		)
-	}
-	if err := decodeJSONBody(resp.Body, maxResponseBodySize, out); err != nil {
-		return credentialSafeChatAssetError("decode Twitch chat asset response", err, c.token())
-	}
-	return nil
+	return getJSON[T](ctx, c.transport, url, chatAssetLabels)
 }
 
 func helixChatAssetURL(endpoint, broadcasterID string) (string, error) {
@@ -233,15 +214,4 @@ func (r helixBadgesResponse) badges() []twitch.BadgeMetadata {
 		}
 	}
 	return out
-}
-
-func credentialSafeChatAssetError(action string, err error, oauthToken string) error {
-	if err == nil {
-		return nil
-	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return err
-	}
-	credentials := twitch.TokenCredentials{OAuthToken: oauthToken}
-	return errors.New(action + ": " + redactCredentials(err.Error(), credentials))
 }

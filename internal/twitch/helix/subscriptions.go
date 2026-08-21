@@ -64,33 +64,17 @@ func (c *SubscriptionsClient) GetBroadcasterSubscriptions(ctx context.Context, b
 	q.Set("first", strconv.Itoa(limit))
 	parsed.RawQuery = q.Encode()
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	decoded, err := getJSON[helixSubscriptionsResponse](ctx, c.transport, parsed.String(), errorLabels{
+		action:     "get Twitch broadcaster subscriptions",
+		readAction: "read Twitch broadcaster subscriptions response",
+		endpoint:   "Get Broadcaster Subscriptions",
+
+		channelAPIReasons: map[int]twitch.ChannelAPIReason{
+			http.StatusUnauthorized: twitch.ChannelAPIMissingScope,
+		},
+	})
 	if err != nil {
-		return twitch.SubscriptionsPage{}, credentialSafeUserError("create Twitch broadcaster subscriptions request", err, c.token())
-	}
-	c.setAuthHeaders(httpReq)
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return twitch.SubscriptionsPage{}, credentialSafeUserError("get Twitch broadcaster subscriptions", err, c.token())
-	}
-	defer resp.Body.Close()
-
-	if !isSuccess(resp) {
-		return twitch.SubscriptionsPage{}, c.responseError(resp, errorLabels{
-			action:     "get Twitch broadcaster subscriptions",
-			readAction: "read Twitch broadcaster subscriptions response",
-			endpoint:   "Get Broadcaster Subscriptions",
-
-			channelAPIReasons: map[int]twitch.ChannelAPIReason{
-				http.StatusUnauthorized: twitch.ChannelAPIMissingScope,
-			},
-		})
-	}
-
-	var decoded helixSubscriptionsResponse
-	if err := decodeJSONBody(resp.Body, maxResponseBodySize, &decoded); err != nil {
-		return twitch.SubscriptionsPage{}, credentialSafeUserError("decode Twitch broadcaster subscriptions response", err, c.token())
+		return twitch.SubscriptionsPage{}, err
 	}
 
 	return twitch.SubscriptionsPage(decoded), nil

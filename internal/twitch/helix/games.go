@@ -2,7 +2,6 @@ package helix
 
 import (
 	"context"
-	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -63,29 +62,13 @@ func (c *GamesClient) SearchCategories(ctx context.Context, query string, limit 
 	q.Set("first", strconv.Itoa(limit))
 	parsed.RawQuery = q.Encode()
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	decoded, err := getJSON[helixGamesResponse](ctx, c.transport, parsed.String(), errorLabels{
+		action:     "search Twitch categories",
+		readAction: "read Twitch category search response",
+		endpoint:   "Search Categories",
+	})
 	if err != nil {
-		return nil, credentialSafeUserError("create Twitch category search request", err, c.token())
-	}
-	c.setAuthHeaders(httpReq)
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, credentialSafeUserError("search Twitch categories", err, c.token())
-	}
-	defer resp.Body.Close()
-
-	if !isSuccess(resp) {
-		return nil, c.responseError(resp, errorLabels{
-			action:     "search Twitch categories",
-			readAction: "read Twitch category search response",
-			endpoint:   "Search Categories",
-		})
-	}
-
-	var decoded helixGamesResponse
-	if err := decodeJSONBody(resp.Body, maxResponseBodySize, &decoded); err != nil {
-		return nil, credentialSafeUserError("decode Twitch category search response", err, c.token())
+		return nil, err
 	}
 	games := make([]twitch.Game, 0, len(decoded.Data))
 	for _, item := range decoded.Data {

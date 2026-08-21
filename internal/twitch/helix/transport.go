@@ -2,6 +2,7 @@ package helix
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -163,3 +164,67 @@ type (
 	SubscriptionsClientConfig    = ClientConfig
 	UsersClientConfig            = ClientConfig
 )
+
+// getJSON performs one authenticated Helix GET and decodes the response.
+//
+// Every read-path adapter method ran this same sequence inline -- build the
+// request, send it, check the status, decode the body -- with four
+// credentialSafeUserError call sites apiece and eleven copies in total. The
+// adapters are now only what actually differs between them: the URL to call,
+// the labels to report a failure under, and mapping the decoded payload to a
+// domain type.
+//
+// It is generic over the wire type so the caller gets a decoded value rather
+// than passing a pointer into an out-parameter, which keeps the shape of every
+// adapter method the same.
+func getJSON[T any](ctx context.Context, t transport, endpoint string, labels errorLabels) (T, error) {
+	var decoded T
+
+	req, err := t.newGetRequest(ctx, endpoint, "create Twitch "+labels.subject()+" request")
+	if err != nil {
+		return decoded, err
+	}
+	resp, err := t.httpClient.Do(req)
+	if err != nil {
+		return decoded, credentialSafeUserError(labels.action, err, t.token())
+	}
+	defer resp.Body.Close()
+
+	if !isSuccess(resp) {
+		return decoded, t.responseError(resp, labels)
+	}
+	if err := decodeJSONBody(resp.Body, maxResponseBodySize, &decoded); err != nil {
+		return decoded, credentialSafeUserError("decode Twitch "+labels.subject()+" response", err, t.token())
+	}
+	return decoded, nil
+}
+
+// subject is the noun phrase shared by an endpoint's request and decode error
+// messages, taken from readAction, which reads "read Twitch <subject>
+// response". Deriving it keeps one label per endpoint rather than three that
+// have to be kept consistent by hand.
+func (l errorLabels) subject() string {
+	subject := strings.TrimPrefix(l.readAction, "read Twitch ")
+	return strings.TrimSuffix(subject, " response")
+}
+
+// credentialSafeUserError wraps err with a message safe to display.
+//
+// A cancelled or timed-out context is returned unchanged: that is the caller's
+// own doing, and wrapping it would hide the sentinel the caller checks for.
+// Everything else is redacted, because a Helix error body echoes back the
+// request that produced it -- which is where the credentials are.
+//
+// This lived in users.go, and chat_assets.go carried a byte-identical second
+// copy under a different name. It belongs with the rest of the shared
+// transport code, which is what every adapter reports errors through.
+func credentialSafeUserError(action string, err error, oauthToken string) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	credentials := twitch.TokenCredentials{OAuthToken: oauthToken}
+	return errors.New(action + ": " + redactCredentials(err.Error(), credentials))
+}

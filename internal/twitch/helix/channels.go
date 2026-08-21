@@ -49,24 +49,9 @@ func (c *ChannelsClient) GetChannelInformation(ctx context.Context, broadcasterI
 	if err != nil {
 		return twitch.ChannelInfo{}, credentialSafeUserError("create Twitch channel information request", err, c.token())
 	}
-	httpReq, err := c.newGetRequest(ctx, endpoint, "create Twitch channel information request")
+	decoded, err := getJSON[helixChannelsResponse](ctx, c.transport, endpoint, channelErrorLabels("get Twitch channel information", "Get Channel Information"))
 	if err != nil {
 		return twitch.ChannelInfo{}, err
-	}
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return twitch.ChannelInfo{}, credentialSafeUserError("get Twitch channel information", err, c.token())
-	}
-	defer resp.Body.Close()
-
-	if !isSuccess(resp) {
-		return twitch.ChannelInfo{}, c.responseError(resp, channelErrorLabels("get Twitch channel information", "Get Channel Information"))
-	}
-
-	var decoded helixChannelsResponse
-	if err := decodeJSONBody(resp.Body, maxResponseBodySize, &decoded); err != nil {
-		return twitch.ChannelInfo{}, credentialSafeUserError("decode Twitch channel information response", err, c.token())
 	}
 	if len(decoded.Data) == 0 {
 		return twitch.ChannelInfo{}, fmt.Errorf("get Twitch channel information: no channel found for broadcaster")
