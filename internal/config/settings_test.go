@@ -65,6 +65,15 @@ func TestEverySettingRoundTripsThroughAFile(t *testing.T) {
 			var cfg Config
 			s.apply(&cfg, sampleValueFor(s.key))
 			want := s.format(cfg)
+			// Guard against the test passing vacuously. A new bool or int
+			// setting that sampleValueFor does not know about gets a string
+			// its parser rejects, leaving the field at its zero value -- and
+			// the round-trip below then compares zero against zero and passes
+			// while proving nothing.
+			if want == s.format(Config{}) {
+				t.Fatalf("sampleValueFor(%q) does not change the setting from its zero value; "+
+					"add it to sampleValueFor's switch", s.key)
+			}
 
 			path := filepath.Join(t.TempDir(), "config.toml")
 			if err := os.WriteFile(path, []byte(s.key+" = "+want+"\n"), 0o600); err != nil {
@@ -93,6 +102,11 @@ func TestEverySettingReadsItsEnvironmentVariable(t *testing.T) {
 
 			var want Config
 			s.apply(&want, value)
+			// Same vacuity guard as the file round-trip above.
+			if s.format(want) == s.format(Config{}) {
+				t.Fatalf("sampleValueFor(%q) does not change the setting from its zero value; "+
+					"add it to sampleValueFor's switch", s.key)
+			}
 
 			var got Config
 			applyEnv(&got, []string{s.env + "=" + value})

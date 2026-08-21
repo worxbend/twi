@@ -164,3 +164,39 @@ func TestApplyMessageTrimsInactiveChannel(t *testing.T) {
 		t.Fatalf("oldest retained = %q, want %q", got, want)
 	}
 }
+
+// TestAppendStaticMessageTrimsTheActiveChannel covers the scrollback trim on
+// the path messages actually arrive by.
+//
+// channelStateSet.appendMessage trims the channel it routes to, and that is
+// covered. shellModel.appendStaticMessage trims separately, for the active
+// channel, and was covered by nothing: deleting its trimScrollback call left
+// the whole suite green. Retained messages are re-rendered on every repaint,
+// so an untrimmed active channel is the one that makes frame time grow without
+// bound over a long stream -- the exact case the trim exists for.
+func TestAppendStaticMessageTrimsTheActiveChannel(t *testing.T) {
+	const limit = 3
+	model := newMockModelWithClock("example", config.Config{}, nil)
+	model.channels = newChannelStateSet(
+		[]string{"example"}, animationConfigFor(model.animationMode), nil, limit)
+
+	for i := range 12 {
+		model.appendStaticMessage(twitch.ChatMessage{
+			ID:          fmt.Sprintf("m%d", i),
+			Channel:     "example",
+			AuthorLogin: "chatter",
+			Text:        fmt.Sprintf("message %d", i),
+		}, false)
+	}
+
+	got := model.activeChannelState().messages
+	if len(got) != limit {
+		t.Fatalf("retained %d messages, want the scrollback limit of %d", len(got), limit)
+	}
+	// Trimming drops from the head, keeping the newest history.
+	for i, want := range []string{"m9", "m10", "m11"} {
+		if got[i].ID != want {
+			t.Errorf("message %d = %q, want %q: trimming must keep the newest", i, got[i].ID, want)
+		}
+	}
+}

@@ -425,15 +425,16 @@ type fakeIRCSession struct {
 	token    string
 	channels []string
 
-	mu          sync.Mutex
-	connectErr  error
-	connects    int
-	disconnects int
-	onConnect   func()
-	says        []string
-	replies     []string
-	joined      []string
-	departed    []string
+	mu               sync.Mutex
+	connectErr       error
+	connects         int
+	disconnects      int
+	onConnect        func()
+	onPrivateMessage func(gempir.PrivateMessage)
+	says             []string
+	replies          []string
+	joined           []string
+	departed         []string
 }
 
 var _ chatSession = (*fakeIRCSession)(nil)
@@ -487,7 +488,22 @@ func (s *fakeIRCSession) OnConnect(callback func()) {
 	s.onConnect = callback
 }
 
-func (s *fakeIRCSession) OnPrivateMessage(func(gempir.PrivateMessage))       {}
+func (s *fakeIRCSession) OnPrivateMessage(callback func(gempir.PrivateMessage)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onPrivateMessage = callback
+}
+
+// deliverPrivateMessage drives the handler the client registered, standing in
+// for the library delivering a line off the socket.
+func (s *fakeIRCSession) deliverPrivateMessage(message gempir.PrivateMessage) {
+	s.mu.Lock()
+	callback := s.onPrivateMessage
+	s.mu.Unlock()
+	if callback != nil {
+		callback(message)
+	}
+}
 func (s *fakeIRCSession) OnNoticeMessage(func(gempir.NoticeMessage))         {}
 func (s *fakeIRCSession) OnUserNoticeMessage(func(gempir.UserNoticeMessage)) {}
 func (s *fakeIRCSession) OnRoomStateMessage(func(gempir.RoomStateMessage))   {}
@@ -838,5 +854,112 @@ func TestConnectLoopStopsOnceClosed(t *testing.T) {
 	}
 	if got := session.connectCalls(); got != 0 {
 		t.Errorf("Connect called %d times after Close, want 0: a connection was opened that nothing can close", got)
+	}
+}
+
+// TestEmitDropsOldestEventWhenTheConsumerFallsBehind covers the drop policy
+// that keeps the connection alive under load.
+//
+// The underlying library answers Twitch's PING from the same goroutine that
+// delivers messages. If emit ever blocked on a full channel, that goroutine
+// would stall, the PING would go unanswered, and Twitch would close the
+// connection -- so a busy channel with a slow consumer would drop the session
+// rather than a few lines. emit therefore discards the oldest buffered event
+// to make room, and counts what it discarded so the UI can say so.
+//
+// Neither half of that was covered: the drop, nor the counter.
+func TestEmitDropsOldestEventWhenTheConsumerFallsBehind(t *testing.T) {
+	oldNewSession := newSession
+	t.Cleanup(func() { newSession = oldNewSession })
+	session := &fakeIRCSession{}
+	newSession = func(string, string, []string) chatSession { return session }
+
+	client, err := NewClient(Config{
+		Username:   "viewer",
+		OAuthToken: "oauth:token",
+		Channels:   []string{"example"},
+		Buffer:     2,
+	})
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+	events, err := client.Connect(context.Background())
+	if err != nil {
+		t.Fatalf("Connect returned error: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	// Nothing reads events, so the buffer fills and then overflows.
+	const sent = 8
+	for i := range sent {
+		session.deliverPrivateMessage(gempir.PrivateMessage{
+			ID:      fmt.Sprintf("m%d", i),
+			Channel: "example",
+			Message: "hello",
+			User:    gempir.User{Name: "chatter"},
+		})
+	}
+
+	if got := client.DroppedEvents(); got == 0 {
+		t.Fatal("DroppedEvents() = 0 after overflowing the buffer, want the discarded events counted")
+	}
+	// The counter must reflect the overflow rather than every event.
+	if got := client.DroppedEvents(); got >= sent {
+		t.Errorf("DroppedEvents() = %d, want fewer than the %d sent: buffered events must not be counted as dropped", got, sent)
+	}
+	// The newest event survives: emit discards the oldest to make room.
+	drained := make([]twitch.Event, 0, 2)
+	for len(drained) < 2 {
+		select {
+		case event := <-events:
+			drained = append(drained, event)
+		case <-time.After(time.Second):
+			t.Fatalf("only drained %d events, want the buffer to still hold 2", len(drained))
+		}
+	}
+	newest := drained[len(drained)-1]
+	if newest.Message.ID != fmt.Sprintf("m%d", sent-1) {
+		t.Errorf("newest buffered event = %q, want the most recent message m%d", newest.Message.ID, sent-1)
+	}
+}
+
+// TestEmitDoesNotDropWhenTheConsumerKeepsUp is the negative case: a counter
+// that always incremented would pass the test above.
+func TestEmitDoesNotDropWhenTheConsumerKeepsUp(t *testing.T) {
+	oldNewSession := newSession
+	t.Cleanup(func() { newSession = oldNewSession })
+	session := &fakeIRCSession{}
+	newSession = func(string, string, []string) chatSession { return session }
+
+	client, err := NewClient(Config{
+		Username:   "viewer",
+		OAuthToken: "oauth:token",
+		Channels:   []string{"example"},
+		Buffer:     8,
+	})
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+	events, err := client.Connect(context.Background())
+	if err != nil {
+		t.Fatalf("Connect returned error: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	for i := range 4 {
+		session.deliverPrivateMessage(gempir.PrivateMessage{
+			ID:      fmt.Sprintf("m%d", i),
+			Channel: "example",
+			Message: "hello",
+			User:    gempir.User{Name: "chatter"},
+		})
+		select {
+		case <-events:
+		case <-time.After(time.Second):
+			t.Fatal("event was not delivered to a consumer that is keeping up")
+		}
+	}
+	if got := client.DroppedEvents(); got != 0 {
+		t.Errorf("DroppedEvents() = %d, want 0 when the consumer keeps up", got)
 	}
 }
