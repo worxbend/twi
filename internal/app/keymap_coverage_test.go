@@ -8,6 +8,19 @@ import (
 	"testing"
 )
 
+// bindingForKeys finds an entry of the keyBindings table by its Keys value -
+// the exact string the table uses, such as "ctrl+e" or "1-4". It lives here
+// because the coverage tests below are the only thing that looks a binding up
+// this way; the shell itself dispatches on the key, never on the table.
+func bindingForKeys(keys string) (keyBinding, bool) {
+	for _, binding := range keyBindings {
+		if binding.Keys == keys {
+			return binding, true
+		}
+	}
+	return keyBinding{}, false
+}
+
 // ctrlKeyPattern finds the tea.KeyCtrlX constants the model actually handles.
 var ctrlKeyPattern = regexp.MustCompile(`tea\.KeyCtrl([A-Z])\b`)
 

@@ -6,7 +6,179 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/rivo/uniseg"
+	"github.com/worxbend/twi/internal/twitch"
 )
+
+// handleMouse is the entry point for every mouse event the terminal reports.
+// It scrolls chat on a wheel event and otherwise routes a left-button press
+// through the regions of the screen in the order they are stacked, from the
+// overlay on top down to the chat pane behind it.
+func (m *shellModel) handleMouse(msg tea.MouseMsg) (shellModel, tea.Cmd) {
+	if !m.mouseEnabled {
+		return *m, nil
+	}
+
+	layout := m.layout()
+	event := tea.MouseEvent(msg)
+	if m.mouseInChatRegion(event, layout) && !m.anyOverlayOpen() {
+		switch {
+		case isMouseWheelUp(event):
+			m.scrollBy(3)
+			return *m, nil
+		case isMouseWheelDown(event):
+			m.scrollBy(-3)
+			return *m, nil
+		}
+	}
+
+	if !isMouseLeftPress(event) {
+		return *m, nil
+	}
+
+	// An open overlay covers the composer and part of chat, so it gets first
+	// refusal on every click; anything landing outside it dismisses nothing
+	// and falls through to the regions still visible above.
+	if model, cmd, handled := m.handleOverlayMouse(event, layout); handled {
+		return model, cmd
+	}
+	if tab, ok := m.tabAtMouse(event, layout); ok {
+		return m.switchToTab(tab)
+	}
+	if index, closeHit, ok := m.sidebarRowAtMouse(event, layout); ok {
+		state := m.channels.states[m.channels.order[index]]
+		if state == nil {
+			return *m, nil
+		}
+		if closeHit {
+			return m.closeChannel(state.name)
+		}
+		m.focus = focusSidebar
+		m.panes.sidebarSelected = index
+		if m.channels.setActive(state.name) {
+			m.clampScroll()
+			return m.withAsyncAssetCommands(nil)
+		}
+		return *m, nil
+	}
+	if m.mouseInComposer(event, layout) {
+		m.focus = focusComposer
+		return *m, nil
+	}
+	if message, ok := m.messageAtMouse(event, layout); ok {
+		m.focus = focusChat
+		m.activeChannelState().replyTo = replyContextFromMessage(message)
+		return *m, nil
+	}
+	if m.mouseInChatRegion(event, layout) {
+		m.focus = focusChat
+	}
+	return *m, nil
+}
+
+// isMouseWheelUp reports whether the event is one notch of the wheel away
+// from the newest message.
+func isMouseWheelUp(event tea.MouseEvent) bool {
+	return event.Button == tea.MouseButtonWheelUp
+}
+
+// isMouseWheelDown reports whether the event is one notch of the wheel back
+// towards the newest message.
+func isMouseWheelDown(event tea.MouseEvent) bool {
+	return event.Button == tea.MouseButtonWheelDown
+}
+
+// isMouseLeftPress reports whether the event is the primary button going
+// down. Releases and drags are ignored so that one click acts once.
+func isMouseLeftPress(event tea.MouseEvent) bool {
+	return event.Button == tea.MouseButtonLeft && event.Action == tea.MouseActionPress
+}
+
+// mouseInChatRegion reports whether the cursor is inside the chat pane,
+// borders included.
+func (m shellModel) mouseInChatRegion(event tea.MouseEvent, layout shellLayout) bool {
+	chatTop := layout.tabBarHeight + layout.statusHeight
+	chatLeft := layout.sidebarWidth
+	chatRight := layout.sidebarWidth + layout.chatWidth
+	return event.X >= chatLeft &&
+		event.X < chatRight &&
+		event.Y >= chatTop &&
+		event.Y < chatTop+layout.chatHeight
+}
+
+// mouseInComposer reports whether the cursor is inside the composer strip at
+// the bottom of the window. The composer spans the full width, so only the
+// row really decides.
+func (m shellModel) mouseInComposer(event tea.MouseEvent, layout shellLayout) bool {
+	composerTop := layout.tabBarHeight + layout.statusHeight + layout.chatHeight
+	return event.X >= 0 &&
+		event.X < layout.width &&
+		event.Y >= composerTop &&
+		event.Y < composerTop+layout.composerHeight
+}
+
+// messageAtMouse resolves the chat message drawn under the cursor, if any.
+// Clicks on the pane border, on a group separator, or below the last message
+// resolve to nothing.
+func (m shellModel) messageAtMouse(event tea.MouseEvent, layout shellLayout) (twitch.ChatMessage, bool) {
+	if !m.mouseInChatRegion(event, layout) || layout.chatContentHeight <= 0 {
+		return twitch.ChatMessage{}, false
+	}
+	chatTop := layout.tabBarHeight + layout.statusHeight
+	contentTop := chatTop
+	if layout.chatFramed {
+		contentTop++
+	}
+	contentRow := event.Y - contentTop
+	if contentRow < 0 || contentRow >= layout.chatContentHeight {
+		return twitch.ChatMessage{}, false
+	}
+	return m.messageAtVisibleChatRow(layout, contentRow)
+}
+
+// messageAtVisibleChatRow maps a row of chat content - counted from the top
+// of the visible area, not from the top of the history - back to the message
+// that produced it. It replays the same windowing arithmetic the renderer
+// uses, so the hit boxes cannot drift from what is drawn.
+func (m shellModel) messageAtVisibleChatRow(layout shellLayout, contentRow int) (twitch.ChatMessage, bool) {
+	active := m.activeChannelState()
+	blocks := m.visibleChatRowBlocks(layout)
+	totalRows := chatRowBlockCount(blocks)
+
+	start := totalRows - layout.chatContentHeight - active.scrollOffset
+	if start < 0 {
+		start = 0
+	}
+	target := start + contentRow
+	if target < 0 || target >= totalRows {
+		return twitch.ChatMessage{}, false
+	}
+
+	cursor := 0
+	for _, block := range blocks {
+		if block.separatorBefore {
+			if target == cursor {
+				return twitch.ChatMessage{}, false
+			}
+			cursor++
+		}
+		next := cursor + chatRowBlockRowCount(block)
+		if target >= cursor && target < next {
+			return selectableMessage(block.message)
+		}
+		cursor = next
+	}
+	return twitch.ChatMessage{}, false
+}
+
+// selectableMessage filters out messages that cannot be acted on. A message
+// with no ID (a locally generated notice, for example) can be neither replied
+// to nor inspected, so a click on it selects nothing.
+func selectableMessage(message twitch.ChatMessage) (twitch.ChatMessage, bool) {
+	if strings.TrimSpace(message.ID) == "" {
+		return twitch.ChatMessage{}, false
+	}
+	return message, true
+}
 
 // tabAtMouse resolves which tab-bar entry sits under the cursor by rebuilding
 // the same label run tabBarTabs renders, so the hit boxes cannot drift from

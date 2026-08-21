@@ -349,44 +349,6 @@ type composerReplyContext struct {
 	Text      string
 }
 
-type shellLayout struct {
-	width                       int
-	tabBarHeight                int
-	statusHeight                int
-	chatHeight                  int
-	chatContentHeight           int
-	chatFramed                  bool
-	chatWidth                   int
-	sidebarWidth                int
-	sidebarContentHeight        int
-	activityWidth               int
-	activityContentHeight       int
-	inspectHeight               int
-	inspectContentHeight        int
-	inspectFramed               bool
-	paletteHeight               int
-	paletteContentHeight        int
-	paletteFramed               bool
-	emotePickerHeight           int
-	emotePickerContentHeight    int
-	emotePickerFramed           bool
-	channelPickerHeight         int
-	channelPickerContentHeight  int
-	channelPickerFramed         bool
-	categoryPickerHeight        int
-	categoryPickerContentHeight int
-	categoryPickerFramed        bool
-	streamInfoHeight            int
-	streamInfoContentHeight     int
-	streamInfoFramed            bool
-	miscHeight                  int
-	miscContentHeight           int
-	miscFramed                  bool
-	composerHeight              int
-	composerFramed              bool
-	helpHeight                  int
-}
-
 type chatRowBlock struct {
 	message         twitch.ChatMessage
 	rows            []render.Row
@@ -604,27 +566,72 @@ func (m shellModel) Init() tea.Cmd {
 	)
 }
 
+// Update is Bubble Tea's single entry point for everything that happens to
+// the shell: a keypress, a mouse click, a resize, chat arriving, a timer
+// firing, or a background request finishing.
+//
+// Each family of messages has its own handler below, and each handler reports
+// whether it recognised the message. No two of them claim the same concrete
+// message type, so the order they are tried in is only about readability -
+// it cannot change which handler runs.
 func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if model, cmd, handled := m.updateTerminalEvent(msg); handled {
+		return model, cmd
+	}
+	if model, cmd, handled := m.updateChatStream(msg); handled {
+		return model, cmd
+	}
+	if model, cmd, handled := m.updateTimers(msg); handled {
+		return model, cmd
+	}
+	if model, cmd, handled := m.updateAsyncResults(msg); handled {
+		return model, cmd
+	}
+	return m, nil
+}
+
+// updateTerminalEvent handles what the terminal itself reports: keys, mouse
+// activity, resizes, and the window gaining or losing focus.
+func (m *shellModel) updateTerminalEvent(msg tea.Msg) (shellModel, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		return m.handleKey(msg)
+		model, cmd := m.handleKey(msg)
+		return model, cmd, true
 	case tea.MouseMsg:
 		// The theme page and category picker own the whole screen, so a
 		// click has nothing to hit outside them.
 		if m.themeSettings.open || m.categoryPicker.open {
-			return m, nil
+			return *m, nil, true
 		}
-		return m.handleMouse(msg)
+		model, cmd := m.handleMouse(msg)
+		return model, cmd, true
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		m.refreshActiveRevealRows()
 		m.clampScroll()
-		return m.withAsyncAssetCommands(nil)
+		model, cmd := m.withAsyncAssetCommands(nil)
+		return model, cmd, true
 	case tea.FocusMsg:
 		m.terminalFocused = true
+		return *m, nil, true
 	case tea.BlurMsg:
 		m.terminalFocused = false
+		return *m, nil, true
+	}
+	return *m, nil, false
+}
+
+// updateChatStream handles chat arriving from the connected client - or from
+// the mock source the demo and the tests use - together with the connection,
+// membership, user-state, and moderation events that travel beside it.
+//
+// Every one of these messages is delivered by a command that read a single
+// value off a channel, so each handler asks for the next read and the stream
+// keeps flowing. An ok of false means that channel closed and there is
+// nothing further to listen for.
+func (m *shellModel) updateChatStream(msg tea.Msg) (shellModel, tea.Cmd, bool) {
+	switch msg := msg.(type) {
 	case mockIncomingMessageMsg:
 		var cmds []tea.Cmd
 		if msg.scheduled && msg.index == m.nextIncoming {
@@ -633,104 +640,96 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, m.ingestMessage(msg.message)...)
 		m.clampScroll()
-		return m.withAsyncAssetCommands(cmds...)
+		model, cmd := m.withAsyncAssetCommands(cmds...)
+		return model, cmd, true
 	case chatClientMessageMsg:
 		if !msg.ok {
-			m.channels.applyConnectionState(ConnectionState{
-				Status:  ConnectionDisconnected,
-				Channel: m.activeChannelName(),
-				Detail:  "chat message stream closed",
-				At:      time.Now(),
-			})
-			m.debugConnectionState("app.message_stream.closed", m.activeChannelState().status)
-			return m, nil
+			m.markStreamClosed("app.message_stream.closed", "chat message stream closed")
+			return *m, nil, true
 		}
 		m.debugChatMessage("app.message.received", msg.message)
 		cmds := m.ingestMessage(msg.message)
 		cmds = append(cmds, m.nextClientMessageCommand())
 		m.clampScroll()
-		return m.withAsyncAssetCommands(cmds...)
+		model, cmd := m.withAsyncAssetCommands(cmds...)
+		return model, cmd, true
 	case chatClientConnectionStateMsg:
 		if !msg.ok {
+			// A stream that closes after a deliberate disconnect is
+			// expected, and the status already says so, so only an
+			// unexpected close is worth reporting.
 			if m.activeChannelState().status.Status != ConnectionClosed {
-				m.channels.applyConnectionState(ConnectionState{
-					Status:  ConnectionDisconnected,
-					Channel: m.activeChannelName(),
-					Detail:  "connection state stream closed",
-					At:      time.Now(),
-				})
-				m.debugConnectionState("app.connection_stream.closed", m.activeChannelState().status)
+				m.markStreamClosed("app.connection_stream.closed", "connection state stream closed")
 			}
-			return m, nil
+			return *m, nil, true
 		}
 		m.channels.applyConnectionState(msg.state)
 		m.debugConnectionState("app.connection_state.received", msg.state)
-		return m, m.nextConnectionStateCommand()
+		cmd := m.nextConnectionStateCommand()
+		return *m, cmd, true
 	case chatClientMembershipMsg:
 		// A closed membership stream is not a chat failure: Twitch simply
 		// stops sending membership for busy channels. Stop listening and
 		// leave the roster on its message-recency fallback.
 		if !msg.ok {
-			return m, nil
+			return *m, nil, true
 		}
 		m.applyMembershipEvent(msg.membership)
-		return m, m.nextClientMembershipCommand()
+		cmd := m.nextClientMembershipCommand()
+		return *m, cmd, true
 	case chatClientUserStateMsg:
 		if !msg.ok {
-			return m, nil
+			return *m, nil, true
 		}
 		m.applyUserState(msg.state)
-		return m, m.nextClientUserStateCommand()
+		cmd := m.nextClientUserStateCommand()
+		return *m, cmd, true
 	case chatClientModerationMsg:
 		if !msg.ok {
-			return m, nil
+			return *m, nil, true
 		}
 		m.applyModeration(msg.event)
-		return m, m.nextClientModerationCommand()
-	case composerSendCompletedMsg:
-		return m.completeComposerSend(msg)
-	case reconnectCompletedMsg:
-		m.completeReconnect(msg)
+		cmd := m.nextClientModerationCommand()
+		return *m, cmd, true
+	}
+	return *m, nil, false
+}
+
+// markStreamClosed records that one of the background streams feeding the
+// shell has ended. Nothing can be reconnected from here, so it updates the
+// connection status the header shows and writes one debug line naming which
+// stream stopped: event is the name that line is filed under, detail is the
+// wording the user sees.
+func (m *shellModel) markStreamClosed(event, detail string) {
+	m.channels.applyConnectionState(ConnectionState{
+		Status:  ConnectionDisconnected,
+		Channel: m.activeChannelName(),
+		Detail:  detail,
+		At:      time.Now(),
+	})
+	m.debugConnectionState(event, m.activeChannelState().status)
+}
+
+// updateTimers handles the repeating ticks that move the shell forward on
+// their own: the animation clock, the per-character message reveal, and the
+// polls that refresh stream status and channel metrics. Each tick clears the
+// "already scheduled" flag it was armed with and asks for the next one, so
+// only ever one timer of each kind is in flight.
+func (m *shellModel) updateTimers(msg tea.Msg) (shellModel, tea.Cmd, bool) {
+	switch msg := msg.(type) {
 	case animation.FrameMsg:
 		m.frames.frameTickScheduled = false
 		m.advanceFrame(msg.At)
-		return m, m.scheduleFrameTick()
+		cmd := m.scheduleFrameTick()
+		return *m, cmd, true
 	case streamStatusTickMsg:
 		m.streamStatusTickScheduled = false
-		return m, tea.Batch(m.resolveStreamStatusCommand(), m.scheduleStreamStatusTick())
-	case streamStatusResolvedMsg:
-		if msg.err == nil {
-			m.applyStreamStatusResults(msg.results)
-		}
-		return m, nil
+		cmd := tea.Batch(m.resolveStreamStatusCommand(), m.scheduleStreamStatusTick())
+		return *m, cmd, true
 	case channelMetricsTickMsg:
 		m.metrics.channelMetricsTickScheduled = false
-		return m, tea.Batch(m.resolveChannelMetricsCommand(), m.scheduleChannelMetricsTick())
-	case channelMetricsResolvedMsg:
-		return m.applyChannelMetrics(msg), nil
-	case broadcasterIDResolvedMsg:
-		m.applyBroadcasterIDResult(msg)
-		return m.withAsyncAssetCommands(nil)
-	case emoteIndexResolvedMsg:
-		m.applyEmoteIndexResult(msg)
-		return m, nil
-	case followedChannelsResolvedMsg:
-		m.applyFollowedChannels(msg)
-		return m, nil
-	case streamInfoLoadedMsg:
-		return m.applyStreamInfoLoaded(msg), nil
-	case streamInfoSavedMsg:
-		return m.applyStreamInfoSaved(msg), nil
-	case categoryPickerDebounceMsg:
-		return m.applyCategoryPickerDebounce(msg)
-	case categoryPickerResultsMsg:
-		return m.applyCategoryPickerResults(msg), nil
-	case miscMarkersLoadedMsg:
-		return m.applyMiscLoaded(msg), nil
-	case miscMarkerCreatedMsg:
-		return m.applyMiscMarkerCreated(msg), nil
-	case clipCreatedMsg:
-		return m.applyClipCreated(msg), nil
+		cmd := tea.Batch(m.resolveChannelMetricsCommand(), m.scheduleChannelMetricsTick())
+		return *m, cmd, true
 	case mockAnimationTickMsg:
 		m.frames.revealTickScheduled = false
 		active := m.activeChannelState()
@@ -738,13 +737,65 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.completeReveals(result.Completed)
 		m.clampScroll()
 		if active.revealQueue.Len() > 0 {
-			return m, m.scheduleRevealTick()
+			cmd := m.scheduleRevealTick()
+			return *m, cmd, true
 		}
 		if result.Changed {
-			return m.withAsyncAssetCommands(nil)
+			model, cmd := m.withAsyncAssetCommands(nil)
+			return model, cmd, true
 		}
+		return *m, nil, true
 	}
-	return m, nil
+	return *m, nil, false
+}
+
+// updateAsyncResults handles the answers to work the shell started earlier
+// and did not wait for: a chat message finishing its trip to Twitch, a
+// reconnect completing, and the API lookups behind stream status, channel
+// metrics, emotes, clips, followed channels, and the stream-info and
+// category editors.
+func (m *shellModel) updateAsyncResults(msg tea.Msg) (shellModel, tea.Cmd, bool) {
+	switch msg := msg.(type) {
+	case composerSendCompletedMsg:
+		model, cmd := m.completeComposerSend(msg)
+		return model, cmd, true
+	case reconnectCompletedMsg:
+		m.completeReconnect(msg)
+		return *m, nil, true
+	case streamStatusResolvedMsg:
+		if msg.err == nil {
+			m.applyStreamStatusResults(msg.results)
+		}
+		return *m, nil, true
+	case channelMetricsResolvedMsg:
+		return m.applyChannelMetrics(msg), nil, true
+	case broadcasterIDResolvedMsg:
+		m.applyBroadcasterIDResult(msg)
+		model, cmd := m.withAsyncAssetCommands(nil)
+		return model, cmd, true
+	case emoteIndexResolvedMsg:
+		m.applyEmoteIndexResult(msg)
+		return *m, nil, true
+	case followedChannelsResolvedMsg:
+		m.applyFollowedChannels(msg)
+		return *m, nil, true
+	case streamInfoLoadedMsg:
+		return m.applyStreamInfoLoaded(msg), nil, true
+	case streamInfoSavedMsg:
+		return m.applyStreamInfoSaved(msg), nil, true
+	case categoryPickerDebounceMsg:
+		model, cmd := m.applyCategoryPickerDebounce(msg)
+		return model, cmd, true
+	case categoryPickerResultsMsg:
+		return m.applyCategoryPickerResults(msg), nil, true
+	case miscMarkersLoadedMsg:
+		return m.applyMiscLoaded(msg), nil, true
+	case miscMarkerCreatedMsg:
+		return m.applyMiscMarkerCreated(msg), nil, true
+	case clipCreatedMsg:
+		return m.applyClipCreated(msg), nil, true
+	}
+	return *m, nil, false
 }
 
 // handleKey routes one keypress.
@@ -1812,278 +1863,6 @@ func backgroundStyledLine(text string, background string) string {
 	return lipgloss.NewStyle().Background(lipgloss.Color(background)).Render(text)
 }
 
-func (m shellModel) layout() shellLayout {
-	width := clampMin(m.width, 1)
-	height := clampMin(m.height, 1)
-	layout := shellLayout{
-		width:        width,
-		chatWidth:    width,
-		tabBarHeight: 1,
-		statusHeight: 1,
-		helpHeight:   1,
-	}
-	if height == 1 {
-		layout.tabBarHeight = 0
-		layout.helpHeight = 0
-		return layout
-	}
-
-	if m.helpExpanded {
-		// The expanded help has four lines; taller terminals show all of
-		// them, shorter ones keep the most important prefix.
-		switch {
-		case height >= 18:
-			layout.helpHeight = 4
-		case height >= 14:
-			layout.helpHeight = 3
-		case height >= 10:
-			layout.helpHeight = 2
-		}
-	}
-
-	onStreamInfo := m.activeTab == tabStreamInfo
-	onMisc := m.activeTab == tabMisc
-
-	if !onStreamInfo && !onMisc {
-		layout.composerHeight = 4
-		if m.activeChannelState().replyTo != nil {
-			layout.composerHeight++
-		}
-		layout.composerFramed = width >= 8
-		if height < 10 {
-			layout.composerHeight = 3
-		}
-	}
-
-	remaining := height - layout.tabBarHeight - layout.statusHeight - layout.helpHeight - layout.composerHeight
-	if remaining < 3 && layout.composerHeight > 3 {
-		layout.composerHeight = 3
-		remaining = height - layout.tabBarHeight - layout.statusHeight - layout.helpHeight - layout.composerHeight
-	}
-	if remaining < 1 && layout.helpHeight > 0 {
-		layout.helpHeight = 0
-		remaining = height - layout.tabBarHeight - layout.statusHeight - layout.composerHeight
-	}
-	if remaining < 1 && layout.composerHeight > 0 {
-		layout.composerHeight = clampMin(height-layout.tabBarHeight-layout.statusHeight, 0)
-		layout.composerFramed = layout.composerHeight >= 3 && width >= 8
-		remaining = height - layout.tabBarHeight - layout.statusHeight - layout.composerHeight
-	}
-
-	// The overlay panes -- command palette, inspector, emote picker, channel
-	// picker, category picker -- all occupy the same strip above the composer,
-	// so at most one is ever sized. This switch is what decides which one wins
-	// when several are somehow open at once; the order of the cases is that
-	// priority. It replaces a chain of conditions in which each pane repeated
-	// the negation of every pane above it, where adding a sixth overlay meant
-	// correctly editing all five conditions before it.
-	if remaining >= 4 {
-		switch {
-		case m.palette.open:
-			pane := sizeOverlayPane(remaining, height, width, 7)
-			layout.paletteHeight = pane.height
-			layout.paletteFramed = pane.framed
-			layout.paletteContentHeight = pane.contentHeight
-			remaining -= pane.height
-		case m.inspectOpen:
-			pane := sizeOverlayPane(remaining, height, width, 7)
-			layout.inspectHeight = pane.height
-			layout.inspectFramed = pane.framed
-			layout.inspectContentHeight = pane.contentHeight
-			remaining -= pane.height
-		case m.emotePicker.open:
-			pane := sizeOverlayPane(remaining, height, width, 7)
-			layout.emotePickerHeight = pane.height
-			layout.emotePickerFramed = pane.framed
-			layout.emotePickerContentHeight = pane.contentHeight
-			remaining -= pane.height
-		case m.channelPicker.open:
-			// The channel picker lists channels rather than a few commands,
-			// so it takes two extra rows where the terminal can spare them.
-			pane := sizeOverlayPane(remaining, height, width, 9)
-			layout.channelPickerHeight = pane.height
-			layout.channelPickerFramed = pane.framed
-			layout.channelPickerContentHeight = pane.contentHeight
-			remaining -= pane.height
-		case m.categoryPicker.open:
-			pane := sizeOverlayPane(remaining, height, width, 7)
-			layout.categoryPickerHeight = pane.height
-			layout.categoryPickerFramed = pane.framed
-			layout.categoryPickerContentHeight = pane.contentHeight
-			remaining -= pane.height
-		}
-	}
-
-	layout.chatHeight = clampMin(remaining, 0)
-	layout.sidebarWidth = m.sidebarWidth(width, layout.chatHeight)
-	layout.activityWidth = m.activityWidthFor(width, layout.chatHeight)
-	layout.chatWidth = clampMin(width-layout.sidebarWidth-layout.activityWidth, 1)
-	layout.chatFramed = layout.chatHeight >= 3 && width >= 5
-	layout.applyChatContentHeights()
-
-	used := layout.tabBarHeight + layout.statusHeight + layout.chatHeight + layout.paletteHeight + layout.inspectHeight + layout.emotePickerHeight + layout.channelPickerHeight + layout.categoryPickerHeight + layout.composerHeight + layout.helpHeight
-	if used < height {
-		layout.chatHeight += height - used
-		layout.applyChatContentHeights()
-	}
-
-	switch {
-	case onStreamInfo:
-		body := layout.takeBodyFromChat(width)
-		layout.streamInfoHeight = body.height
-		layout.streamInfoContentHeight = body.contentHeight
-		layout.streamInfoFramed = body.framed
-	case onMisc:
-		body := layout.takeBodyFromChat(width)
-		layout.miscHeight = body.height
-		layout.miscContentHeight = body.contentHeight
-		layout.miscFramed = body.framed
-	}
-
-	return layout
-}
-
-// applyChatContentHeights recomputes every row count that follows from
-// chatHeight: the chat pane's own content rows, and the sidebar and activity
-// columns standing beside it. Call it again whenever chatHeight changes.
-func (l *shellLayout) applyChatContentHeights() {
-	l.chatContentHeight = l.chatHeight
-	if l.chatFramed {
-		l.chatContentHeight = l.chatHeight - 2
-	}
-	l.chatContentHeight = clampMin(l.chatContentHeight, 0)
-	l.sidebarContentHeight = clampMin(l.chatHeight-2, 0)
-	l.activityContentHeight = l.sidebarContentHeight
-}
-
-// bodyPane is the geometry of whatever pane occupies the body of the window
-// between the tab bar and the composer.
-type bodyPane struct {
-	height        int
-	contentHeight int
-	framed        bool
-}
-
-// takeBodyFromChat hands the chat pane's geometry to a tab that draws across
-// the full width of the body -- Stream Info and Misc -- and clears the chat
-// pane along with the sidebar and activity columns, none of which those tabs
-// show. It returns the geometry the calling tab has just taken over.
-func (l *shellLayout) takeBodyFromChat(width int) bodyPane {
-	body := bodyPane{
-		height:        l.chatHeight,
-		contentHeight: l.chatContentHeight,
-		framed:        l.chatFramed,
-	}
-	l.sidebarWidth = 0
-	l.activityWidth = 0
-	l.chatWidth = width
-	l.sidebarContentHeight = 0
-	l.activityContentHeight = 0
-	l.chatHeight = 0
-	l.chatContentHeight = 0
-	l.chatFramed = false
-	return body
-}
-
-// overlayPaneSize is the vertical geometry of one overlay pane: how many
-// rows it occupies, whether it is drawn with a border, and how many rows are
-// left for its contents once that border is accounted for.
-type overlayPaneSize struct {
-	height        int
-	framed        bool
-	contentHeight int
-}
-
-// sizeOverlayPane sizes one of the overlay panes that share the strip above
-// the composer.
-//
-// remaining is the rows still unclaimed by the panes around it, height and
-// width are the terminal's, and tallHeight is the size the pane grows to when
-// the terminal is tall enough to afford it. The pane always leaves at least
-// one row for the chat behind it, and collapses to nothing rather than
-// rendering shorter than the three rows a bordered pane needs.
-func sizeOverlayPane(remaining, height, width, tallHeight int) overlayPaneSize {
-	paneHeight := 5
-	if height >= 18 {
-		paneHeight = tallHeight
-	}
-	if paneHeight > remaining-1 {
-		paneHeight = remaining - 1
-	}
-	if paneHeight < 3 {
-		paneHeight = 0
-	}
-	pane := overlayPaneSize{
-		height:        paneHeight,
-		framed:        paneHeight >= 3 && width >= 5,
-		contentHeight: paneHeight,
-	}
-	if pane.framed {
-		pane.contentHeight = paneHeight - 2
-	}
-	return pane
-}
-
-func (m shellModel) sidebarWidth(width, chatHeight int) int {
-	if !m.sidebarVisibleFor(width, chatHeight) {
-		return 0
-	}
-	fallback := sidebarNormalSize
-	if width >= 112 {
-		fallback = sidebarWideSize
-	}
-	// The activity column is measured first and passed in as the competing
-	// pane, so the two can never together starve chat.
-	return paneWidthOrDefault(
-		m.panes.sidebarWidthOverride, fallback,
-		sidebarMinSize, sidebarMaxSize,
-		width, m.activityWidthFor(width, chatHeight),
-	)
-}
-
-// activityWidthFor decides the right-hand activity log column's width.
-// Unlike the left channel sidebar, it doesn't need multiple channels to be
-// useful (raids/subs/new followers matter even with one channel open), so
-// it's gated only on having enough width and chat vertical room.
-func (m shellModel) activityWidthFor(width, chatHeight int) int {
-	if !m.activityVisibleFor(width, chatHeight) {
-		return 0
-	}
-	fallback := activityLogNormalSize
-	if width >= 140 {
-		fallback = activityLogWideSize
-	}
-	return paneWidthOrDefault(
-		m.panes.activityWidthOverride, fallback,
-		activityMinSize, activityMaxSize,
-		width, 0,
-	)
-}
-
-func (m shellModel) chatRowWidth(layout shellLayout) int {
-	rowWidth := layout.chatWidth
-	if layout.chatFramed {
-		rowWidth = layout.chatWidth - 4
-	}
-	return clampMin(rowWidth, 1)
-}
-
-func (m shellModel) chatMessageContentWidth(layout shellLayout) int {
-	rowWidth := m.chatRowWidth(layout)
-	return clampMin(rowWidth-messageGutterWidth(rowWidth), 1)
-}
-
-func messageGutterWidth(rowWidth int) int {
-	switch {
-	case rowWidth >= 24:
-		return 4
-	case rowWidth >= 12:
-		return 2
-	default:
-		return 0
-	}
-}
-
 func (m shellModel) messageRowString(block chatRowBlock, blockIndex, rowIndex int, row render.Row, rowWidth int) string {
 	gutterWidth := messageGutterWidth(rowWidth)
 	background := m.messageGroupBackground(block, blockIndex)
@@ -2244,172 +2023,6 @@ func (m *shellModel) scrollBy(delta int) {
 	m.clampScroll()
 }
 
-func (m *shellModel) handleMouse(msg tea.MouseMsg) (shellModel, tea.Cmd) {
-	if !m.mouseEnabled {
-		return *m, nil
-	}
-
-	layout := m.layout()
-	event := tea.MouseEvent(msg)
-	if m.mouseInChatRegion(event, layout) && !m.anyOverlayOpen() {
-		switch {
-		case isMouseWheelUp(event):
-			m.scrollBy(3)
-			return *m, nil
-		case isMouseWheelDown(event):
-			m.scrollBy(-3)
-			return *m, nil
-		}
-	}
-
-	if !isMouseLeftPress(event) {
-		return *m, nil
-	}
-
-	// An open overlay covers the composer and part of chat, so it gets first
-	// refusal on every click; anything landing outside it dismisses nothing
-	// and falls through to the regions still visible above.
-	if model, cmd, handled := m.handleOverlayMouse(event, layout); handled {
-		return model, cmd
-	}
-	if tab, ok := m.tabAtMouse(event, layout); ok {
-		return m.switchToTab(tab)
-	}
-	if index, closeHit, ok := m.sidebarRowAtMouse(event, layout); ok {
-		state := m.channels.states[m.channels.order[index]]
-		if state == nil {
-			return *m, nil
-		}
-		if closeHit {
-			return m.closeChannel(state.name)
-		}
-		m.focus = focusSidebar
-		m.panes.sidebarSelected = index
-		if m.channels.setActive(state.name) {
-			m.clampScroll()
-			return m.withAsyncAssetCommands(nil)
-		}
-		return *m, nil
-	}
-	if m.mouseInComposer(event, layout) {
-		m.focus = focusComposer
-		return *m, nil
-	}
-	if message, ok := m.messageAtMouse(event, layout); ok {
-		m.focus = focusChat
-		m.activeChannelState().replyTo = replyContextFromMessage(message)
-		return *m, nil
-	}
-	if m.mouseInChatRegion(event, layout) {
-		m.focus = focusChat
-	}
-	return *m, nil
-}
-
-func isMouseWheelUp(event tea.MouseEvent) bool {
-	return event.Button == tea.MouseButtonWheelUp
-}
-
-func isMouseWheelDown(event tea.MouseEvent) bool {
-	return event.Button == tea.MouseButtonWheelDown
-}
-
-func isMouseLeftPress(event tea.MouseEvent) bool {
-	return event.Button == tea.MouseButtonLeft && event.Action == tea.MouseActionPress
-}
-
-func (m shellModel) mouseInChatRegion(event tea.MouseEvent, layout shellLayout) bool {
-	chatTop := layout.tabBarHeight + layout.statusHeight
-	chatLeft := layout.sidebarWidth
-	chatRight := layout.sidebarWidth + layout.chatWidth
-	return event.X >= chatLeft &&
-		event.X < chatRight &&
-		event.Y >= chatTop &&
-		event.Y < chatTop+layout.chatHeight
-}
-
-func (m shellModel) mouseInComposer(event tea.MouseEvent, layout shellLayout) bool {
-	composerTop := layout.tabBarHeight + layout.statusHeight + layout.chatHeight
-	return event.X >= 0 &&
-		event.X < layout.width &&
-		event.Y >= composerTop &&
-		event.Y < composerTop+layout.composerHeight
-}
-
-func (m shellModel) channelAtMouse(event tea.MouseEvent, layout shellLayout) (string, bool) {
-	if layout.sidebarWidth <= 0 || event.X < 0 || event.X >= layout.sidebarWidth {
-		return "", false
-	}
-	chatTop := layout.tabBarHeight + layout.statusHeight
-	if event.Y < chatTop+1 || event.Y >= chatTop+layout.chatHeight-1 {
-		return "", false
-	}
-	contentRow := event.Y - chatTop - 1
-	channelIndex := contentRow
-	if channelIndex < 0 || channelIndex >= len(m.channels.order) {
-		return "", false
-	}
-	state := m.channels.states[m.channels.order[channelIndex]]
-	if state == nil {
-		return "", false
-	}
-	return state.name, true
-}
-
-func (m shellModel) messageAtMouse(event tea.MouseEvent, layout shellLayout) (twitch.ChatMessage, bool) {
-	if !m.mouseInChatRegion(event, layout) || layout.chatContentHeight <= 0 {
-		return twitch.ChatMessage{}, false
-	}
-	chatTop := layout.tabBarHeight + layout.statusHeight
-	contentTop := chatTop
-	if layout.chatFramed {
-		contentTop++
-	}
-	contentRow := event.Y - contentTop
-	if contentRow < 0 || contentRow >= layout.chatContentHeight {
-		return twitch.ChatMessage{}, false
-	}
-	return m.messageAtVisibleChatRow(layout, contentRow)
-}
-
-func (m shellModel) messageAtVisibleChatRow(layout shellLayout, contentRow int) (twitch.ChatMessage, bool) {
-	active := m.activeChannelState()
-	blocks := m.visibleChatRowBlocks(layout)
-	totalRows := chatRowBlockCount(blocks)
-
-	start := totalRows - layout.chatContentHeight - active.scrollOffset
-	if start < 0 {
-		start = 0
-	}
-	target := start + contentRow
-	if target < 0 || target >= totalRows {
-		return twitch.ChatMessage{}, false
-	}
-
-	cursor := 0
-	for _, block := range blocks {
-		if block.separatorBefore {
-			if target == cursor {
-				return twitch.ChatMessage{}, false
-			}
-			cursor++
-		}
-		next := cursor + chatRowBlockRowCount(block)
-		if target >= cursor && target < next {
-			return selectableMessage(block.message)
-		}
-		cursor = next
-	}
-	return twitch.ChatMessage{}, false
-}
-
-func selectableMessage(message twitch.ChatMessage) (twitch.ChatMessage, bool) {
-	if strings.TrimSpace(message.ID) == "" {
-		return twitch.ChatMessage{}, false
-	}
-	return message, true
-}
-
 func (m *shellModel) clampScroll() {
 	active := m.activeChannelState()
 	maxScroll := m.maxScrollOffset()
@@ -2447,26 +2060,45 @@ func (m shellModel) nextIncomingCommand() tea.Cmd {
 	})
 }
 
+// receiveCommand turns one of the channels the chat transport publishes on
+// into a Bubble Tea command that reads a single value from it.
+//
+// Bubble Tea has no notion of a lasting subscription: a command runs once,
+// returns one message, and the handler for that message asks for the next
+// one. wrap builds that message out of the value received and out of ok,
+// which is false once the channel has been closed and drained - that is how a
+// handler learns the stream has ended. A nil channel produces no command,
+// because there is nothing there to listen to.
+func receiveCommand[T any](ch <-chan T, wrap func(value T, ok bool) tea.Msg) tea.Cmd {
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		value, ok := <-ch
+		return wrap(value, ok)
+	}
+}
+
+// nextClientMessageCommand waits for the next chat message from the
+// transport.
 func (m shellModel) nextClientMessageCommand() tea.Cmd {
 	if m.services.client == nil {
 		return nil
 	}
-	messages := m.services.client.Messages()
-	return func() tea.Msg {
-		message, ok := <-messages
+	return receiveCommand(m.services.client.Messages(), func(message twitch.ChatMessage, ok bool) tea.Msg {
 		return chatClientMessageMsg{message: message, ok: ok}
-	}
+	})
 }
 
+// nextConnectionStateCommand waits for the transport's next report of whether
+// it is connected.
 func (m shellModel) nextConnectionStateCommand() tea.Cmd {
 	if m.services.client == nil {
 		return nil
 	}
-	states := m.services.client.ConnectionStates()
-	return func() tea.Msg {
-		state, ok := <-states
+	return receiveCommand(m.services.client.ConnectionStates(), func(state ConnectionState, ok bool) tea.Msg {
 		return chatClientConnectionStateMsg{state: state, ok: ok}
-	}
+	})
 }
 
 // nextClientMembershipCommand subscribes to JOIN/PART when the transport
@@ -2480,14 +2112,9 @@ func (m shellModel) nextClientMembershipCommand() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	memberships := source.Memberships()
-	if memberships == nil {
-		return nil
-	}
-	return func() tea.Msg {
-		membership, ok := <-memberships
+	return receiveCommand(source.Memberships(), func(membership twitch.MembershipEvent, ok bool) tea.Msg {
 		return chatClientMembershipMsg{membership: membership, ok: ok}
-	}
+	})
 }
 
 // nextClientUserStateCommand subscribes to USERSTATE when the transport
@@ -2501,14 +2128,9 @@ func (m shellModel) nextClientUserStateCommand() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	states := source.UserStates()
-	if states == nil {
-		return nil
-	}
-	return func() tea.Msg {
-		state, ok := <-states
+	return receiveCommand(source.UserStates(), func(state twitch.UserState, ok bool) tea.Msg {
 		return chatClientUserStateMsg{state: state, ok: ok}
-	}
+	})
 }
 
 // nextClientModerationCommand subscribes to moderation actions when the
@@ -2522,14 +2144,9 @@ func (m shellModel) nextClientModerationCommand() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	events := source.Moderations()
-	if events == nil {
-		return nil
-	}
-	return func() tea.Msg {
-		event, ok := <-events
+	return receiveCommand(source.Moderations(), func(event twitch.ModerationEvent, ok bool) tea.Msg {
 		return chatClientModerationMsg{event: event, ok: ok}
-	}
+	})
 }
 
 // applyModeration redacts messages a moderator removed, rather than echoing
@@ -2575,23 +2192,6 @@ func (m *shellModel) applyModeration(event twitch.ModerationEvent) {
 
 // markMessageDeleted flags every retained message matching pred, in both the
 // settled backlog and any message still animating in.
-func (s *channelState) markMessageDeleted(pred func(twitch.ChatMessage) bool) {
-	if s == nil || pred == nil {
-		return
-	}
-	for i := range s.messages {
-		if pred(s.messages[i]) {
-			s.messages[i].Deleted = true
-		}
-	}
-	for id, msg := range s.activeMessages {
-		if pred(msg) {
-			msg.Deleted = true
-			s.activeMessages[id] = msg
-		}
-	}
-}
-
 // applyUserState records the authenticated user's own badges and identity for
 // the target channel. Twitch re-sends USERSTATE after every message that user
 // sends, so this stays current as roles change mid-session.
@@ -2793,20 +2393,6 @@ func (m *shellModel) removeActiveReveal(id string) {
 	state.removeActiveRevealID(id)
 }
 
-func (s *channelState) removeActiveRevealID(id string) {
-	if s == nil {
-		return
-	}
-	for i, activeID := range s.activeOrder {
-		if activeID != id {
-			continue
-		}
-		copy(s.activeOrder[i:], s.activeOrder[i+1:])
-		s.activeOrder = s.activeOrder[:len(s.activeOrder)-1]
-		return
-	}
-}
-
 // scheduleFrameTick starts the shared animation clock. It runs continuously
 // (not just while something is mid-animation) whenever animation is enabled,
 // driving the pulsing status indicators, startup splash,
@@ -2891,348 +2477,6 @@ func (m *shellModel) refreshActiveRevealRows() {
 		}
 		state.revealQueue.ReplaceRows(id, render.Rows(message, m.messageRenderOptions(rowWidth, message, m.continuesActiveGroup(message))))
 	}
-}
-
-func (m *shellModel) queueComposerSend() (shellModel, tea.Cmd) {
-	state := m.activeChannelState()
-	draft := strings.TrimSpace(state.composerText)
-	// /channels never reaches Twitch: bare, it opens the picker; with a name,
-	// it opens that channel directly.
-	if channel, isChannelCommand := composerChannelCommand(draft); isChannelCommand {
-		state.composerText = ""
-		if channel == "" {
-			return *m, m.openChannelPicker()
-		}
-		return m.openChannel(channel)
-	}
-	if m.channels.empty() {
-		state.sendState = composerSendFailed
-		state.sendFeedback = "no channel open: /channels or " + channelPickerKeyHint
-		return *m, nil
-	}
-	if offsets, isClip, parseErr := parseClipCommand(draft); isClip {
-		if parseErr != nil {
-			state.sendState = composerSendFailed
-			state.sendFeedback = "clip: " + parseErr.Error()
-			return *m, nil
-		}
-		state.composerText = ""
-		state.replyTo = nil
-		return *m, m.scheduleClipCreate(state, offsets)
-	}
-	text, action := composerSendText(draft)
-	if text == "" {
-		return *m, nil
-	}
-	if m.services.client == nil {
-		state.sendState = composerSendFailed
-		state.sendFeedback = "send unavailable for this chat source"
-		return *m, nil
-	}
-
-	m.nextSend++
-	channel := state.name
-	state.sendQueue = append(state.sendQueue, queuedComposerSend{
-		ID:               m.nextSend,
-		Channel:          channel,
-		Text:             text,
-		Draft:            draft,
-		ReplyToMessageID: replyMessageID(state.replyTo),
-		Action:           action,
-		Reply:            cloneComposerReply(state.replyTo),
-	})
-	state.composerText = ""
-	state.replyTo = nil
-	state.sendState = composerSendQueued
-	state.sendFeedback = fmt.Sprintf("queued for #%s", channel)
-	m.debugSendQueued(state.sendQueue[len(state.sendQueue)-1])
-	return *m, m.startNextComposerSend(state)
-}
-
-func (m *shellModel) startNextComposerSend(state *channelState) tea.Cmd {
-	if state == nil || state.activeSend != nil || len(state.sendQueue) == 0 {
-		return nil
-	}
-	next := state.sendQueue[0]
-	state.sendQueue = state.sendQueue[1:]
-	state.activeSend = &next
-	state.sendState = composerSendSending
-	state.sendFeedback = fmt.Sprintf("sending to #%s", next.Channel)
-	if next.ReplyToMessageID != "" {
-		state.sendFeedback = "sending reply to " + replyAuthor(next.Reply)
-	}
-	if next.Action {
-		state.sendFeedback = "sending action to #" + next.Channel
-	}
-	m.debugSendStart(next)
-	client := m.services.client
-	req := SendRequest{
-		Channel:          next.Channel,
-		Text:             next.Text,
-		ReplyToMessageID: next.ReplyToMessageID,
-		Action:           next.Action,
-	}
-	return func() tea.Msg {
-		result, err := client.Send(context.Background(), req)
-		return composerSendCompletedMsg{id: next.ID, result: result, err: err}
-	}
-}
-
-func (m shellModel) completeComposerSend(msg composerSendCompletedMsg) (shellModel, tea.Cmd) {
-	state := m.channelStateForActiveSend(msg.id)
-	if state == nil || state.activeSend == nil {
-		return m, nil
-	}
-
-	sent := *state.activeSend
-	state.activeSend = nil
-	m.debugSendComplete(sent, msg.result, msg.err)
-	if msg.err != nil {
-		state.sendState = composerSendFailed
-		state.sendFeedback = "failed: " + credentialSafeSendDetail(msg.err)
-		texts, reply := state.drainUnsentComposerSends(sent)
-		state.restoreComposerText(texts...)
-		state.replyTo = reply
-		return m, nil
-	}
-	if msg.result.RateLimited {
-		state.sendState = composerSendRateLimited
-		state.sendFeedback = "rate limited: " + sendResultDetail(msg.result)
-		texts, reply := state.drainUnsentComposerSends(sent)
-		state.restoreComposerText(texts...)
-		state.replyTo = reply
-		return m, nil
-	}
-
-	state.sendState = composerSendSucceeded
-	state.sendFeedback = sendResultDetail(msg.result)
-	m.appendLocalEcho(sent, msg.result)
-	return m, m.startNextComposerSend(state)
-}
-
-func (m *shellModel) appendLocalEcho(sent queuedComposerSend, result SendResult) {
-	state := m.channels.ensure(sent.Channel)
-	if state == nil {
-		return
-	}
-	message := m.localEchoMessage(sent, result, state.name)
-	if message.ID != "" {
-		if state.localEchoes == nil {
-			state.localEchoes = make(map[string]struct{})
-		}
-		state.localEchoes[message.ID] = struct{}{}
-	}
-	m.appendStaticMessage(message, channelKey(state.name) == m.channels.active && state.scrollOffset > 0)
-}
-
-func (m shellModel) localEchoMessage(sent queuedComposerSend, result SendResult, channel string) twitch.ChatMessage {
-	at := result.AcceptedAt
-	if at.IsZero() && m.channels != nil && m.channels.clock != nil {
-		at = m.channels.clock.Now()
-	}
-	if at.IsZero() {
-		at = time.Now()
-	}
-	id := strings.TrimSpace(result.MessageID)
-	if id == "" {
-		id = fmt.Sprintf("local-send-%d", sent.ID)
-	}
-	author := strings.TrimSpace(m.mentionLogin)
-	if author == "" {
-		author = "me"
-	}
-	messageType := twitch.MessageTypeChat
-	if sent.Action {
-		messageType = twitch.MessageTypeAction
-	}
-	// Twitch never echoes the user's own PRIVMSG back, so this local echo is
-	// the only render of it - it has to carry the badges and identity that
-	// USERSTATE reported, or the user is the one person in chat whose own
-	// broadcaster/mod badge never appears.
-	display := author
-	color := "#9146ff"
-	var badges []twitch.Badge
-	if state := m.channels.ensure(channel); state != nil {
-		badges = state.selfBadges
-		if name := strings.TrimSpace(state.selfDisplayName); name != "" {
-			display = name
-		}
-		if value := strings.TrimSpace(state.selfColor); value != "" {
-			color = value
-		}
-	}
-	return twitch.ChatMessage{
-		ID:          id,
-		Channel:     channel,
-		Timestamp:   at,
-		AuthorLogin: author,
-		DisplayName: display,
-		AuthorColor: color,
-		Badges:      badges,
-		Text:        sent.Text,
-		Type:        messageType,
-		Reply:       replyFromComposerContext(sent.Reply),
-	}
-}
-
-func (m shellModel) channelStateForActiveSend(id int) *channelState {
-	if m.channels == nil {
-		return nil
-	}
-	for _, state := range m.channels.states {
-		if state != nil && state.activeSend != nil && state.activeSend.ID == id {
-			return state
-		}
-	}
-	return nil
-}
-
-func (s *channelState) removeLocalEcho(id string) bool {
-	if s == nil || id == "" {
-		return false
-	}
-	if _, ok := s.localEchoes[id]; !ok {
-		return false
-	}
-	delete(s.localEchoes, id)
-	for i, message := range s.messages {
-		if message.ID == id {
-			copy(s.messages[i:], s.messages[i+1:])
-			s.messages = s.messages[:len(s.messages)-1]
-			return true
-		}
-	}
-	for _, activeID := range s.activeOrder {
-		message, ok := s.activeMessages[activeID]
-		if ok && message.ID == id {
-			delete(s.activeMessages, activeID)
-			s.removeActiveRevealID(activeID)
-			return true
-		}
-	}
-	return false
-}
-
-func (s *channelState) drainUnsentComposerSends(active queuedComposerSend) ([]string, *composerReplyContext) {
-	if s == nil {
-		return nil, nil
-	}
-	texts := make([]string, 0, len(s.sendQueue)+1)
-	texts = append(texts, active.restoreText())
-	for _, queued := range s.sendQueue {
-		texts = append(texts, queued.restoreText())
-	}
-	reply := commonReplyContext(active, s.sendQueue)
-	s.sendQueue = nil
-	return texts, reply
-}
-
-func (s *channelState) restoreComposerText(texts ...string) {
-	if s == nil {
-		return
-	}
-	text := strings.TrimSpace(strings.Join(texts, " "))
-	if text == "" {
-		return
-	}
-	if strings.TrimSpace(s.composerText) == "" {
-		s.composerText = text
-		return
-	}
-	s.composerText = text + " " + s.composerText
-}
-
-func sendResultDetail(result SendResult) string {
-	if result.Detail != "" {
-		return result.Detail
-	}
-	if result.RateLimited {
-		if result.RetryAfter > 0 {
-			return "retry in " + result.RetryAfter.String()
-		}
-		return "Twitch is slowing message sends"
-	}
-	if !result.AcceptedAt.IsZero() {
-		return "accepted"
-	}
-	return "accepted"
-}
-
-func (s queuedComposerSend) restoreText() string {
-	if s.Draft != "" {
-		return s.Draft
-	}
-	if s.Action {
-		return "/me " + s.Text
-	}
-	return s.Text
-}
-
-func composerSendText(draft string) (string, bool) {
-	text := strings.TrimSpace(draft)
-	lower := strings.ToLower(text)
-	if lower == "/me" {
-		return "", true
-	}
-	if strings.HasPrefix(lower, "/me ") || strings.HasPrefix(lower, "/me\t") {
-		return strings.TrimSpace(text[len("/me"):]), true
-	}
-	return text, false
-}
-
-func replyMessageID(reply *composerReplyContext) string {
-	if reply == nil {
-		return ""
-	}
-	return reply.MessageID
-}
-
-func cloneComposerReply(reply *composerReplyContext) *composerReplyContext {
-	if reply == nil {
-		return nil
-	}
-	copied := *reply
-	return &copied
-}
-
-func replyFromComposerContext(reply *composerReplyContext) *twitch.Reply {
-	if reply == nil || reply.MessageID == "" {
-		return nil
-	}
-	return &twitch.Reply{
-		ParentMessageID: reply.MessageID,
-		ParentLogin:     reply.Author,
-		ParentAuthor:    reply.Author,
-		ParentText:      reply.Text,
-	}
-}
-
-func replyAuthor(reply *composerReplyContext) string {
-	if reply == nil || reply.Author == "" {
-		return "message"
-	}
-	return reply.Author
-}
-
-func commonReplyContext(active queuedComposerSend, queued []queuedComposerSend) *composerReplyContext {
-	all := make([]queuedComposerSend, 0, len(queued)+1)
-	all = append(all, active)
-	all = append(all, queued...)
-
-	var common *composerReplyContext
-	for _, send := range all {
-		if send.ReplyToMessageID == "" {
-			return nil
-		}
-		if common == nil {
-			common = cloneComposerReply(send.Reply)
-			continue
-		}
-		if send.ReplyToMessageID != common.MessageID {
-			return nil
-		}
-	}
-	return common
 }
 
 func animationConfigFor(mode string) animation.Config {

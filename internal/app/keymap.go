@@ -117,16 +117,6 @@ func compactHelpLine() string {
 	return " " + strings.Join(parts, " | ")
 }
 
-// bindingForKeys finds a binding by its Keys value.
-func bindingForKeys(keys string) (keyBinding, bool) {
-	for _, binding := range keyBindings {
-		if binding.Keys == keys {
-			return binding, true
-		}
-	}
-	return keyBinding{}, false
-}
-
 // documentedKeys reports every key form named in the table, for the coverage
 // test that compares it against what Update actually handles.
 func documentedKeys() map[string]bool {

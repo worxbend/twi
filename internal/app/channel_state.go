@@ -367,6 +367,111 @@ func configuredChannels(primary string, configured []string) []string {
 	return channels
 }
 
+// markMessageDeleted marks every message matching pred as deleted, in both the
+// settled history and the messages still being revealed. Twitch tells clients
+// to hide a message after the fact (a moderator delete, a timeout, a ban), and
+// the renderer decides what a deleted message looks like, so nothing is
+// dropped here.
+func (s *channelState) markMessageDeleted(pred func(twitch.ChatMessage) bool) {
+	if s == nil || pred == nil {
+		return
+	}
+	for i := range s.messages {
+		if pred(s.messages[i]) {
+			s.messages[i].Deleted = true
+		}
+	}
+	for id, msg := range s.activeMessages {
+		if pred(msg) {
+			msg.Deleted = true
+			s.activeMessages[id] = msg
+		}
+	}
+}
+
+// removeActiveRevealID drops one ID from the reveal order. activeOrder is the
+// list of messages currently animating in; taking an ID out of it stops that
+// message from being drawn as an in-progress reveal.
+func (s *channelState) removeActiveRevealID(id string) {
+	if s == nil {
+		return
+	}
+	for i, activeID := range s.activeOrder {
+		if activeID != id {
+			continue
+		}
+		copy(s.activeOrder[i:], s.activeOrder[i+1:])
+		s.activeOrder = s.activeOrder[:len(s.activeOrder)-1]
+		return
+	}
+}
+
+// removeLocalEcho deletes the optimistic copy of a message this client showed
+// before Twitch confirmed it, whether that copy already settled into the
+// history or is still revealing. It reports whether anything was removed, so
+// the caller can tell an echo that was replaced from one that was never there.
+func (s *channelState) removeLocalEcho(id string) bool {
+	if s == nil || id == "" {
+		return false
+	}
+	if _, ok := s.localEchoes[id]; !ok {
+		return false
+	}
+	delete(s.localEchoes, id)
+	for i, message := range s.messages {
+		if message.ID == id {
+			copy(s.messages[i:], s.messages[i+1:])
+			s.messages = s.messages[:len(s.messages)-1]
+			return true
+		}
+	}
+	for _, activeID := range s.activeOrder {
+		message, ok := s.activeMessages[activeID]
+		if ok && message.ID == id {
+			delete(s.activeMessages, activeID)
+			s.removeActiveRevealID(activeID)
+			return true
+		}
+	}
+	return false
+}
+
+// drainUnsentComposerSends empties the queue of messages waiting to be sent and
+// returns their text, newest last, together with the reply context they shared
+// (nil when they did not all share one). Callers use it to put a failed batch
+// back in front of the user instead of losing what they typed.
+func (s *channelState) drainUnsentComposerSends(active queuedComposerSend) ([]string, *composerReplyContext) {
+	if s == nil {
+		return nil, nil
+	}
+	texts := make([]string, 0, len(s.sendQueue)+1)
+	texts = append(texts, active.restoreText())
+	for _, queued := range s.sendQueue {
+		texts = append(texts, queued.restoreText())
+	}
+	reply := commonReplyContext(active, s.sendQueue)
+	s.sendQueue = nil
+	return texts, reply
+}
+
+// restoreComposerText puts recovered text back into the composer, ahead of
+// anything the user has typed since. Empty pieces are dropped, and a single
+// space joins what is left, so a restored draft reads as one line.
+func (s *channelState) restoreComposerText(texts ...string) {
+	if s == nil {
+		return
+	}
+	text := strings.TrimSpace(strings.Join(texts, " "))
+	if text == "" {
+		return
+	}
+	if strings.TrimSpace(s.composerText) == "" {
+		s.composerText = text
+		return
+	}
+	s.composerText = text + " " + s.composerText
+}
+
 func normalizeChannelName(channel string) string {
 	channel = strings.TrimSpace(channel)
 	channel = strings.TrimPrefix(channel, "#")
