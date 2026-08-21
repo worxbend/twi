@@ -1410,3 +1410,59 @@ func TestReconnectFailureNamesTheKindOfReconnect(t *testing.T) {
 		t.Errorf("failure detail = %q, calls an automatic reconnect manual", got.Detail)
 	}
 }
+
+// TestCloseDoesNotDeadlockAgainstAFailingReconnect is a regression test for a
+// hang on quit.
+//
+// reconnect holds lifecycleMu for its whole body, and its failure paths emit a
+// connection state on a background context. Once the shell has stopped draining
+// ConnectionStates -- exactly the state twi is in when RunClientWithOptions'
+// deferred Close runs -- that emit blocks, and a closed c.done is its only other
+// way out. Close used to take lifecycleMu before closing c.done, so it waited on
+// the goroutine that was waiting on it.
+//
+// The setup pins the reconnect inside lifecycleMu with a full state buffer
+// before Close is called, so the deadlock is deterministic rather than a race
+// the test might win by accident.
+func TestCloseDoesNotDeadlockAgainstAFailingReconnect(t *testing.T) {
+	factory := &fakeRestartTransportFactory{}
+	factory.queueTransport(newFakeTwitchTransport(4))
+	factory.queueError(errors.New("dial failed"))
+
+	// The reconnect's own factory call is held open, so that once entered
+	// fires the reconnect is known to hold lifecycleMu.
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	factory.blockCall(2, entered, release)
+
+	// Buffer of 2: the initial "connected" state takes one and the
+	// reconnect's "reconnecting" takes the other, so the failure state that
+	// follows has nowhere to go. Nothing in this test drains them.
+	client, err := NewRestartableLiveChatClient(context.Background(), factory.newTransport, 2)
+	if err != nil {
+		t.Fatalf("NewRestartableLiveChatClient returned error: %v", err)
+	}
+
+	reconnectReturned := make(chan struct{})
+	go func() {
+		defer close(reconnectReturned)
+		_ = client.reconnect(context.Background(), "automatic")
+	}()
+
+	<-entered      // the reconnect now holds lifecycleMu
+	close(release) // let it fail, then block emitting the failure state
+
+	closeReturned := make(chan error, 1)
+	go func() { closeReturned <- client.Close() }()
+
+	select {
+	case <-closeReturned:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close did not return: it is deadlocked against the in-flight reconnect")
+	}
+	select {
+	case <-reconnectReturned:
+	case <-time.After(10 * time.Second):
+		t.Fatal("reconnect did not return after Close")
+	}
+}

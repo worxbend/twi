@@ -270,12 +270,27 @@ func actionWireText(text string) string {
 func (c *LiveChatClient) Close() error {
 	var err error
 	c.closeOnce.Do(func() {
-		c.lifecycleMu.Lock()
+		// Close c.done before reaching for lifecycleMu, not after.
+		//
+		// reconnect holds lifecycleMu for its whole body, and the failure
+		// paths inside it emit a connection state on a background context.
+		// Once Bubble Tea has returned there is nobody draining c.states, so
+		// that emit blocks, and c.done is its only other way out. Taking
+		// lifecycleMu first would mean waiting for a goroutine that is itself
+		// waiting for this close -- an unbreakable hang on quit, in exactly
+		// the window where RunClientWithOptions' deferred Close runs.
+		//
+		// Closing c.done first releases any such goroutine, so lifecycleMu
+		// becomes available and the teardown below proceeds.
 		c.mu.Lock()
 		c.closedFlag = true
+		close(c.done)
+		c.mu.Unlock()
+
+		c.lifecycleMu.Lock()
+		c.mu.Lock()
 		session := c.session
 		c.session = nil
-		close(c.done)
 		c.mu.Unlock()
 		err = session.stop(true)
 		c.lifecycleMu.Unlock()
