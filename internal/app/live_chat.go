@@ -375,7 +375,7 @@ func (c *LiveChatClient) reconnect(ctx context.Context, kind string) error {
 			return c.failReconnect(kind+" reconnect timed out; retry with ctrl+r", err)
 		default:
 			safeErr := credentialSafeError(err)
-			return c.failReconnect("manual reconnect failed: "+safeErr.Error()+"; retry with ctrl+r", safeErr)
+			return c.failReconnect(kind+" reconnect failed: "+safeErr.Error()+"; retry with ctrl+r", safeErr)
 		}
 	}
 	// The client can be closed while the replacement session is being built;

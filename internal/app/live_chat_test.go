@@ -1369,3 +1369,44 @@ func TestAutoReconnectNotScheduledAfterClose(t *testing.T) {
 	// WaitGroup reuse after Wait; it returns immediately when nothing is.
 	client.autoReconnects.Wait()
 }
+
+// TestReconnectFailureNamesTheKindOfReconnect is a regression test for a
+// failed *automatic* reconnect reporting itself as a manual one.
+//
+// reconnect is called with "manual" when someone presses ctrl+r and with
+// "automatic" when the transport drops on its own. Three of its four failure
+// messages were built from that word; the fourth had it hardcoded to
+// "manual", so a connection that dropped by itself and then failed to come
+// back told the user "manual reconnect failed" about something they had not
+// done.
+func TestReconnectFailureNamesTheKindOfReconnect(t *testing.T) {
+	factory := &fakeRestartTransportFactory{}
+	factory.queueTransport(newFakeTwitchTransport(4))
+	factory.queueError(errors.New("dial failed"))
+
+	client, err := NewRestartableLiveChatClient(context.Background(), factory.newTransport, 8)
+	if err != nil {
+		t.Fatalf("NewRestartableLiveChatClient returned error: %v", err)
+	}
+	defer client.Close()
+	<-client.ConnectionStates()
+
+	// Drive the "automatic" path directly: Reconnect is the manual entry
+	// point, and the automatic one is only reachable on a dropped transport.
+	if err := client.reconnect(context.Background(), "automatic"); err == nil {
+		t.Fatal("reconnect returned nil error, want the queued factory failure")
+	}
+	if got := <-client.ConnectionStates(); got.Status != ConnectionReconnecting {
+		t.Fatalf("first state = %#v, want reconnecting", got)
+	}
+	got := <-client.ConnectionStates()
+	if got.Status != ConnectionFailed {
+		t.Fatalf("second state = %#v, want failed", got)
+	}
+	if !strings.Contains(got.Detail, "automatic reconnect failed") {
+		t.Errorf("failure detail = %q, want it to name the automatic reconnect", got.Detail)
+	}
+	if strings.Contains(got.Detail, "manual") {
+		t.Errorf("failure detail = %q, calls an automatic reconnect manual", got.Detail)
+	}
+}
