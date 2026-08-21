@@ -7,9 +7,27 @@ import (
 
 type ChatClient interface {
 	Connect(ctx context.Context) (<-chan Event, error)
-	Send(ctx context.Context, channel, text string) error
-	Reply(ctx context.Context, channel, parentMessageID, text string) error
+	Send(ctx context.Context, message OutboundMessage) error
 	Close() error
+}
+
+// OutboundMessage is a message twi is sending to a channel.
+//
+// It replaces a pair of Send/Reply methods that differed only in carrying a
+// parent message ID, and it exists mainly so Action has somewhere to live. An
+// action ("/me waves") goes on the wire wrapped in CTCP delimiters, and with
+// no field to express the intent the caller had to apply that wrapping itself
+// -- which meant the UI package was constructing IRC wire format, and the
+// transport's own truncation had to detect the delimiter afterwards to avoid
+// cutting the closing one off. The transport now owns the framing, because it
+// owns the wire.
+type OutboundMessage struct {
+	Channel string
+	Text    string
+	// ReplyToMessageID, when set, threads this message under another.
+	ReplyToMessageID string
+	// Action marks a "/me" message.
+	Action bool
 }
 
 // ChannelJoiner is an optional ChatClient capability: transports that can

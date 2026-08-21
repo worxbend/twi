@@ -166,15 +166,17 @@ func TestIRCClientDebugLogsSendFieldsWithoutMessageTextOrCredentials(t *testing.
 
 	client.logger.Log(context.Background(), "twitch.irc.test_error", slog.String("error", "oauth:configured-token refresh-secret client-secret"))
 	client.refresh.Logger.Log(context.Background(), "twitch.oauth_refresh.test_error", slog.String("error", "oauth:configured-token refresh-secret client-secret"))
-	if err := client.Send(context.Background(), "example", "hello oauth:message-secret"); err != nil {
+	if err := client.Send(context.Background(), twitch.OutboundMessage{Channel: "example", Text: "hello oauth:message-secret"}); err != nil {
 		t.Fatalf("Send returned error: %v", err)
 	}
-	if err := client.Reply(context.Background(), "example", "parent-1", "reply refresh_token=reply-secret"); err != nil {
-		t.Fatalf("Reply returned error: %v", err)
+	if err := client.Send(context.Background(), twitch.OutboundMessage{Channel: "example", ReplyToMessageID: "parent-1", Text: "reply refresh_token=reply-secret"}); err != nil {
+		t.Fatalf("Send (reply) returned error: %v", err)
 	}
 
+	// A reply is a send that names a parent, so it is one event with a field
+	// rather than an event of its own.
 	output := logs.String()
-	for _, want := range []string{`"event":"twitch.irc.send"`, `"event":"twitch.irc.reply"`, `"channel":"example"`, `"reply_to_message_id":"parent-1"`, `"text_length":`} {
+	for _, want := range []string{`"event":"twitch.irc.send"`, `"channel":"example"`, `"reply_to_message_id":"parent-1"`, `"action":false`, `"text_length":`} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("debug log missing %q:\n%s", want, output)
 		}
@@ -717,13 +719,13 @@ func TestIRCClientSendRefusesWhenNotConnected(t *testing.T) {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
 
-	if err := client.Send(context.Background(), "example", "hello"); !errors.Is(err, twitch.ErrNotConnected) {
+	if err := client.Send(context.Background(), twitch.OutboundMessage{Channel: "example", Text: "hello"}); !errors.Is(err, twitch.ErrNotConnected) {
 		t.Fatalf("Send error = %v, want ErrNotConnected", err)
 	}
-	if err := client.Reply(context.Background(), "example", "parent-1", "hi"); !errors.Is(err, twitch.ErrNotConnected) {
+	if err := client.Send(context.Background(), twitch.OutboundMessage{Channel: "example", ReplyToMessageID: "parent-1", Text: "hi"}); !errors.Is(err, twitch.ErrNotConnected) {
 		t.Fatalf("Reply error = %v, want ErrNotConnected", err)
 	}
-	if twitch.IsAuthError(client.Send(context.Background(), "example", "hello")) {
+	if twitch.IsAuthError(client.Send(context.Background(), twitch.OutboundMessage{Channel: "example", Text: "hello"})) {
 		t.Fatal("a disconnected send was classified as an auth failure")
 	}
 }
@@ -749,7 +751,7 @@ func TestIRCClientSendSucceedsOnceConnected(t *testing.T) {
 	}
 	client.connected.Store(true)
 
-	if err := client.Send(context.Background(), "example", "hello"); err != nil {
+	if err := client.Send(context.Background(), twitch.OutboundMessage{Channel: "example", Text: "hello"}); err != nil {
 		t.Fatalf("Send on a connected session returned %v, want nil", err)
 	}
 }
@@ -766,12 +768,12 @@ func TestIRCClientSendRefusesAfterDisconnect(t *testing.T) {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
 	client.connected.Store(true)
-	if err := client.Send(context.Background(), "example", "hello"); err != nil {
+	if err := client.Send(context.Background(), twitch.OutboundMessage{Channel: "example", Text: "hello"}); err != nil {
 		t.Fatalf("Send while connected returned %v, want nil", err)
 	}
 
 	client.connected.Store(false)
-	if err := client.Send(context.Background(), "example", "hello"); !errors.Is(err, twitch.ErrNotConnected) {
+	if err := client.Send(context.Background(), twitch.OutboundMessage{Channel: "example", Text: "hello"}); !errors.Is(err, twitch.ErrNotConnected) {
 		t.Fatalf("Send after disconnect = %v, want ErrNotConnected", err)
 	}
 }
@@ -1016,4 +1018,51 @@ func TestEmitDoesNotDropWhenTheConsumerKeepsUp(t *testing.T) {
 	if got := client.DroppedEvents(); got != 0 {
 		t.Errorf("DroppedEvents() = %d, want 0 when the consumer keeps up", got)
 	}
+}
+
+// TestSendFramesAnActionAsCTCP pins where the "/me" wire format is produced.
+//
+// It used to be built in internal/app, which meant the Bubble Tea package was
+// constructing IRC wire format and this package's truncation had to detect the
+// delimiter afterwards so it would not cut the closing one off. The transport
+// now owns both ends of that.
+func TestSendFramesAnActionAsCTCP(t *testing.T) {
+	oldNewSession := newSession
+	t.Cleanup(func() { newSession = oldNewSession })
+	session := &fakeIRCSession{}
+	newSession = func(string, string, []string) chatSession { return session }
+
+	client, err := NewClient(Config{Username: "viewer", OAuthToken: "oauth:token", Channels: []string{"example"}})
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+	client.connected.Store(true)
+
+	if err := client.Send(context.Background(), twitch.OutboundMessage{
+		Channel: "example", Text: "waves at chat", Action: true,
+	}); err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+	if err := client.Send(context.Background(), twitch.OutboundMessage{
+		Channel: "example", Text: "plain message",
+	}); err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+
+	said := session.saidLines()
+	if len(said) != 2 {
+		t.Fatalf("said %d lines, want 2", len(said))
+	}
+	if got, want := said[0], "example\x00\x01ACTION waves at chat\x01"; got != want {
+		t.Errorf("action line = %q, want %q", got, want)
+	}
+	if got, want := said[1], "example\x00plain message"; got != want {
+		t.Errorf("ordinary line = %q, want %q: only an action is framed", got, want)
+	}
+}
+
+func (s *fakeIRCSession) saidLines() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.says...)
 }

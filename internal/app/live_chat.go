@@ -217,21 +217,14 @@ func (c *LiveChatClient) Send(ctx context.Context, req SendRequest) (SendResult,
 		c.debugLiveSendComplete(req, SendResult{}, err)
 		return SendResult{}, err
 	}
-	if req.Action {
-		text = actionWireText(text)
-	}
-	if req.ReplyToMessageID != "" {
-		if err := transport.Reply(ctx, req.Channel, req.ReplyToMessageID, text); err != nil {
-			safeErr := credentialSafeSendError(err)
-			result := SendResult{RateLimited: isRateLimited(err), Detail: credentialSafeSendDetail(err)}
-			c.debugLiveSendComplete(req, result, safeErr)
-			return result, safeErr
-		}
-		result := SendResult{AcceptedAt: time.Now()}
-		c.debugLiveSendComplete(req, result, nil)
-		return result, nil
-	}
-	if err := transport.Send(ctx, req.Channel, text); err != nil {
+	// The wire format -- CTCP framing for an action, reply threading -- is the
+	// transport's business; this layer states the intent and lets it decide.
+	if err := transport.Send(ctx, twitch.OutboundMessage{
+		Channel:          req.Channel,
+		Text:             text,
+		ReplyToMessageID: req.ReplyToMessageID,
+		Action:           req.Action,
+	}); err != nil {
 		safeErr := credentialSafeSendError(err)
 		result := SendResult{RateLimited: isRateLimited(err), Detail: credentialSafeSendDetail(err)}
 		c.debugLiveSendComplete(req, result, safeErr)
@@ -343,10 +336,6 @@ func (c *LiveChatClient) channelJoiner() (twitch.ChannelJoiner, error) {
 		return nil, errors.New("chat transport cannot join channels after connecting")
 	}
 	return joiner, nil
-}
-
-func actionWireText(text string) string {
-	return "\x01ACTION " + strings.TrimSpace(text) + "\x01"
 }
 
 func (c *LiveChatClient) Close() error {

@@ -418,7 +418,7 @@ func TestLiveChatClientSendReplyUsesTransportReply(t *testing.T) {
 	}
 }
 
-func TestLiveChatClientSendActionUsesIRCActionText(t *testing.T) {
+func TestLiveChatClientSendCarriesTheActionIntent(t *testing.T) {
 	transport := newFakeTwitchTransport(2)
 	client, err := NewLiveChatClient(context.Background(), transport, 2)
 	if err != nil {
@@ -436,12 +436,17 @@ func TestLiveChatClientSendActionUsesIRCActionText(t *testing.T) {
 		t.Fatalf("Send returned error: %v", err)
 	}
 
+	// This layer states the intent; the CTCP framing is the transport's job,
+	// and is asserted in internal/twitch/irc where the wire format lives.
 	sends := transport.sendsSent()
 	if len(sends) != 1 {
 		t.Fatalf("sends length = %d, want 1", len(sends))
 	}
-	if got, want := sends[0].Text, "\x01ACTION waves at chat\x01"; got != want {
-		t.Fatalf("action wire text = %q, want %q", got, want)
+	if !sends[0].Action {
+		t.Error("Action = false on the outbound message, want the /me intent carried through")
+	}
+	if got, want := sends[0].Text, "waves at chat"; got != want {
+		t.Errorf("text = %q, want %q unwrapped: this layer must not build wire format", got, want)
 	}
 }
 
@@ -951,17 +956,20 @@ func (t *fakeTwitchTransport) Connect(context.Context) (<-chan twitch.Event, err
 	return t.events, nil
 }
 
-func (t *fakeTwitchTransport) Send(_ context.Context, channel, text string) error {
+func (t *fakeTwitchTransport) Send(_ context.Context, message twitch.OutboundMessage) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.sends = append(t.sends, SendRequest{Channel: channel, Text: text})
-	return t.sendErr
-}
-
-func (t *fakeTwitchTransport) Reply(_ context.Context, channel, parentMessageID, text string) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.replies = append(t.replies, SendRequest{Channel: channel, Text: text, ReplyToMessageID: parentMessageID})
+	req := SendRequest{
+		Channel:          message.Channel,
+		Text:             message.Text,
+		ReplyToMessageID: message.ReplyToMessageID,
+		Action:           message.Action,
+	}
+	if message.ReplyToMessageID != "" {
+		t.replies = append(t.replies, req)
+	} else {
+		t.sends = append(t.sends, req)
+	}
 	return t.sendErr
 }
 
@@ -1033,11 +1041,7 @@ func (t *blockingConnectTransport) Connect(ctx context.Context) (<-chan twitch.E
 	}
 }
 
-func (t *blockingConnectTransport) Send(context.Context, string, string) error {
-	return nil
-}
-
-func (t *blockingConnectTransport) Reply(context.Context, string, string, string) error {
+func (t *blockingConnectTransport) Send(context.Context, twitch.OutboundMessage) error {
 	return nil
 }
 

@@ -378,30 +378,62 @@ func (c *Client) connectOnceWithAuthRefresh(ctx context.Context, emit func(twitc
 	return errAuthRetryable
 }
 
-func (c *Client) Send(ctx context.Context, channel, text string) error {
+// Send puts one message on the wire, framing and sanitizing it first.
+//
+// This is where a "/me" becomes CTCP ACTION. Doing it here rather than in the
+// caller is what lets sanitizeText and truncateChatMessage below reason about
+// a complete wire message: truncation has to know the closing delimiter is
+// there so it does not cut it off, and it can only know that if the same layer
+// put it there.
+func (c *Client) Send(ctx context.Context, message twitch.OutboundMessage) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	channel = normalizeChannel(channel)
+	channel := normalizeChannel(message.Channel)
+	replyTo := strings.TrimSpace(message.ReplyToMessageID)
 	c.logger.Log(ctx, "twitch.irc.send",
 		slog.String("channel", channel),
-		slog.Int("text_length", len([]rune(text))),
+		slog.String("reply_to_message_id", replyTo),
+		slog.Bool("action", message.Action),
+		slog.Int("text_length", len([]rune(message.Text))),
 	)
 	if channel == "" {
 		return errors.New("missing Twitch channel")
 	}
-	if strings.TrimSpace(text) == "" {
+	text := strings.TrimSpace(message.Text)
+	if text == "" {
 		return errors.New("message text cannot be empty")
 	}
 	if err := c.requireConnected(); err != nil {
 		return err
 	}
+	if message.Action {
+		text = actionWireText(text)
+	}
 	wire := sanitizeText(text)
-	if err := c.limiter.allow(channel, wire); err != nil {
+
+	if replyTo == "" {
+		if err := c.limiter.allow(channel, wire); err != nil {
+			return err
+		}
+		c.currentClient().Say(channel, wire)
+		return nil
+	}
+	// Replies count against the same allowance, but a reply to a different
+	// message is not a duplicate even with identical text, so the parent ID
+	// is part of the key.
+	if err := c.limiter.allow(channel+"\x00"+replyTo, wire); err != nil {
 		return err
 	}
-	c.currentClient().Say(channel, wire)
+	c.currentClient().Reply(channel, replyTo, wire)
 	return nil
+}
+
+// actionWireText wraps text as a CTCP ACTION, which is how "/me" reaches
+// Twitch. The delimiters are the one C0 control that is meaningful in a chat
+// message, which is why sanitizeText lets them through.
+func actionWireText(text string) string {
+	return string(ctcpDelimiter) + "ACTION " + strings.TrimSpace(text) + string(ctcpDelimiter)
 }
 
 // requireConnected refuses a send on a session that is not registered.
@@ -417,39 +449,6 @@ func (c *Client) requireConnected() error {
 		return nil
 	}
 	return twitch.ErrNotConnected
-}
-
-func (c *Client) Reply(ctx context.Context, channel, parentMessageID, text string) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	channel = normalizeChannel(channel)
-	c.logger.Log(ctx, "twitch.irc.reply",
-		slog.String("channel", channel),
-		slog.String("reply_to_message_id", parentMessageID),
-		slog.Int("text_length", len([]rune(text))),
-	)
-	if channel == "" {
-		return errors.New("missing Twitch channel")
-	}
-	if strings.TrimSpace(parentMessageID) == "" {
-		return errors.New("missing parent message ID")
-	}
-	if strings.TrimSpace(text) == "" {
-		return errors.New("message text cannot be empty")
-	}
-	if err := c.requireConnected(); err != nil {
-		return err
-	}
-	wire := sanitizeText(text)
-	// Replies count against the same allowance, but a reply to a different
-	// message is not a duplicate even with identical text, so the parent ID
-	// is part of the key.
-	if err := c.limiter.allow(channel+"\x00"+parentMessageID, wire); err != nil {
-		return err
-	}
-	c.currentClient().Reply(channel, parentMessageID, wire)
-	return nil
 }
 
 // Join subscribes to additional channels on the live connection. The channel
