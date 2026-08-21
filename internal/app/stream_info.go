@@ -401,14 +401,7 @@ func (m shellModel) streamInfoLines(width, height int) []string {
 		lines = m.streamInfoFieldLines(width)
 	}
 
-	out := make([]string, 0, height)
-	for i := 0; i < height; i++ {
-		line := ""
-		if i < len(lines) {
-			line = lines[i]
-		}
-		out = append(out, fitLine(line, width))
-	}
+	out := padPaneLines(lines, width, height)
 	return out
 }
 

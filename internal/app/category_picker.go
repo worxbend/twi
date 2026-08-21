@@ -235,12 +235,7 @@ func (m shellModel) categoryPickerLines(width, height int) []string {
 	}
 
 	entries := m.categoryPickerEntries()
-	selected := m.categoryPicker.selected
-	if selected < 0 || selected >= len(entries) {
-		selected = 0
-	}
-	maxEntries := height - 1
-	start := paletteWindowStart(selected, len(entries), maxEntries)
+	start, selected := pickerWindow(m.categoryPicker.selected, len(entries), height)
 	for i := start; i < len(entries) && len(lines) < height; i++ {
 		prefix := "  "
 		if i == selected {

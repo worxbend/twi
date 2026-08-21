@@ -282,12 +282,7 @@ func (m shellModel) channelPickerLines(width, height int) []string {
 	}
 
 	entries := m.channelPickerEntries()
-	selected := m.channelPicker.selected
-	if selected < 0 || selected >= len(entries) {
-		selected = 0
-	}
-	maxEntries := height - 1
-	start := paletteWindowStart(selected, len(entries), maxEntries)
+	start, selected := pickerWindow(m.channelPicker.selected, len(entries), height)
 	for i := start; i < len(entries) && len(lines) < height; i++ {
 		prefix := "  "
 		if i == selected {

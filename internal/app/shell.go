@@ -3559,13 +3559,6 @@ func fitBlock(value string, width, height int) string {
 		return ""
 	}
 	lines := strings.Split(value, "\n")
-	out := make([]string, 0, height)
-	for i := 0; i < height; i++ {
-		line := ""
-		if i < len(lines) {
-			line = lines[i]
-		}
-		out = append(out, fitLine(line, width))
-	}
+	out := padPaneLines(lines, width, height)
 	return strings.Join(out, "\n")
 }

@@ -169,12 +169,7 @@ func (m shellModel) emotePickerLines(width, height int) []string {
 	if len(entries) == 0 {
 		lines = append(lines, fitLine("  no matches", width))
 	} else {
-		selected := m.emotePicker.selected
-		if selected < 0 || selected >= len(entries) {
-			selected = 0
-		}
-		maxEntries := height - 1
-		start := paletteWindowStart(selected, len(entries), maxEntries)
+		start, selected := pickerWindow(m.emotePicker.selected, len(entries), height)
 		for i := start; i < len(entries) && len(lines) < height; i++ {
 			prefix := "  "
 			if i == selected {

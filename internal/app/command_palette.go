@@ -435,12 +435,7 @@ func (m shellModel) commandPaletteLines(width, height int) []string {
 	if len(commands) == 0 {
 		lines = append(lines, fitLine("  no matches", width))
 	} else {
-		selected := m.palette.selected
-		if selected < 0 || selected >= len(commands) {
-			selected = 0
-		}
-		maxCommands := height - 1
-		start := paletteWindowStart(selected, len(commands), maxCommands)
+		start, selected := pickerWindow(m.palette.selected, len(commands), height)
 		for i := start; i < len(commands) && len(lines) < height; i++ {
 			prefix := "  "
 			if i == selected {
