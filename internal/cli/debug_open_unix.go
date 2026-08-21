@@ -4,7 +4,6 @@ package cli
 
 import (
 	"errors"
-	"os"
 	"syscall"
 )
 
@@ -13,30 +12,18 @@ const (
 	debugLogOpenPlatformNote = "Unix debug log files are opened with O_NOFOLLOW on the final path and validated through the opened file descriptor."
 )
 
-func openDebugLogFile(path string) (*os.File, error) {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_APPEND|os.O_WRONLY|syscall.O_NOFOLLOW, debugLogFileMode)
-	if err == nil {
-		if err := file.Chmod(debugLogFileMode); err != nil {
-			return closeDebugLogFileWithError(file, debugLogOperationError("set permissions on", path, err))
-		}
-		if err := validateOpenedDebugLogFile(path, file); err != nil {
-			return closeDebugLogFileWithError(file, err)
-		}
-		return file, nil
-	}
-	if !errors.Is(err, os.ErrExist) {
-		return nil, debugLogOpenFileError(path, err)
-	}
+// debugLogNoFollowFlags makes the kernel refuse the open outright if the final
+// path component is a symlink, which is the guarantee this platform can give.
+func debugLogNoFollowFlags() int { return syscall.O_NOFOLLOW }
 
-	file, err = os.OpenFile(path, os.O_APPEND|os.O_WRONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		return nil, debugLogOpenFileError(path, err)
-	}
-	if err := validateOpenedDebugLogFile(path, file); err != nil {
-		return closeDebugLogFileWithError(file, err)
-	}
-	return file, nil
-}
+// debugLogReopenFlags adds O_NONBLOCK on top, so reopening a path that turned
+// out to be a FIFO returns rather than blocking forever waiting for a reader.
+func debugLogReopenFlags() int { return syscall.O_NOFOLLOW | syscall.O_NONBLOCK }
+
+// checkDebugLogPathBeforeReopen does nothing here: O_NOFOLLOW already refuses
+// a symlink at open time, which is stronger than any check this could make
+// beforehand, because nothing can change between the check and the open.
+func checkDebugLogPathBeforeReopen(string) error { return nil }
 
 func debugLogOpenErrorIsSymlink(err error) bool {
 	return errors.Is(err, syscall.ELOOP)
