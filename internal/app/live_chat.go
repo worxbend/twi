@@ -61,6 +61,17 @@ type LiveChatClient struct {
 	// can wait for them before closing the output channels they emit on.
 	autoReconnects sync.WaitGroup
 	debugLogger    debuglog.Logger
+	// joinedAtRuntime and partedAtRuntime record channels opened or closed
+	// after the connection was established, so a reconnect can put the user
+	// back where they were.
+	//
+	// They are deltas rather than one absolute set on purpose. A replacement
+	// transport is built from the configured default channels and rejoins
+	// those itself, so replaying an absolute set would resurrect a channel
+	// the user had deliberately closed. Recording only what changed since
+	// startup replays exactly the difference.
+	joinedAtRuntime map[string]bool
+	partedAtRuntime map[string]bool
 }
 
 var _ ChatClient = (*LiveChatClient)(nil)
@@ -240,7 +251,11 @@ func (c *LiveChatClient) JoinChannel(channel string) error {
 	if err != nil {
 		return err
 	}
-	return joiner.Join(channel)
+	if err := joiner.Join(channel); err != nil {
+		return err
+	}
+	c.recordRuntimeJoin(channel)
+	return nil
 }
 
 func (c *LiveChatClient) PartChannel(channel string) error {
@@ -248,7 +263,74 @@ func (c *LiveChatClient) PartChannel(channel string) error {
 	if err != nil {
 		return err
 	}
-	return joiner.Depart(channel)
+	if err := joiner.Depart(channel); err != nil {
+		return err
+	}
+	c.recordRuntimePart(channel)
+	return nil
+}
+
+// recordRuntimeJoin and recordRuntimePart maintain the two deltas replayed
+// onto a replacement transport after a reconnect. Each channel belongs to at
+// most one of them: the most recent action is the one that has to be replayed.
+func (c *LiveChatClient) recordRuntimeJoin(channel string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.joinedAtRuntime == nil {
+		c.joinedAtRuntime = make(map[string]bool)
+	}
+	c.joinedAtRuntime[channel] = true
+	delete(c.partedAtRuntime, channel)
+}
+
+func (c *LiveChatClient) recordRuntimePart(channel string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.partedAtRuntime == nil {
+		c.partedAtRuntime = make(map[string]bool)
+	}
+	c.partedAtRuntime[channel] = true
+	delete(c.joinedAtRuntime, channel)
+}
+
+// replayRuntimeChannels puts a freshly built transport back into the channel
+// set the user actually had open.
+//
+// Without this, a channel opened from the /channels picker goes silently dead
+// after any reconnect: the sidebar still shows it as connected, because the
+// UI never learns that the new transport was never told to join it.
+func (c *LiveChatClient) replayRuntimeChannels(transport twitch.ChatClient) {
+	joiner, ok := transport.(twitch.ChannelJoiner)
+	if !ok {
+		return
+	}
+	c.mu.RLock()
+	joined := make([]string, 0, len(c.joinedAtRuntime))
+	for channel := range c.joinedAtRuntime {
+		joined = append(joined, channel)
+	}
+	parted := make([]string, 0, len(c.partedAtRuntime))
+	for channel := range c.partedAtRuntime {
+		parted = append(parted, channel)
+	}
+	c.mu.RUnlock()
+
+	// Sorted so a reconnect issues the same commands in the same order every
+	// time, which keeps the debug log and the tests readable.
+	slices.Sort(joined)
+	slices.Sort(parted)
+	for _, channel := range joined {
+		if err := joiner.Join(channel); err != nil {
+			c.debugLiveEvent("live_chat.reconnect.rejoin_failed",
+				slog.String("channel", channel), slog.String("error", err.Error()))
+		}
+	}
+	for _, channel := range parted {
+		if err := joiner.Depart(channel); err != nil {
+			c.debugLiveEvent("live_chat.reconnect.repart_failed",
+				slog.String("channel", channel), slog.String("error", err.Error()))
+		}
+	}
 }
 
 func (c *LiveChatClient) channelJoiner() (twitch.ChannelJoiner, error) {
@@ -401,6 +483,10 @@ func (c *LiveChatClient) reconnect(ctx context.Context, kind string) error {
 	}
 	c.setSession(session)
 	go c.bridge(session)
+	// The replacement transport joined the configured default channels on its
+	// own; anything the user opened or closed since then has to be replayed,
+	// or those channels quietly stop delivering while still looking connected.
+	c.replayRuntimeChannels(session.transport)
 	c.debugLiveEvent("live_chat.reconnect.session_started")
 	return nil
 }

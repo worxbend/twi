@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -907,6 +908,36 @@ type fakeTwitchTransport struct {
 	sendErr   error
 	sends     []SendRequest
 	replies   []SendRequest
+	joined    []string
+	departed  []string
+}
+
+// Join and Depart make the fake a twitch.ChannelJoiner, which is what
+// LiveChatClient replays runtime channel changes through after a reconnect.
+func (t *fakeTwitchTransport) Join(channels ...string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.joined = append(t.joined, channels...)
+	return nil
+}
+
+func (t *fakeTwitchTransport) Depart(channel string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.departed = append(t.departed, channel)
+	return nil
+}
+
+func (t *fakeTwitchTransport) joinedChannels() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]string(nil), t.joined...)
+}
+
+func (t *fakeTwitchTransport) departedChannels() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]string(nil), t.departed...)
 }
 
 func newFakeTwitchTransport(buffer int) *fakeTwitchTransport {
@@ -1464,5 +1495,91 @@ func TestCloseDoesNotDeadlockAgainstAFailingReconnect(t *testing.T) {
 	case <-reconnectReturned:
 	case <-time.After(10 * time.Second):
 		t.Fatal("reconnect did not return after Close")
+	}
+}
+
+// TestReconnectReplaysRuntimeChannelChanges is a regression test for channels
+// opened at runtime going silently dead after a reconnect.
+//
+// A replacement transport is built from the configured default channels, so it
+// knows nothing about a channel opened later from the /channels picker. Before
+// this was fixed the channel stayed in the sidebar showing "connected" while
+// receiving nothing, because the UI was never told the new transport had not
+// joined it.
+//
+// The changes are replayed as deltas, not as one absolute set: a channel the
+// user closed must stay closed even though the fresh transport rejoins the
+// configured defaults by itself.
+func TestReconnectReplaysRuntimeChannelChanges(t *testing.T) {
+	factory := &fakeRestartTransportFactory{}
+	factory.queueTransport(newFakeTwitchTransport(4))
+	second := factory.queueTransport(newFakeTwitchTransport(4))
+
+	client, err := NewRestartableLiveChatClient(context.Background(), factory.newTransport, 8)
+	if err != nil {
+		t.Fatalf("NewRestartableLiveChatClient returned error: %v", err)
+	}
+	defer client.Close()
+	<-client.ConnectionStates()
+
+	if err := client.JoinChannel("opened_at_runtime"); err != nil {
+		t.Fatalf("JoinChannel returned error: %v", err)
+	}
+	if err := client.PartChannel("closed_at_runtime"); err != nil {
+		t.Fatalf("PartChannel returned error: %v", err)
+	}
+
+	if err := client.Reconnect(context.Background()); err != nil {
+		t.Fatalf("Reconnect returned error: %v", err)
+	}
+
+	if got := second.joinedChannels(); !slices.Contains(got, "opened_at_runtime") {
+		t.Errorf("replacement transport joined %v, want it to rejoin opened_at_runtime", got)
+	}
+	if got := second.departedChannels(); !slices.Contains(got, "closed_at_runtime") {
+		t.Errorf("replacement transport departed %v, want it to re-part closed_at_runtime", got)
+	}
+	// The two deltas are mutually exclusive: a channel that was closed must
+	// not also be rejoined, or closing it would not survive a reconnect.
+	if got := second.joinedChannels(); slices.Contains(got, "closed_at_runtime") {
+		t.Errorf("replacement transport rejoined %v, resurrecting a channel the user closed", got)
+	}
+}
+
+// TestRuntimeChannelDeltasKeepOnlyTheLatestAction checks the bookkeeping
+// directly: rejoining a channel that was parted must cancel the part, and
+// parting one that was joined must cancel the join, or a reconnect would
+// replay two contradictory commands whose outcome depends on ordering.
+func TestRuntimeChannelDeltasKeepOnlyTheLatestAction(t *testing.T) {
+	factory := &fakeRestartTransportFactory{}
+	factory.queueTransport(newFakeTwitchTransport(4))
+	second := factory.queueTransport(newFakeTwitchTransport(4))
+
+	client, err := NewRestartableLiveChatClient(context.Background(), factory.newTransport, 8)
+	if err != nil {
+		t.Fatalf("NewRestartableLiveChatClient returned error: %v", err)
+	}
+	defer client.Close()
+	<-client.ConnectionStates()
+
+	// Open, close, then reopen: only the reopen should be replayed.
+	for _, step := range []func() error{
+		func() error { return client.JoinChannel("flipflop") },
+		func() error { return client.PartChannel("flipflop") },
+		func() error { return client.JoinChannel("flipflop") },
+	} {
+		if err := step(); err != nil {
+			t.Fatalf("channel change returned error: %v", err)
+		}
+	}
+	if err := client.Reconnect(context.Background()); err != nil {
+		t.Fatalf("Reconnect returned error: %v", err)
+	}
+
+	if got := second.joinedChannels(); !slices.Contains(got, "flipflop") {
+		t.Errorf("joined = %v, want flipflop rejoined", got)
+	}
+	if got := second.departedChannels(); slices.Contains(got, "flipflop") {
+		t.Errorf("departed = %v, want no part replayed for a channel left open", got)
 	}
 }
