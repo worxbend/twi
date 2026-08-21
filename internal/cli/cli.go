@@ -17,6 +17,7 @@ import (
 	"github.com/worxbend/twi/internal/auth"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/debuglog"
+	"github.com/worxbend/twi/internal/doctor"
 	"github.com/worxbend/twi/internal/storage"
 	"github.com/worxbend/twi/internal/theme"
 	"github.com/worxbend/twi/internal/twitch"
@@ -291,14 +292,14 @@ var newLiveTokenValidator = func() twitch.TokenValidator {
 	return newDoctorTokenValidator()
 }
 
-var doctorReachabilityProbe = app.ProbeTwitchIRCReachability
+var doctorReachabilityProbe = doctor.ProbeTwitchIRCReachability
 
 var doctorCacheDir = func() string {
 	return ""
 }
 
-var buildDoctorReport = func(ctx context.Context, cfg config.Config, cfgErr error) app.DoctorReport {
-	return app.DoctorWithOptions(ctx, cfg, app.DoctorOptions{
+var buildDoctorReport = func(ctx context.Context, cfg config.Config, cfgErr error) doctor.Report {
+	return doctor.RunWithOptions(ctx, cfg, doctor.Options{
 		CacheDir:          doctorCacheDir(),
 		ConfigLoadError:   cfgErr,
 		ReachabilityProbe: doctorReachabilityProbe,
@@ -1001,7 +1002,7 @@ func refreshedCredentialRecord(cfg config.Config, base storage.CredentialRecord,
 	return record
 }
 
-func credentialFileDoctorCheck(status credentialLoadStatus) app.DoctorCheck {
+func credentialFileDoctorCheck(status credentialLoadStatus) doctor.Check {
 	label := strings.TrimSpace(status.Label)
 	if label == "" {
 		label = "credential store"
@@ -1015,22 +1016,22 @@ func credentialFileDoctorCheck(status credentialLoadStatus) app.DoctorCheck {
 	}
 	displayLocation := config.RedactDisplayValue(location)
 	if status.Err != nil {
-		return app.DoctorCheck{
+		return doctor.Check{
 			Name:   label,
-			Status: app.DoctorStatusWarn,
+			Status: doctor.StatusWarn,
 			Detail: fmt.Sprintf("%s load failed: %s; using env/config/defaults", displayLocation, config.RedactDisplayValue(status.Err.Error())),
 		}
 	}
 	if status.Present {
-		return app.DoctorCheck{
+		return doctor.Check{
 			Name:   label,
-			Status: app.DoctorStatusOK,
+			Status: doctor.StatusOK,
 			Detail: displayLocation + " loaded",
 		}
 	}
-	return app.DoctorCheck{
+	return doctor.Check{
 		Name:   label,
-		Status: app.DoctorStatusWarn,
+		Status: doctor.StatusWarn,
 		Detail: displayLocation + " not found; run `twi login` after configuring a Twitch app client",
 	}
 }

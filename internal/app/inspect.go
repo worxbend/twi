@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/worxbend/twi/internal/config"
+	"github.com/worxbend/twi/internal/auth"
 	"github.com/worxbend/twi/internal/textsafe"
 	"github.com/worxbend/twi/internal/twitch"
 )
@@ -239,6 +239,11 @@ func safeDiagnosticValue(value string) string {
 	return redactDiagnosticText(emptyFallback(value, "unknown"))
 }
 
+// redactedMarker is what twi's diagnostic output prints in place of a
+// credential. internal/auth uses "<redacted>" for the same purpose; the
+// bracket form is what `twi doctor` and `twi config show` have always printed.
+const redactedMarker = "[redacted]"
+
 // redactDiagnosticText makes a raw protocol value safe to print.
 //
 // Two separate hazards, in this order. textsafe.Display removes the control
@@ -250,7 +255,7 @@ func safeDiagnosticValue(value string) string {
 // redactSensitive then removes anything credential-shaped, which matters
 // because reply and system tags can quote text the user typed.
 func redactDiagnosticText(value string) string {
-	return redactSensitive(textsafe.Display(value), config.Config{})
+	return auth.NewRedactor().WithPlaceholder(redactedMarker).Redact(textsafe.Display(value))
 }
 
 func sensitiveDiagnosticKey(key string) bool {

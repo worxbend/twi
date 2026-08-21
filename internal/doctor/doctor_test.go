@@ -1,4 +1,4 @@
-package app
+package doctor
 
 import (
 	"context"
@@ -18,7 +18,7 @@ func TestDoctorRunsWithoutCredentialsAndUsesWarnings(t *testing.T) {
 	cfg := config.Default()
 	cfg.Path = filepath.Join(t.TempDir(), "missing.toml")
 
-	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+	report := RunWithOptions(context.Background(), cfg, Options{
 		Environ:  []string{"TERM=dumb"},
 		CacheDir: cacheDir,
 		ReachabilityProbe: func(context.Context) error {
@@ -30,14 +30,14 @@ func TestDoctorRunsWithoutCredentialsAndUsesWarnings(t *testing.T) {
 	// OAuth token, so not configuring one is not a problem to warn about.
 	for _, name := range []string{"config file", "oauth token", "token validation", "twitch reachability", "terminal"} {
 		check := doctorCheck(t, report, name)
-		if check.Status != DoctorStatusWarn {
+		if check.Status != StatusWarn {
 			t.Fatalf("%s status = %q, want warn; detail=%q", name, check.Status, check.Detail)
 		}
 	}
-	if check := doctorCheck(t, report, "cache directory"); check.Status != DoctorStatusOK {
+	if check := doctorCheck(t, report, "cache directory"); check.Status != StatusOK {
 		t.Fatalf("cache status = %q, want ok; detail=%q", check.Status, check.Detail)
 	}
-	if check := doctorCheck(t, report, "legacy asset cache"); check.Status != DoctorStatusOK {
+	if check := doctorCheck(t, report, "legacy asset cache"); check.Status != StatusOK {
 		t.Fatalf("cache pruning status = %q, want ok; detail=%q", check.Status, check.Detail)
 	}
 	entries, err := os.ReadDir(cacheDir)
@@ -67,7 +67,7 @@ func TestDoctorReportsCredentialPresenceAndValidationWithoutSecrets(t *testing.T
 		},
 	})
 
-	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+	report := RunWithOptions(context.Background(), cfg, Options{
 		Environ:  []string{"TERM=xterm-256color", "COLORTERM=truecolor"},
 		CacheDir: filepath.Join(t.TempDir(), "cache"),
 		ReachabilityProbe: func(context.Context) error {
@@ -78,23 +78,23 @@ func TestDoctorReportsCredentialPresenceAndValidationWithoutSecrets(t *testing.T
 
 	for _, name := range []string{"oauth token", "refresh token", "client id"} {
 		check := doctorCheck(t, report, name)
-		if check.Status != DoctorStatusOK || check.Detail != "present" {
+		if check.Status != StatusOK || check.Detail != "present" {
 			t.Fatalf("%s = (%q, %q), want ok present", name, check.Status, check.Detail)
 		}
 	}
 	// twitch username reports how the login is resolved rather than bare
 	// presence, since it is derived from the token and only a fallback.
-	if user := doctorCheck(t, report, "twitch username"); user.Status != DoctorStatusOK {
+	if user := doctorCheck(t, report, "twitch username"); user.Status != StatusOK {
 		t.Fatalf("twitch username = (%q, %q), want ok", user.Status, user.Detail)
 	}
 	// The client secret check reports refresh capability rather than bare
 	// presence, because a saved refresh token without a secret cannot be
 	// redeemed. See TestDoctorWarnsWhenRefreshTokenCannotBeRedeemed.
-	if secret := doctorCheck(t, report, "client secret"); secret.Status != DoctorStatusOK {
+	if secret := doctorCheck(t, report, "client secret"); secret.Status != StatusOK {
 		t.Fatalf("client secret = (%q, %q), want ok when a secret is configured", secret.Status, secret.Detail)
 	}
 	validation := doctorCheck(t, report, "token validation")
-	if validation.Status != DoctorStatusWarn || !strings.Contains(validation.Detail, "chat:edit") {
+	if validation.Status != StatusWarn || !strings.Contains(validation.Detail, "chat:edit") {
 		t.Fatalf("token validation = (%q, %q), want missing chat:edit warning", validation.Status, validation.Detail)
 	}
 	requests := validator.Requests()
@@ -115,13 +115,13 @@ func TestDoctorReportsMultipleChannelsAsConfigured(t *testing.T) {
 	cfg := config.Default()
 	cfg.DefaultChannels = []string{"alpha", "beta"}
 
-	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+	report := RunWithOptions(context.Background(), cfg, Options{
 		Environ:  []string{"TERM=xterm-256color"},
 		CacheDir: filepath.Join(t.TempDir(), "cache"),
 	})
 
 	check := doctorCheck(t, report, "channels")
-	if check.Status != DoctorStatusOK || !strings.Contains(check.Detail, "2 configured") {
+	if check.Status != StatusOK || !strings.Contains(check.Detail, "2 configured") {
 		t.Fatalf("channels check = (%q, %q), want ok 2 configured", check.Status, check.Detail)
 	}
 }
@@ -187,7 +187,7 @@ func TestDoctorReportsTokenValidationStates(t *testing.T) {
 			cfg.Twitch.Username = "viewer"
 			cfg.Twitch.OAuthToken = "oauth:secret-token"
 
-			report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+			report := RunWithOptions(context.Background(), cfg, Options{
 				Environ:           []string{"TERM=xterm-256color"},
 				CacheDir:          filepath.Join(t.TempDir(), "cache"),
 				ReachabilityProbe: func(context.Context) error { return nil },
@@ -214,7 +214,7 @@ func TestDoctorReportsTokenValidationContext(t *testing.T) {
 	cfg.Twitch.ClientSecret = "client-secret"
 	expiresAt := time.Date(2026, 7, 2, 12, 30, 0, 0, time.UTC)
 
-	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+	report := RunWithOptions(context.Background(), cfg, Options{
 		Environ:           []string{"TERM=xterm-256color"},
 		CacheDir:          filepath.Join(t.TempDir(), "cache"),
 		ReachabilityProbe: func(context.Context) error { return nil },
@@ -256,7 +256,7 @@ func TestDoctorRedactsValidatorErrors(t *testing.T) {
 		Err: errors.New("Bearer bearer-secret rejected with client-secret and authorization_code=auth-code-secret"),
 	})
 
-	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+	report := RunWithOptions(context.Background(), cfg, Options{
 		Environ:  []string{"TERM=xterm-256color"},
 		CacheDir: filepath.Join(t.TempDir(), "cache"),
 		ReachabilityProbe: func(context.Context) error {
@@ -266,7 +266,7 @@ func TestDoctorRedactsValidatorErrors(t *testing.T) {
 	})
 
 	validation := doctorCheck(t, report, "token validation")
-	if validation.Status != DoctorStatusWarn {
+	if validation.Status != StatusWarn {
 		t.Fatalf("token validation status = %q, want warn", validation.Status)
 	}
 	if !strings.Contains(validation.Detail, "[redacted]") {
@@ -283,7 +283,7 @@ func TestDoctorContinuesWhenValidationCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	report := DoctorWithOptions(ctx, cfg, DoctorOptions{
+	report := RunWithOptions(ctx, cfg, Options{
 		Environ:           []string{"TERM=xterm-256color"},
 		CacheDir:          filepath.Join(t.TempDir(), "cache"),
 		ReachabilityProbe: func(context.Context) error { return nil },
@@ -293,10 +293,10 @@ func TestDoctorContinuesWhenValidationCanceled(t *testing.T) {
 	})
 
 	validation := doctorCheck(t, report, "token validation")
-	if validation.Status != DoctorStatusWarn || !strings.Contains(validation.Detail, "canceled") {
+	if validation.Status != StatusWarn || !strings.Contains(validation.Detail, "canceled") {
 		t.Fatalf("token validation = (%q, %q), want canceled warning", validation.Status, validation.Detail)
 	}
-	if check := doctorCheck(t, report, "cache directory"); check.Status != DoctorStatusOK {
+	if check := doctorCheck(t, report, "cache directory"); check.Status != StatusOK {
 		t.Fatalf("cache status = %q, want ok; detail=%q", check.Status, check.Detail)
 	}
 }
@@ -316,14 +316,14 @@ func TestDoctorReportsLeftoverAssetCache(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.Path = filepath.Join(t.TempDir(), "missing.toml")
-	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+	report := RunWithOptions(context.Background(), cfg, Options{
 		Environ:           []string{"TERM=xterm-256color"},
 		CacheDir:          cacheDir,
 		ReachabilityProbe: func(context.Context) error { return nil },
 	})
 
 	check := doctorCheck(t, report, "legacy asset cache")
-	if check.Status != DoctorStatusWarn {
+	if check.Status != StatusWarn {
 		t.Fatalf("legacy asset cache status = %q, want warn; detail=%q", check.Status, check.Detail)
 	}
 	for _, want := range []string{"1 file(s)", "can be deleted"} {
@@ -345,13 +345,13 @@ func TestDoctorReportsLeftoverAssetCache(t *testing.T) {
 func TestDoctorReportsNoLeftoverAssetCacheWhenAbsent(t *testing.T) {
 	cfg := config.Default()
 	cfg.Path = filepath.Join(t.TempDir(), "missing.toml")
-	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+	report := RunWithOptions(context.Background(), cfg, Options{
 		Environ:           []string{"TERM=xterm-256color"},
 		CacheDir:          filepath.Join(t.TempDir(), "cache"),
 		ReachabilityProbe: func(context.Context) error { return nil },
 	})
 
-	if check := doctorCheck(t, report, "legacy asset cache"); check.Status != DoctorStatusOK {
+	if check := doctorCheck(t, report, "legacy asset cache"); check.Status != StatusOK {
 		t.Fatalf("legacy asset cache status = %q, want ok; detail=%q", check.Status, check.Detail)
 	}
 }
@@ -370,7 +370,7 @@ func TestDoctorLeftoverAssetCachePathDoesNotLeakSecrets(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.Path = filepath.Join(t.TempDir(), "missing.toml")
-	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+	report := RunWithOptions(context.Background(), cfg, Options{
 		Environ:           []string{"TERM=xterm-256color"},
 		CacheDir:          cacheDir,
 		ReachabilityProbe: func(context.Context) error { return nil },
@@ -384,13 +384,13 @@ func TestDoctorWarnsOnUnknownThemeAndStreamStatusModes(t *testing.T) {
 	cfg.Features.StreamStatusMode = "sometimes"
 	cfg.Features.EmoteAutocompleteMode = "sometimes"
 
-	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+	report := RunWithOptions(context.Background(), cfg, Options{
 		Environ:  []string{"TERM=xterm-256color", "COLORTERM=truecolor"},
 		CacheDir: filepath.Join(t.TempDir(), "cache"),
 	})
 
 	check := doctorCheck(t, report, "feature modes")
-	if check.Status != DoctorStatusWarn {
+	if check.Status != StatusWarn {
 		t.Fatalf("feature modes status = %q, want warn; detail=%q", check.Status, check.Detail)
 	}
 	for _, want := range []string{"theme=not-a-theme", "stream_status=sometimes", "emote_autocomplete=sometimes"} {
@@ -405,15 +405,15 @@ func TestDoctorStreamStatusCheckStates(t *testing.T) {
 
 	off := config.Default()
 	off.Features.StreamStatusMode = "off"
-	report := DoctorWithOptions(context.Background(), off, DoctorOptions{CacheDir: cacheDir})
-	if check := doctorCheck(t, report, "stream status polling"); check.Status != DoctorStatusWarn {
+	report := RunWithOptions(context.Background(), off, Options{CacheDir: cacheDir})
+	if check := doctorCheck(t, report, "stream status polling"); check.Status != StatusWarn {
 		t.Fatalf("stream status check with mode off = %q, want warn; detail=%q", check.Status, check.Detail)
 	}
 
 	missingCreds := config.Default()
-	report = DoctorWithOptions(context.Background(), missingCreds, DoctorOptions{CacheDir: cacheDir})
+	report = RunWithOptions(context.Background(), missingCreds, Options{CacheDir: cacheDir})
 	check := doctorCheck(t, report, "stream status polling")
-	if check.Status != DoctorStatusWarn {
+	if check.Status != StatusWarn {
 		t.Fatalf("stream status check without credentials = %q, want warn; detail=%q", check.Status, check.Detail)
 	}
 	if !strings.Contains(check.Detail, "twitch_client_id") || !strings.Contains(check.Detail, "twitch_oauth_token") {
@@ -423,13 +423,13 @@ func TestDoctorStreamStatusCheckStates(t *testing.T) {
 	ready := config.Default()
 	ready.Twitch.ClientID = "client-id"
 	ready.Twitch.OAuthToken = "oauth:token"
-	report = DoctorWithOptions(context.Background(), ready, DoctorOptions{CacheDir: cacheDir})
-	if check := doctorCheck(t, report, "stream status polling"); check.Status != DoctorStatusOK {
+	report = RunWithOptions(context.Background(), ready, Options{CacheDir: cacheDir})
+	if check := doctorCheck(t, report, "stream status polling"); check.Status != StatusOK {
 		t.Fatalf("stream status check with credentials = %q, want ok; detail=%q", check.Status, check.Detail)
 	}
 }
 
-func doctorCheck(t *testing.T, report DoctorReport, name string) DoctorCheck {
+func doctorCheck(t *testing.T, report Report, name string) Check {
 	t.Helper()
 	for _, check := range report.Checks {
 		if check.Name == name {
@@ -437,10 +437,10 @@ func doctorCheck(t *testing.T, report DoctorReport, name string) DoctorCheck {
 		}
 	}
 	t.Fatalf("doctor report missing check %q: %#v", name, report.Checks)
-	return DoctorCheck{}
+	return Check{}
 }
 
-func assertDoctorDoesNotLeak(t *testing.T, report DoctorReport, secrets ...string) {
+func assertDoctorDoesNotLeak(t *testing.T, report Report, secrets ...string) {
 	t.Helper()
 	for _, check := range report.Checks {
 		for _, secret := range secrets {
@@ -457,7 +457,7 @@ func TestDoctorWarnsOnUnknownLayoutAndBadgeModes(t *testing.T) {
 	features.BadgeMode = "sparkles"
 
 	check := featureModesCheck(features)
-	if check.Status != DoctorStatusWarn {
+	if check.Status != StatusWarn {
 		t.Fatalf("feature modes status = %v, want a warning for unknown modes", check.Status)
 	}
 	for _, want := range []string{"message_layout=sideways", "badge_mode=sparkles"} {
@@ -473,7 +473,7 @@ func TestDoctorAcceptsEveryValidLayoutAndBadgeMode(t *testing.T) {
 			features := config.Default().Features
 			features.MessageLayout = layout
 			features.BadgeMode = badges
-			if check := featureModesCheck(features); check.Status != DoctorStatusOK {
+			if check := featureModesCheck(features); check.Status != StatusOK {
 				t.Errorf("layout=%s badges=%s reported %v: %s", layout, badges, check.Status, check.Detail)
 			}
 		}
@@ -495,14 +495,14 @@ func TestDoctorWarnsWhenRefreshTokenCannotBeRedeemed(t *testing.T) {
 	cfg.Twitch.ClientID = "client-id"
 	cfg.Twitch.ClientSecret = ""
 
-	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+	report := RunWithOptions(context.Background(), cfg, Options{
 		Environ:           []string{"TERM=xterm-256color"},
 		CacheDir:          filepath.Join(t.TempDir(), "cache"),
 		ReachabilityProbe: func(context.Context) error { return nil },
 	})
 
 	check := doctorCheck(t, report, "client secret")
-	if check.Status != DoctorStatusWarn {
+	if check.Status != StatusWarn {
 		t.Fatalf("client secret = (%q, %q), want a warning", check.Status, check.Detail)
 	}
 	for _, want := range []string{"refresh token cannot be redeemed", "disconnect", "TWI_TWITCH_CLIENT_SECRET"} {
@@ -530,7 +530,7 @@ func TestDoctorNamesMissingRefreshCredential(t *testing.T) {
 		},
 	})
 
-	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+	report := RunWithOptions(context.Background(), cfg, Options{
 		Environ:           []string{"TERM=xterm-256color"},
 		CacheDir:          filepath.Join(t.TempDir(), "cache"),
 		ReachabilityProbe: func(context.Context) error { return nil },
@@ -550,7 +550,7 @@ func TestDoctorClientSecretStaysSoftWithoutRefreshToken(t *testing.T) {
 	cfg := config.Default()
 	cfg.Path = filepath.Join(t.TempDir(), "missing.toml")
 
-	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+	report := RunWithOptions(context.Background(), cfg, Options{
 		Environ:           []string{"TERM=xterm-256color"},
 		CacheDir:          filepath.Join(t.TempDir(), "cache"),
 		ReachabilityProbe: func(context.Context) error { return nil },

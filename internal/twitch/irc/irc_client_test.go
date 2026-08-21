@@ -915,6 +915,18 @@ func TestEmitDropsOldestEventWhenTheConsumerFallsBehind(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = client.Close() })
 
+	// The client emits a connection event from its connect goroutine as soon
+	// as the session registers. Take that first, so what follows is measured
+	// against an empty buffer instead of racing that emit.
+	select {
+	case event := <-events:
+		if event.Kind != twitch.EventConnection {
+			t.Fatalf("first event = %v, want the connection event", event.Kind)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no connection event was emitted")
+	}
+
 	// Nothing reads events, so the buffer fills and then overflows.
 	const sent = 8
 	for i := range sent {
@@ -975,6 +987,18 @@ func TestEmitDoesNotDropWhenTheConsumerKeepsUp(t *testing.T) {
 		t.Fatalf("Connect returned error: %v", err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
+
+	// The client emits a connection event from its connect goroutine as soon
+	// as the session registers. Take that first, so what follows is measured
+	// against an empty buffer instead of racing that emit.
+	select {
+	case event := <-events:
+		if event.Kind != twitch.EventConnection {
+			t.Fatalf("first event = %v, want the connection event", event.Kind)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no connection event was emitted")
+	}
 
 	for i := range 4 {
 		session.deliverPrivateMessage(gempir.PrivateMessage{

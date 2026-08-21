@@ -18,6 +18,7 @@ import (
 	"github.com/worxbend/twi/internal/auth"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/debuglog"
+	"github.com/worxbend/twi/internal/doctor"
 	"github.com/worxbend/twi/internal/storage"
 	"github.com/worxbend/twi/internal/twitch"
 	"github.com/worxbend/twi/internal/twitch/irc"
@@ -1761,14 +1762,14 @@ func TestDoctorDoesNotPrintSecrets(t *testing.T) {
 	defer func() {
 		buildDoctorReport = oldBuildDoctorReport
 	}()
-	buildDoctorReport = func(ctx context.Context, cfg config.Config, cfgErr error) app.DoctorReport {
+	buildDoctorReport = func(ctx context.Context, cfg config.Config, cfgErr error) doctor.Report {
 		validator := twitch.NewFakeTokenValidator(twitch.FakeTokenValidationOutcome{
 			Result: twitch.TokenValidationResult{
 				Status: twitch.TokenValidationMalformed,
 				Detail: "Twitch rejected oauth:access-token-private with Bearer bearer-secret, client_secret=client-secret, refresh_token=refresh-secret, authorization_code=auth-code-secret",
 			},
 		})
-		return app.DoctorWithOptions(ctx, cfg, app.DoctorOptions{
+		return doctor.RunWithOptions(ctx, cfg, doctor.Options{
 			Environ:         []string{"TERM=xterm-256color", "COLORTERM=truecolor"},
 			CacheDir:        t.TempDir(),
 			ConfigLoadError: cfgErr,
@@ -1807,10 +1808,10 @@ func TestDoctorDebugLogWritesRedactedCommandEvents(t *testing.T) {
 	t.Cleanup(func() {
 		buildDoctorReport = oldBuildDoctorReport
 	})
-	buildDoctorReport = func(context.Context, config.Config, error) app.DoctorReport {
-		return app.DoctorReport{Checks: []app.DoctorCheck{{
+	buildDoctorReport = func(context.Context, config.Config, error) doctor.Report {
+		return doctor.Report{Checks: []doctor.Check{{
 			Name:   "fixture",
-			Status: app.DoctorStatusOK,
+			Status: doctor.StatusOK,
 			Detail: "ok",
 		}}}
 	}
@@ -1850,8 +1851,8 @@ func TestDoctorWarnsWhenCredentialFileFallbackUnsupported(t *testing.T) {
 	newCredentialStore = func() (storage.CredentialStore, error) {
 		return nil, fmt.Errorf("%w: credential-file fallback is disabled on non-Unix builds; use environment variables or a private flat config file", storage.ErrUnsupportedCredentialFilePlatform)
 	}
-	buildDoctorReport = func(context.Context, config.Config, error) app.DoctorReport {
-		return app.DoctorReport{}
+	buildDoctorReport = func(context.Context, config.Config, error) doctor.Report {
+		return doctor.Report{}
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -2033,7 +2034,7 @@ func TestDefaultDoctorReportWiresTokenValidator(t *testing.T) {
 		t.Fatalf("validator request = %#v, want configured credentials", requests[0])
 	}
 	validation := doctorCheck(t, report, "token validation")
-	if validation.Status != app.DoctorStatusOK {
+	if validation.Status != doctor.StatusOK {
 		t.Fatalf("token validation status = %q, want ok; detail=%q", validation.Status, validation.Detail)
 	}
 	if strings.Contains(validation.Detail, "oauth:access-token-private") || strings.Contains(validation.Detail, "access-token-private") {
@@ -2055,14 +2056,14 @@ func TestDoctorReportsConfigLoadErrorAndUsesEnvFallback(t *testing.T) {
 	defer func() {
 		buildDoctorReport = oldBuildDoctorReport
 	}()
-	buildDoctorReport = func(ctx context.Context, cfg config.Config, cfgErr error) app.DoctorReport {
+	buildDoctorReport = func(ctx context.Context, cfg config.Config, cfgErr error) doctor.Report {
 		if cfgErr == nil {
 			t.Fatal("doctor report builder received nil config error, want parse error")
 		}
 		if cfg.Twitch.Username != "viewer" || cfg.Twitch.OAuthToken != "oauth:secret" {
 			t.Fatalf("fallback credentials = (%q, %q), want env values", cfg.Twitch.Username, cfg.Twitch.OAuthToken)
 		}
-		return app.DoctorWithOptions(ctx, cfg, app.DoctorOptions{
+		return doctor.RunWithOptions(ctx, cfg, doctor.Options{
 			Environ:         []string{"TERM=xterm-256color"},
 			CacheDir:        t.TempDir(),
 			ConfigLoadError: cfgErr,
@@ -2088,7 +2089,7 @@ func TestDoctorReportsConfigLoadErrorAndUsesEnvFallback(t *testing.T) {
 	}
 }
 
-func doctorCheck(t *testing.T, report app.DoctorReport, name string) app.DoctorCheck {
+func doctorCheck(t *testing.T, report doctor.Report, name string) doctor.Check {
 	t.Helper()
 	for _, check := range report.Checks {
 		if check.Name == name {
@@ -2096,7 +2097,7 @@ func doctorCheck(t *testing.T, report app.DoctorReport, name string) app.DoctorC
 		}
 	}
 	t.Fatalf("doctor report missing check %q: %#v", name, report.Checks)
-	return app.DoctorCheck{}
+	return doctor.Check{}
 }
 
 type fakeLoginCallbackWaiter struct {

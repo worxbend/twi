@@ -1,4 +1,14 @@
-package app
+// Package doctor implements `twi doctor`: a read-only check of whether this
+// machine is set up to run twi, and an explanation of anything that is not.
+//
+// It lives outside internal/app because it is not part of the terminal UI. It
+// draws nothing, holds no shell state, and imports neither Bubble Tea nor
+// lipgloss -- it reads configuration, credentials, the terminal environment
+// and the filesystem, and returns a Report that the CLI prints. Keeping it in
+// the UI package meant those 600 lines were rebuilt and reasoned about
+// alongside chat rendering, and it was the only reason internal/app depended
+// on internal/storage at all.
+package doctor
 
 import (
 	"context"
@@ -20,8 +30,8 @@ import (
 )
 
 const (
-	DoctorStatusOK   DoctorStatus = "ok"
-	DoctorStatusWarn DoctorStatus = "warn"
+	StatusOK   Status = "ok"
+	StatusWarn Status = "warn"
 )
 
 // redactedMarker is what twi's diagnostic output prints in place of a
@@ -30,19 +40,19 @@ const (
 // `twi config show` have always printed.
 const redactedMarker = "[redacted]"
 
-type DoctorStatus string
+type Status string
 
-type DoctorReport struct {
-	Checks []DoctorCheck
+type Report struct {
+	Checks []Check
 }
 
-type DoctorCheck struct {
+type Check struct {
 	Name   string
-	Status DoctorStatus
+	Status Status
 	Detail string
 }
 
-type DoctorOptions struct {
+type Options struct {
 	Environ           []string
 	CacheDir          string
 	ConfigLoadError   error
@@ -52,14 +62,14 @@ type DoctorOptions struct {
 
 type ReachabilityProbe func(context.Context) error
 
-func Doctor(ctx context.Context, cfg config.Config) DoctorReport {
-	return DoctorWithOptions(ctx, cfg, DoctorOptions{
+func Run(ctx context.Context, cfg config.Config) Report {
+	return RunWithOptions(ctx, cfg, Options{
 		Environ:           os.Environ(),
 		ReachabilityProbe: ProbeTwitchIRCReachability,
 	})
 }
 
-func DoctorWithOptions(ctx context.Context, cfg config.Config, opts DoctorOptions) DoctorReport {
+func RunWithOptions(ctx context.Context, cfg config.Config, opts Options) Report {
 	if opts.Environ == nil {
 		opts.Environ = os.Environ()
 	}
@@ -67,7 +77,7 @@ func DoctorWithOptions(ctx context.Context, cfg config.Config, opts DoctorOption
 		opts.ReachabilityProbe = ProbeTwitchIRCReachability
 	}
 
-	checks := []DoctorCheck{
+	checks := []Check{
 		configPathCheck(cfg.Path, opts.ConfigLoadError),
 		usernameCheck(cfg.Twitch.Username),
 		credentialCheck("oauth token", cfg.Twitch.OAuthToken, "live chat unavailable until TWI_TWITCH_OAUTH_TOKEN or TWITCH_ACCESS_TOKEN is set"),
@@ -89,7 +99,7 @@ func DoctorWithOptions(ctx context.Context, cfg config.Config, opts DoctorOption
 	for i := range checks {
 		checks[i].Detail = redactSensitive(checks[i].Detail, cfg)
 	}
-	return DoctorReport{Checks: checks}
+	return Report{Checks: checks}
 }
 
 func ProbeTwitchIRCReachability(ctx context.Context) error {
@@ -104,7 +114,7 @@ func ProbeTwitchIRCReachability(ctx context.Context) error {
 	return conn.Close()
 }
 
-func configPathCheck(path string, loadErr error) DoctorCheck {
+func configPathCheck(path string, loadErr error) Check {
 	if strings.TrimSpace(path) == "" {
 		return warnCheck("config file", "path unavailable")
 	}
@@ -134,21 +144,21 @@ func configPathCheck(path string, loadErr error) DoctorCheck {
 // was "unavailable until TWI_TWITCH_USERNAME is set", which sent people to
 // configure something that has not been required since the login became
 // token-derived.
-func usernameCheck(username string) DoctorCheck {
+func usernameCheck(username string) Check {
 	if strings.TrimSpace(username) == "" {
 		return okCheck("twitch username", "not set; the login is derived from the OAuth token")
 	}
 	return okCheck("twitch username", "set; used only as a fallback if token validation is unreachable")
 }
 
-func credentialCheck(name, value, missingDetail string) DoctorCheck {
+func credentialCheck(name, value, missingDetail string) Check {
 	if strings.TrimSpace(value) == "" {
 		return warnCheck(name, "missing; "+missingDetail)
 	}
 	return okCheck(name, "present")
 }
 
-func channelsCheck(channels []string) DoctorCheck {
+func channelsCheck(channels []string) Check {
 	switch len(channels) {
 	case 0:
 		// Not an error: twi starts on the empty state and /channels opens the
@@ -161,10 +171,10 @@ func channelsCheck(channels []string) DoctorCheck {
 	}
 }
 
-func tokenValidationCheck(ctx context.Context, cfg config.Config, validator twitch.TokenValidator) DoctorCheck {
+func tokenValidationCheck(ctx context.Context, cfg config.Config, validator twitch.TokenValidator) Check {
 	// Every result of this check is reported under the same name, and every
 	// one but the last is a warning, so both are bound once here.
-	warn := func(parts ...string) DoctorCheck {
+	warn := func(parts ...string) Check {
 		return warnCheck("token validation", joinTokenValidationDetails(parts...))
 	}
 
@@ -254,7 +264,7 @@ func tokenValidationCheck(ctx context.Context, cfg config.Config, validator twit
 		capabilities()...)...))
 }
 
-func reachabilityCheck(ctx context.Context, probe ReachabilityProbe) DoctorCheck {
+func reachabilityCheck(ctx context.Context, probe ReachabilityProbe) Check {
 	if probe == nil {
 		return warnCheck("twitch reachability", "not checked")
 	}
@@ -264,7 +274,7 @@ func reachabilityCheck(ctx context.Context, probe ReachabilityProbe) DoctorCheck
 	return okCheck("twitch reachability", "irc.chat.twitch.tv:6697 reachable")
 }
 
-func terminalCheck(environ []string) DoctorCheck {
+func terminalCheck(environ []string) Check {
 	term := envMap(environ)["TERM"]
 	switch {
 	case term == "":
@@ -276,7 +286,7 @@ func terminalCheck(environ []string) DoctorCheck {
 	}
 }
 
-func colorCheck(environ []string) DoctorCheck {
+func colorCheck(environ []string) Check {
 	env := envMap(environ)
 	term := env["TERM"]
 	colorTerm := strings.ToLower(env["COLORTERM"])
@@ -292,7 +302,7 @@ func colorCheck(environ []string) DoctorCheck {
 	}
 }
 
-func mouseCheck(environ []string) DoctorCheck {
+func mouseCheck(environ []string) Check {
 	term := envMap(environ)["TERM"]
 	if term == "" || term == "dumb" {
 		return warnCheck("terminal mouse", "mouse support unknown; keyboard controls remain primary")
@@ -300,7 +310,7 @@ func mouseCheck(environ []string) DoctorCheck {
 	return okCheck("terminal mouse", "terminal advertises interactive capabilities; mouse behavior remains optional")
 }
 
-func cacheCheck(cacheDir string) DoctorCheck {
+func cacheCheck(cacheDir string) Check {
 	if strings.TrimSpace(cacheDir) == "" {
 		defaultDir, err := config.DefaultCacheDir()
 		if err != nil {
@@ -326,7 +336,7 @@ func cacheCheck(cacheDir string) DoctorCheck {
 // This only reports. `twi doctor` is a diagnostic command, and deleting a
 // user's files as a side effect of asking for a report would be a surprise;
 // the check says what to remove and leaves the choice to the reader.
-func legacyAssetCacheCheck(cacheDir string) DoctorCheck {
+func legacyAssetCacheCheck(cacheDir string) Check {
 	assetDir, err := legacyAssetCacheDir(cacheDir)
 	if err != nil {
 		return okCheck("legacy asset cache", "no cache directory to check")
@@ -398,7 +408,7 @@ func staleUsernameDetail(configured, actual string) string {
 	)
 }
 
-func featureModesCheck(features config.FeatureConfig) DoctorCheck {
+func featureModesCheck(features config.FeatureConfig) Check {
 	detail := fmt.Sprintf(
 		"avatar=%s animation=%s theme=%s stream_status=%s emote_autocomplete=%s mouse=%t layout=%s badges=%s highlight_emotes=%t full_username=%t",
 		features.AvatarMode,
@@ -447,7 +457,7 @@ func unknownFeatureModes(features config.FeatureConfig) []string {
 // streamStatusCheck reports whether the real-broadcast LIVE indicator can
 // poll Twitch Helix "Get Streams" (see cli.newStreamStatusResolver): it
 // needs stream_status_mode enabled plus a Client ID and OAuth token.
-func streamStatusCheck(cfg config.Config) DoctorCheck {
+func streamStatusCheck(cfg config.Config) Check {
 	if strings.EqualFold(strings.TrimSpace(cfg.Features.StreamStatusMode), "off") {
 		return warnCheck("stream status polling", "disabled by stream_status_mode=off; the LIVE indicator will show OFFLINE")
 	}
@@ -491,7 +501,7 @@ func tokenValidationDetail(validation twitch.TokenValidationResult, fallback str
 // refresh token that can never be redeemed, and chat drops mid-session with
 // nothing having warned about it. That deserves a warning here rather than
 // the old "optional OAuth client-secret flow unavailable".
-func clientSecretCheck(cfg config.TwitchConfig) DoctorCheck {
+func clientSecretCheck(cfg config.TwitchConfig) Check {
 	if strings.TrimSpace(cfg.ClientSecret) != "" {
 		return okCheck("client secret", "set; unattended token refresh can run")
 	}
@@ -629,10 +639,10 @@ func oneOf(value string, allowed ...string) bool {
 	return slices.Contains(allowed, value)
 }
 
-func okCheck(name, detail string) DoctorCheck {
-	return DoctorCheck{Name: name, Status: DoctorStatusOK, Detail: detail}
+func okCheck(name, detail string) Check {
+	return Check{Name: name, Status: StatusOK, Detail: detail}
 }
 
-func warnCheck(name, detail string) DoctorCheck {
-	return DoctorCheck{Name: name, Status: DoctorStatusWarn, Detail: detail}
+func warnCheck(name, detail string) Check {
+	return Check{Name: name, Status: StatusWarn, Detail: detail}
 }
