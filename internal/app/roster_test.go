@@ -131,11 +131,11 @@ func TestMembershipEventsFeedRosterAndActivityLog(t *testing.T) {
 	if !ok || !entry.Present {
 		t.Fatalf("join did not mark chatter present: found=%v", ok)
 	}
-	if len(model.activityLog) != 1 || !strings.Contains(model.activityLog[0].Text, "newviewer joined") {
-		t.Fatalf("activity log = %+v, want a 'newviewer joined' entry", model.activityLog)
+	if len(model.activity.activityLog) != 1 || !strings.Contains(model.activity.activityLog[0].Text, "newviewer joined") {
+		t.Fatalf("activity log = %+v, want a 'newviewer joined' entry", model.activity.activityLog)
 	}
-	if model.activityLog[0].Kind != activityMembership {
-		t.Fatalf("activity kind = %q, want %q", model.activityLog[0].Kind, activityMembership)
+	if model.activity.activityLog[0].Kind != activityMembership {
+		t.Fatalf("activity kind = %q, want %q", model.activity.activityLog[0].Kind, activityMembership)
 	}
 
 	updated, _ = model.Update(chatClientMembershipMsg{ok: true, membership: twitch.MembershipEvent{
@@ -145,8 +145,8 @@ func TestMembershipEventsFeedRosterAndActivityLog(t *testing.T) {
 	if entry, _ = model.activeChannelState().roster.lookup("newviewer"); entry.Present {
 		t.Fatal("part did not clear presence")
 	}
-	if len(model.activityLog) != 2 || !strings.Contains(model.activityLog[1].Text, "newviewer left") {
-		t.Fatalf("activity log = %+v, want a 'newviewer left' entry", model.activityLog)
+	if len(model.activity.activityLog) != 2 || !strings.Contains(model.activity.activityLog[1].Text, "newviewer left") {
+		t.Fatalf("activity log = %+v, want a 'newviewer left' entry", model.activity.activityLog)
 	}
 }
 
@@ -170,10 +170,10 @@ func TestMembershipBurstCollapsesIntoOneSummaryRow(t *testing.T) {
 	// that is rewritten in place - so a reconnect burst costs a bounded
 	// number of lines rather than one per join.
 	want := membershipActivityBurst + 1
-	if got := len(model.activityLog); got != want {
+	if got := len(model.activity.activityLog); got != want {
 		t.Fatalf("activity log rows after %d joins = %d, want %d", joins, got, want)
 	}
-	summary := model.activityLog[len(model.activityLog)-1].Text
+	summary := model.activity.activityLog[len(model.activity.activityLog)-1].Text
 	if !strings.Contains(summary, "more joined/left") {
 		t.Fatalf("last row = %q, want a collapsed burst summary", summary)
 	}

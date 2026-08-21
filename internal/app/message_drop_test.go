@@ -101,7 +101,7 @@ func TestStatusLineShowsDroppedMessages(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	model := newMockModelWithClock("example", cfg, &appFakeClock{now: time.Now()})
-	model.client = &fakeDropCounter{dropped: 143}
+	model.services.client = &fakeDropCounter{dropped: 143}
 
 	status := ansi.Strip(model.statusLine(120))
 	if !strings.Contains(status, "dropped=143") {
@@ -114,7 +114,7 @@ func TestStatusLineOmitsDropCounterWhenNothingDropped(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	model := newMockModelWithClock("example", cfg, &appFakeClock{now: time.Now()})
-	model.client = &fakeDropCounter{dropped: 0}
+	model.services.client = &fakeDropCounter{dropped: 0}
 
 	if status := ansi.Strip(model.statusLine(120)); strings.Contains(status, "dropped=") {
 		t.Fatalf("status line = %q, want no drop counter when nothing was dropped", status)

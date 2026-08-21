@@ -93,7 +93,7 @@ func TestSplashViewWordmarkAndTaglineCarryExplicitBackground(t *testing.T) {
 
 	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 22
-	model.splashUntil = time.Now().Add(splashDuration)
+	model.frames.splashUntil = time.Now().Add(splashDuration)
 
 	view := model.View()
 	// The wordmark/tagline/progress-bar lines are each rendered independently
@@ -110,7 +110,7 @@ func TestSplashViewWordmarkLineHasNoUnstyledGapBetweenResets(t *testing.T) {
 	cfg := config.Default()
 	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 22
-	model.splashUntil = time.Now().Add(splashDuration)
+	model.frames.splashUntil = time.Now().Add(splashDuration)
 
 	view := model.splashView()
 	var wordmarkLine string
@@ -225,7 +225,7 @@ func TestViewEmbedsThemeBackgroundSequenceDuringSplash(t *testing.T) {
 	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 88, 22
 	model.terminalOutput = &buf
-	model.splashUntil = time.Now().Add(splashDuration)
+	model.frames.splashUntil = time.Now().Add(splashDuration)
 
 	view := model.View()
 	want := "\x1b]11;" + model.canvasBackground() + "\x07"

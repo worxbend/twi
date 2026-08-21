@@ -152,7 +152,7 @@ func TestSidebarFocusNavigatesSwitchesAndCloses(t *testing.T) {
 	model.syncSidebarSelectionToActive()
 
 	model, _ = pressRune(model, 'j')
-	if got, want := model.sidebarSelected, 1; got != want {
+	if got, want := model.panes.sidebarSelected, 1; got != want {
 		t.Fatalf("selection after j = %d, want %d", got, want)
 	}
 	model, _ = pressRune(model, 'l')
@@ -185,7 +185,7 @@ func TestTabCycleIncludesTheSidebarOnlyWhenVisible(t *testing.T) {
 		t.Fatalf("focus after tab from composer = %v, want the visible sidebar", model.focus)
 	}
 
-	model.sidebarVisibility = sidebarHidden
+	model.panes.sidebarVisibility = sidebarHidden
 	model.focus = focusComposer
 	model, _ = press(model, tea.KeyMsg{Type: tea.KeyTab})
 	if model.focus != focusChat {

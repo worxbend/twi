@@ -41,15 +41,15 @@ func TestLiveModelReadsEveryFeatureSetting(t *testing.T) {
 		got   any
 		want  any
 	}{
-		{"MessageLayout", live.messageLayout, render.NormalizeLayoutMode("grouped")},
-		{"BadgeMode", live.badgeMode, render.NormalizeBadgeMode("text")},
-		{"HighlightEmotes", live.highlightEmotes, false},
-		{"FullUsername", live.fullUsername, true},
+		{"MessageLayout", live.display.messageLayout, render.NormalizeLayoutMode("grouped")},
+		{"BadgeMode", live.display.badgeMode, render.NormalizeBadgeMode("text")},
+		{"HighlightEmotes", live.display.highlightEmotes, false},
+		{"FullUsername", live.display.fullUsername, true},
 		{"EnableMouse", live.mouseEnabled, false},
 		{"AvatarMode", live.avatarMode, "off"},
 		{"ScrollbackLimit", live.channels.scrollbackLimit, 321},
-		{"SidebarWidth", live.sidebarWidthOverride, 20},
-		{"ActivityWidth", live.activityWidthOverride, 30},
+		{"SidebarWidth", live.panes.sidebarWidthOverride, 20},
+		{"ActivityWidth", live.panes.activityWidthOverride, 30},
 	}
 	for _, c := range checks {
 		if !reflect.DeepEqual(c.got, c.want) {
@@ -105,21 +105,21 @@ func TestMockAndLiveModelsAgreeOnConfigDerivedState(t *testing.T) {
 	mock := newMockModelWithClock("example", cfg, nil)
 	live := newLiveModelWithClock("example", cfg, nil, nil)
 
-	if mock.messageLayout != live.messageLayout {
-		t.Errorf("messageLayout: mock %v, live %v", mock.messageLayout, live.messageLayout)
+	if mock.display.messageLayout != live.display.messageLayout {
+		t.Errorf("messageLayout: mock %v, live %v", mock.display.messageLayout, live.display.messageLayout)
 	}
-	if mock.badgeMode != live.badgeMode {
-		t.Errorf("badgeMode: mock %v, live %v", mock.badgeMode, live.badgeMode)
+	if mock.display.badgeMode != live.display.badgeMode {
+		t.Errorf("badgeMode: mock %v, live %v", mock.display.badgeMode, live.display.badgeMode)
 	}
-	if mock.highlightEmotes != live.highlightEmotes {
-		t.Errorf("highlightEmotes: mock %v, live %v", mock.highlightEmotes, live.highlightEmotes)
+	if mock.display.highlightEmotes != live.display.highlightEmotes {
+		t.Errorf("highlightEmotes: mock %v, live %v", mock.display.highlightEmotes, live.display.highlightEmotes)
 	}
-	if mock.fullUsername != live.fullUsername {
-		t.Errorf("fullUsername: mock %v, live %v", mock.fullUsername, live.fullUsername)
+	if mock.display.fullUsername != live.display.fullUsername {
+		t.Errorf("fullUsername: mock %v, live %v", mock.display.fullUsername, live.display.fullUsername)
 	}
-	if mock.membershipBurstIndex != live.membershipBurstIndex {
+	if mock.activity.membershipBurstIndex != live.activity.membershipBurstIndex {
 		t.Errorf("membershipBurstIndex: mock %d, live %d; -1 means no burst is open",
-			mock.membershipBurstIndex, live.membershipBurstIndex)
+			mock.activity.membershipBurstIndex, live.activity.membershipBurstIndex)
 	}
 	if mock.animationMode != live.animationMode {
 		t.Errorf("animationMode: mock %q, live %q", mock.animationMode, live.animationMode)

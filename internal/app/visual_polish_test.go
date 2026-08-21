@@ -46,7 +46,7 @@ func TestSplashViewHasAnimatedLogoAndNamedBootPhases(t *testing.T) {
 	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 22
 	started := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
-	model.splashUntil = started.Add(splashDuration)
+	model.frames.splashUntil = started.Add(splashDuration)
 
 	loading := model.splashViewAt(started)
 	if !strings.Contains(loading, "████████") || !strings.Contains(loading, "twi · loading palette") {
@@ -68,7 +68,7 @@ func TestSplashViewRemainsResponsiveOnCompactTerminal(t *testing.T) {
 	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 30, 8
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
-	model.splashUntil = now.Add(splashDuration)
+	model.frames.splashUntil = now.Add(splashDuration)
 
 	view := model.splashViewAt(now.Add(time.Second))
 	if got := lineCount(view); got != 8 {
@@ -84,7 +84,7 @@ func TestSplashViewRemainsResponsiveOnCompactTerminal(t *testing.T) {
 func TestSplashViewFitsVeryShortTerminals(t *testing.T) {
 	model := newMockModel("alpha", config.Default())
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
-	model.splashUntil = now.Add(splashDuration)
+	model.frames.splashUntil = now.Add(splashDuration)
 
 	for _, height := range []int{1, 3, 5} {
 		model.width, model.height = 30, height
@@ -116,9 +116,9 @@ func TestAnimatingMessageRailChangesWithSharedFrame(t *testing.T) {
 	model := newMockModel("alpha", config.Default())
 	block := chatRowBlock{animating: true}
 	row := render.Row{Fragments: []render.Fragment{{Kind: render.FragmentText, Text: "hello"}}}
-	model.lastFrameAt = time.UnixMilli(1600)
+	model.frames.lastFrameAt = time.UnixMilli(1600)
 	first := model.messageRowString(block, 0, 0, row, 40)
-	model.lastFrameAt = time.UnixMilli(1800)
+	model.frames.lastFrameAt = time.UnixMilli(1800)
 	second := model.messageRowString(block, 0, 0, row, 40)
 	if first == second {
 		t.Fatal("animated message rail did not change with the shared frame clock")

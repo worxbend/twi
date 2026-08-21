@@ -58,11 +58,11 @@ func TestMiscLoadsAndDisplaysMarkers(t *testing.T) {
 	cfg.Twitch.Username = "streamer"
 	model := newMockModel("example", cfg)
 	model.width, model.height = 88, 20
-	model.markerManager = &appFakeMarkerManager{markers: []twitch.StreamMarker{
+	model.services.markerManager = &appFakeMarkerManager{markers: []twitch.StreamMarker{
 		{ID: "1", Description: "hype moment", PositionSeconds: 65},
 		{ID: "2", Description: "", PositionSeconds: 3725},
 	}}
-	model.userLookup = &appFakeUserLookup{users: []twitch.UserIdentity{{UserID: "123", Login: "streamer"}}}
+	model.services.userLookup = &appFakeUserLookup{users: []twitch.UserIdentity{{UserID: "123", Login: "streamer"}}}
 
 	updated, cmd := model.switchToTab(tabMisc)
 	model = updated.(shellModel)
@@ -98,7 +98,7 @@ func TestMiscLoadFailureSurfacesError(t *testing.T) {
 	model := newMockModel("example", cfg)
 	model.width, model.height = 88, 20
 	model.activeTab = tabMisc
-	model.markerManager = &appFakeMarkerManager{getErr: errors.New("twitch says no")}
+	model.services.markerManager = &appFakeMarkerManager{getErr: errors.New("twitch says no")}
 	model.selfBroadcasterID = "123" // skip user lookup
 
 	cmd := model.scheduleMiscLoad()
@@ -122,7 +122,7 @@ func TestMiscCreateMarkerFlow(t *testing.T) {
 	model.width, model.height = 88, 20
 	model.activeTab = tabMisc
 	fake := &appFakeMarkerManager{created: twitch.StreamMarker{ID: "99", Description: "big play", PositionSeconds: 42}}
-	model.markerManager = fake
+	model.services.markerManager = fake
 	model.selfBroadcasterID = "123"
 	model.misc.loaded = true
 
@@ -171,7 +171,7 @@ func TestMiscCreateMarkerFailureIsUserFriendlyOnMissingScope(t *testing.T) {
 
 	cfg := config.Default()
 	model := newMockModel("example", cfg)
-	model.markerManager = helix.NewMarkersClient(helix.MarkersClientConfig{Endpoint: server.URL})
+	model.services.markerManager = helix.NewMarkersClient(helix.MarkersClientConfig{Endpoint: server.URL})
 	model.selfBroadcasterID = "123"
 
 	cmd := model.scheduleCreateMarker("")
@@ -196,7 +196,7 @@ func TestMiscLoadFailureShowsNotLiveHintOnNoVideoFound(t *testing.T) {
 	model := newMockModel("example", cfg)
 	model.width, model.height = 88, 20
 	model.activeTab = tabMisc
-	model.markerManager = helix.NewMarkersClient(helix.MarkersClientConfig{Endpoint: server.URL})
+	model.services.markerManager = helix.NewMarkersClient(helix.MarkersClientConfig{Endpoint: server.URL})
 	model.selfBroadcasterID = "123"
 
 	loaded := model.scheduleMiscLoad()().(miscMarkersLoadedMsg)

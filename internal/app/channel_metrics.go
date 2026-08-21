@@ -27,22 +27,22 @@ type channelMetricsResolvedMsg struct {
 // channelMetricsPollInterval. Disabled (both lookups nil) without live
 // credentials or the relevant scopes.
 func (m *shellModel) scheduleChannelMetricsTick() tea.Cmd {
-	if (m.followerLookup == nil && m.subscriptionLookup == nil) || m.channelMetricsTickScheduled {
+	if (m.services.followerLookup == nil && m.services.subscriptionLookup == nil) || m.metrics.channelMetricsTickScheduled {
 		return nil
 	}
-	m.channelMetricsTickScheduled = true
+	m.metrics.channelMetricsTickScheduled = true
 	return tea.Tick(channelMetricsPollInterval, func(time.Time) tea.Msg {
 		return channelMetricsTickMsg{}
 	})
 }
 
 func (m shellModel) resolveChannelMetricsCommand() tea.Cmd {
-	if m.followerLookup == nil && m.subscriptionLookup == nil {
+	if m.services.followerLookup == nil && m.services.subscriptionLookup == nil {
 		return nil
 	}
-	followerLookup := m.followerLookup
-	subscriptionLookup := m.subscriptionLookup
-	userLookup := m.userLookup
+	followerLookup := m.services.followerLookup
+	subscriptionLookup := m.services.subscriptionLookup
+	userLookup := m.services.userLookup
 	username := m.effectiveConfig.Twitch.Username
 	knownID := m.selfBroadcasterID
 
@@ -74,17 +74,17 @@ func (m shellModel) applyChannelMetrics(msg channelMetricsResolvedMsg) shellMode
 	if msg.broadcasterID != "" {
 		m.selfBroadcasterID = msg.broadcasterID
 	}
-	if m.followerLookup != nil && msg.followersErr == nil {
-		m.followerCount = msg.followers.Total
-		m.followerCountKnown = true
+	if m.services.followerLookup != nil && msg.followersErr == nil {
+		m.metrics.followerCount = msg.followers.Total
+		m.metrics.followerCountKnown = true
 		m.applyNewFollowerActivity(msg.followers.Followers)
 		// Followers are polled per broadcaster, so only the active channel's
 		// roster can be annotated from this page.
 		m.activeChannelState().roster.applyFollowers(msg.followers.Followers)
 	}
-	if m.subscriptionLookup != nil && msg.subscriptionsErr == nil {
-		m.subscriberCount = msg.subscriptions.Total
-		m.subscriberCountKnown = true
+	if m.services.subscriptionLookup != nil && msg.subscriptionsErr == nil {
+		m.metrics.subscriberCount = msg.subscriptions.Total
+		m.metrics.subscriberCountKnown = true
 	}
 	return m
 }

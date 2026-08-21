@@ -126,14 +126,14 @@ func (m *shellModel) applyMembershipEvent(event twitch.MembershipEvent) {
 		return
 	}
 
-	if at.Sub(m.membershipBurstAt) > membershipBurstWindow {
-		m.membershipBurstCount = 0
-		m.membershipBurstIndex = -1
+	if at.Sub(m.activity.membershipBurstAt) > membershipBurstWindow {
+		m.activity.membershipBurstCount = 0
+		m.activity.membershipBurstIndex = -1
 	}
-	m.membershipBurstAt = at
-	m.membershipBurstCount++
+	m.activity.membershipBurstAt = at
+	m.activity.membershipBurstCount++
 
-	if m.membershipBurstCount <= membershipActivityBurst {
+	if m.activity.membershipBurstCount <= membershipActivityBurst {
 		verb := "joined"
 		if event.Type == twitch.MembershipPart {
 			verb = "left"
@@ -147,7 +147,7 @@ func (m *shellModel) applyMembershipEvent(event twitch.MembershipEvent) {
 		return
 	}
 
-	collapsed := m.membershipBurstCount - membershipActivityBurst
+	collapsed := m.activity.membershipBurstCount - membershipActivityBurst
 	summary := activityEntry{
 		Kind:    activityMembership,
 		Channel: state.name,
@@ -156,28 +156,28 @@ func (m *shellModel) applyMembershipEvent(event twitch.MembershipEvent) {
 	}
 	// Rewrite the existing summary row in place while the burst continues so
 	// one noisy reconnect costs the log a single line, not hundreds.
-	if m.membershipBurstIndex >= 0 && m.membershipBurstIndex < len(m.activityLog) &&
-		m.activityLog[m.membershipBurstIndex].Kind == activityMembership {
-		m.activityLog[m.membershipBurstIndex] = summary
+	if m.activity.membershipBurstIndex >= 0 && m.activity.membershipBurstIndex < len(m.activity.activityLog) &&
+		m.activity.activityLog[m.activity.membershipBurstIndex].Kind == activityMembership {
+		m.activity.activityLog[m.activity.membershipBurstIndex] = summary
 		return
 	}
 	m.appendActivity(summary)
-	m.membershipBurstIndex = len(m.activityLog) - 1
+	m.activity.membershipBurstIndex = len(m.activity.activityLog) - 1
 }
 
 func (m *shellModel) appendActivity(entry activityEntry) {
 	if entry.At.IsZero() {
 		entry.At = time.Now()
 	}
-	m.activityLog = append(m.activityLog, entry)
-	if len(m.activityLog) > maxActivityEntries {
-		trimmed := len(m.activityLog) - maxActivityEntries
-		m.activityLog = m.activityLog[trimmed:]
+	m.activity.activityLog = append(m.activity.activityLog, entry)
+	if len(m.activity.activityLog) > maxActivityEntries {
+		trimmed := len(m.activity.activityLog) - maxActivityEntries
+		m.activity.activityLog = m.activity.activityLog[trimmed:]
 		// Trimming shifts every index left; keep the in-place membership
 		// summary row pointing at the same entry, or drop it if it aged out.
-		m.membershipBurstIndex -= trimmed
-		if m.membershipBurstIndex < 0 {
-			m.membershipBurstIndex = -1
+		m.activity.membershipBurstIndex -= trimmed
+		if m.activity.membershipBurstIndex < 0 {
+			m.activity.membershipBurstIndex = -1
 		}
 	}
 }
@@ -188,16 +188,16 @@ func (m *shellModel) appendActivity(entry activityEntry) {
 // establishes the seen-set as a baseline; it never floods the log by
 // treating every existing follower as "new".
 func (m *shellModel) applyNewFollowerActivity(page []twitch.Follower) {
-	hadBaseline := m.seenFollowerIDs != nil
-	if m.seenFollowerIDs == nil {
-		m.seenFollowerIDs = make(map[string]bool, len(page))
+	hadBaseline := m.activity.seenFollowerIDs != nil
+	if m.activity.seenFollowerIDs == nil {
+		m.activity.seenFollowerIDs = make(map[string]bool, len(page))
 	}
 	for i := len(page) - 1; i >= 0; i-- {
 		follower := page[i]
-		if follower.UserID == "" || m.seenFollowerIDs[follower.UserID] {
+		if follower.UserID == "" || m.activity.seenFollowerIDs[follower.UserID] {
 			continue
 		}
-		m.seenFollowerIDs[follower.UserID] = true
+		m.activity.seenFollowerIDs[follower.UserID] = true
 		if !hadBaseline {
 			continue
 		}

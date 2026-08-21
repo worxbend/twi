@@ -77,7 +77,7 @@ func screenshotModel(t *testing.T, theme string, layout string, width, height in
 
 	model := newMockModel("pixelforge", cfg)
 	model.width, model.height = width, height
-	model.splashSkipped = true
+	model.frames.splashSkipped = true
 
 	at := time.Date(2026, 8, 1, 20, 14, 0, 0, time.Local)
 	messages := []twitch.ChatMessage{

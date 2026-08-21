@@ -57,7 +57,7 @@ func chatText(model shellModel) string {
 
 func TestGroupedLayoutNamesAuthorOncePerRun(t *testing.T) {
 	model := displayTestModel(t)
-	model.messageLayout = render.LayoutGrouped
+	model.display.messageLayout = render.LayoutGrouped
 
 	text := chatText(model)
 	// Two consecutive Alice messages share one header; Bobby starts a new one.
@@ -76,7 +76,7 @@ func TestGroupedLayoutNamesAuthorOncePerRun(t *testing.T) {
 
 func TestInlineLayoutNamesAuthorOnEveryMessage(t *testing.T) {
 	model := displayTestModel(t)
-	model.messageLayout = render.LayoutInline
+	model.display.messageLayout = render.LayoutInline
 
 	if got := strings.Count(chatText(model), "Alice_L"); got != 2 {
 		t.Fatalf("inline chat names Alice_L %d times, want 2 (one per message)", got)
@@ -85,15 +85,15 @@ func TestInlineLayoutNamesAuthorOnEveryMessage(t *testing.T) {
 
 func TestCycleMessageLayoutRotatesAndPersists(t *testing.T) {
 	model := displayTestModel(t)
-	if model.messageLayout != render.LayoutInline {
-		t.Fatalf("default layout = %q, want inline", model.messageLayout)
+	if model.display.messageLayout != render.LayoutInline {
+		t.Fatalf("default layout = %q, want inline", model.display.messageLayout)
 	}
 
 	for _, want := range []render.LayoutMode{render.LayoutGrouped, render.LayoutCompact, render.LayoutInline} {
 		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
 		model = updated.(shellModel)
-		if model.messageLayout != want {
-			t.Fatalf("layout after ctrl+g = %q, want %q", model.messageLayout, want)
+		if model.display.messageLayout != want {
+			t.Fatalf("layout after ctrl+g = %q, want %q", model.display.messageLayout, want)
 		}
 	}
 
@@ -116,8 +116,8 @@ func TestCycleBadgeModeRotatesAndChangesRendering(t *testing.T) {
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
 	model = updated.(shellModel)
-	if model.badgeMode != render.BadgeModeText {
-		t.Fatalf("badge mode after one ctrl+b = %q, want text", model.badgeMode)
+	if model.display.badgeMode != render.BadgeModeText {
+		t.Fatalf("badge mode after one ctrl+b = %q, want text", model.display.badgeMode)
 	}
 	if got := chatText(model); !strings.Contains(got, "[mod") || strings.Contains(got, "⚔") {
 		t.Fatalf("text badge mode rendering wrong:\n%s", got)
@@ -125,8 +125,8 @@ func TestCycleBadgeModeRotatesAndChangesRendering(t *testing.T) {
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
 	model = updated.(shellModel)
-	if model.badgeMode != render.BadgeModeOff {
-		t.Fatalf("badge mode after two ctrl+b = %q, want off", model.badgeMode)
+	if model.display.badgeMode != render.BadgeModeOff {
+		t.Fatalf("badge mode after two ctrl+b = %q, want off", model.display.badgeMode)
 	}
 	if got := chatText(model); strings.Contains(got, "[mod") || strings.Contains(got, "⚔") {
 		t.Fatalf("badges still rendered when off:\n%s", got)
@@ -134,8 +134,8 @@ func TestCycleBadgeModeRotatesAndChangesRendering(t *testing.T) {
 
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
 	model = updated.(shellModel)
-	if model.badgeMode != render.BadgeModeGlyph {
-		t.Fatalf("badge mode after three ctrl+b = %q, want glyph again", model.badgeMode)
+	if model.display.badgeMode != render.BadgeModeGlyph {
+		t.Fatalf("badge mode after three ctrl+b = %q, want glyph again", model.display.badgeMode)
 	}
 }
 
@@ -151,7 +151,7 @@ func TestToggleFullUsernameShowsLogin(t *testing.T) {
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
 	model = updated.(shellModel)
-	if !model.fullUsername {
+	if !model.display.fullUsername {
 		t.Fatal("ctrl+n did not enable full usernames")
 	}
 	if got := chatText(model); !strings.Contains(got, "アリス (alice_l)") {
@@ -161,13 +161,13 @@ func TestToggleFullUsernameShowsLogin(t *testing.T) {
 
 func TestToggleEmoteHighlightFlipsRenderOption(t *testing.T) {
 	model := displayTestModel(t)
-	if !model.highlightEmotes {
+	if !model.display.highlightEmotes {
 		t.Fatal("emote highlighting should default on")
 	}
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
 	model = updated.(shellModel)
-	if model.highlightEmotes {
+	if model.display.highlightEmotes {
 		t.Fatal("ctrl+y did not disable emote highlighting")
 	}
 	if model.renderOptions(60).HighlightEmotes {
@@ -188,8 +188,8 @@ func TestDisplayTogglesSurviveAFailedConfigWrite(t *testing.T) {
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
 	model = updated.(shellModel)
-	if model.messageLayout != render.LayoutGrouped {
-		t.Fatalf("layout = %q after a failed save, want the change applied anyway", model.messageLayout)
+	if model.display.messageLayout != render.LayoutGrouped {
+		t.Fatalf("layout = %q after a failed save, want the change applied anyway", model.display.messageLayout)
 	}
 	if feedback := model.activeChannelState().sendFeedback; !strings.Contains(feedback, "not saved") {
 		t.Fatalf("send feedback = %q, want it to report the failed save", feedback)

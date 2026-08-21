@@ -30,10 +30,10 @@ var splashLogo = []string{
 // the normal dashboard. Any keypress sets splashSkipped so users are never
 // trapped waiting it out.
 func (m shellModel) splashActive() bool {
-	if m.splashUntil.IsZero() || m.splashSkipped {
+	if m.frames.splashUntil.IsZero() || m.frames.splashSkipped {
 		return false
 	}
-	return time.Now().Before(m.splashUntil)
+	return time.Now().Before(m.frames.splashUntil)
 }
 
 func (m shellModel) splashView() string {
@@ -178,10 +178,10 @@ func splashTaglineStep(animationMode string) time.Duration {
 
 // splashElapsed returns how long the splash has been on screen at now.
 func (m shellModel) splashElapsed(now time.Time) time.Duration {
-	if m.splashUntil.IsZero() {
+	if m.frames.splashUntil.IsZero() {
 		return 0
 	}
-	return splashDuration - m.splashUntil.Sub(now)
+	return splashDuration - m.frames.splashUntil.Sub(now)
 }
 
 func (m shellModel) splashFraction(now time.Time) float64 {

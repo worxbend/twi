@@ -69,13 +69,13 @@ func (m *shellModel) openChannelPicker() tea.Cmd {
 // and accepts any typed name, so the failure is reported inline and the
 // request is not retried on every open.
 func (m *shellModel) scheduleFollowedChannelsLookup() tea.Cmd {
-	if m.followedChannels == nil || m.followedChannelsRequested {
+	if m.services.followedChannels == nil || m.followedChannelsRequested {
 		return nil
 	}
 	m.followedChannelsRequested = true
 	m.channelPicker.loading = true
-	lookup := m.followedChannels
-	userLookup := m.userLookup
+	lookup := m.services.followedChannels
+	userLookup := m.services.userLookup
 	username := m.effectiveConfig.Twitch.Username
 	knownID := m.selfBroadcasterID
 	return func() tea.Msg {

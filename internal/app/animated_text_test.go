@@ -14,7 +14,7 @@ func TestSplashTaglineTypesInWithoutMovingSideways(t *testing.T) {
 	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 88, 22
 	started := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
-	model.splashUntil = started.Add(splashDuration)
+	model.frames.splashUntil = started.Add(splashDuration)
 	contentWidth := splashContentWidth(model.width)
 	canvas := model.canvasBackground()
 
@@ -59,7 +59,7 @@ func TestSplashLinesAnimateBetweenFrames(t *testing.T) {
 	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 88, 22
 	started := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
-	model.splashUntil = started.Add(splashDuration)
+	model.frames.splashUntil = started.Add(splashDuration)
 	contentWidth := splashContentWidth(model.width)
 	canvas := model.canvasBackground()
 
@@ -77,9 +77,9 @@ func TestEmptyStateAnimatesOnTheSharedFrameClock(t *testing.T) {
 	forceColorProfile(t)
 	model := newMockModel("alpha", config.Default())
 
-	model.lastFrameAt = time.UnixMilli(1000)
+	model.frames.lastFrameAt = time.UnixMilli(1000)
 	first := strings.Join(model.noChannelRows(60), "\n")
-	model.lastFrameAt = time.UnixMilli(1900)
+	model.frames.lastFrameAt = time.UnixMilli(1900)
 	later := strings.Join(model.noChannelRows(60), "\n")
 	if first == later {
 		t.Fatal("empty state is identical across frames, want the headline and scanner to move")
@@ -100,9 +100,9 @@ func TestEmptyStateHoldsStillWhenAnimationIsOff(t *testing.T) {
 	cfg.Features.AnimationMode = string(animation.ModeOff)
 	model := newMockModel("alpha", cfg)
 
-	model.lastFrameAt = time.UnixMilli(1000)
+	model.frames.lastFrameAt = time.UnixMilli(1000)
 	first := strings.Join(model.noChannelRows(60), "\n")
-	model.lastFrameAt = time.UnixMilli(9000)
+	model.frames.lastFrameAt = time.UnixMilli(9000)
 	later := strings.Join(model.noChannelRows(60), "\n")
 	if first != later {
 		t.Fatalf("empty state animated with animation=off:\n%s\n---\n%s", first, later)
@@ -118,7 +118,7 @@ func TestEmptyStateHoldsStillWhenAnimationIsOff(t *testing.T) {
 func TestEmptyStateRowsStayInsideTheirWidth(t *testing.T) {
 	forceColorProfile(t)
 	model := newMockModel("alpha", config.Default())
-	model.lastFrameAt = time.UnixMilli(1400)
+	model.frames.lastFrameAt = time.UnixMilli(1400)
 
 	for _, width := range []int{1, 6, 12, 24, 60, 120} {
 		for _, row := range model.noChannelRows(width) {

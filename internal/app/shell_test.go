@@ -273,7 +273,7 @@ func TestMockShellMouseEventsWhenEnabled(t *testing.T) {
 	if got, want := model.focus, focusSidebar; got != want {
 		t.Fatalf("focus after sidebar click = %v, want %v", got, want)
 	}
-	if got, want := model.sidebarSelected, 1; got != want {
+	if got, want := model.panes.sidebarSelected, 1; got != want {
 		t.Fatalf("sidebar selection after click = %d, want %d", got, want)
 	}
 
@@ -2958,7 +2958,7 @@ func TestScheduleFrameTickRunsContinuouslyWhenAnimationEnabled(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("scheduleFrameTick() = nil, want a tea.Cmd")
 	}
-	if !model.frameTickScheduled {
+	if !model.frames.frameTickScheduled {
 		t.Fatal("frameTickScheduled = false after scheduling, want true")
 	}
 	if second := model.scheduleFrameTick(); second != nil {
@@ -2994,7 +2994,7 @@ func TestCommandPaletteRevealProgressesThenSettles(t *testing.T) {
 	}
 
 	now := time.Now()
-	for i := 0; i < 200 && !model.paletteRevealSeq.Done(); i++ {
+	for i := 0; i < 200 && !model.frames.paletteRevealSeq.Done(); i++ {
 		now = now.Add(50 * time.Millisecond)
 		updated, _ = model.Update(animation.FrameMsg{At: now})
 		model = updated.(shellModel)
@@ -3023,7 +3023,7 @@ func TestSplashCoversViewUntilDeadlineOrKeypress(t *testing.T) {
 	cfg.Features.AnimationMode = "fast"
 	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 22
-	model.splashUntil = time.Now().Add(splashDuration)
+	model.frames.splashUntil = time.Now().Add(splashDuration)
 
 	view := model.View()
 	if !strings.Contains(view, "twi") {
@@ -3048,7 +3048,7 @@ func TestSplashClearsAfterDeadlineWithoutKeypress(t *testing.T) {
 	cfg.Features.AnimationMode = "fast"
 	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 22
-	model.splashUntil = time.Now().Add(-time.Millisecond)
+	model.frames.splashUntil = time.Now().Add(-time.Millisecond)
 
 	if model.splashActive() {
 		t.Fatal("splashActive() = true after deadline elapsed, want false")
@@ -3199,8 +3199,8 @@ func TestApplyStreamStatusResultsUpdatesLiveOfflineAndViewers(t *testing.T) {
 	if beta.live || !beta.liveSince.IsZero() {
 		t.Fatalf("beta state = %+v, want offline with zero liveSince", beta)
 	}
-	if len(model.activityLog) != 0 {
-		t.Fatalf("activityLog after first poll = %#v, want empty (baseline only)", model.activityLog)
+	if len(model.activity.activityLog) != 0 {
+		t.Fatalf("activityLog after first poll = %#v, want empty (baseline only)", model.activity.activityLog)
 	}
 }
 
@@ -3210,24 +3210,24 @@ func TestApplyStreamStatusResultsLogsLiveOfflineTransitionsAfterBaseline(t *test
 	model := newMockModel("alpha", cfg)
 
 	model.applyStreamStatusResults([]twitch.StreamInfo{{UserLogin: "alpha", Live: false}})
-	if len(model.activityLog) != 0 {
-		t.Fatalf("activityLog after baseline poll = %#v, want empty", model.activityLog)
+	if len(model.activity.activityLog) != 0 {
+		t.Fatalf("activityLog after baseline poll = %#v, want empty", model.activity.activityLog)
 	}
 
 	model.applyStreamStatusResults([]twitch.StreamInfo{{UserLogin: "alpha", Live: true}})
-	if len(model.activityLog) != 1 || model.activityLog[0].Kind != activityStreamStatus || model.activityLog[0].Text != "stream went live" {
-		t.Fatalf("activityLog after going live = %#v, want one \"stream went live\" entry", model.activityLog)
+	if len(model.activity.activityLog) != 1 || model.activity.activityLog[0].Kind != activityStreamStatus || model.activity.activityLog[0].Text != "stream went live" {
+		t.Fatalf("activityLog after going live = %#v, want one \"stream went live\" entry", model.activity.activityLog)
 	}
 
 	// Polling again with the same live status must not re-report it.
 	model.applyStreamStatusResults([]twitch.StreamInfo{{UserLogin: "alpha", Live: true}})
-	if len(model.activityLog) != 1 {
-		t.Fatalf("activityLog after repeat poll = %#v, want still 1 entry", model.activityLog)
+	if len(model.activity.activityLog) != 1 {
+		t.Fatalf("activityLog after repeat poll = %#v, want still 1 entry", model.activity.activityLog)
 	}
 
 	model.applyStreamStatusResults([]twitch.StreamInfo{{UserLogin: "alpha", Live: false}})
-	if len(model.activityLog) != 2 || model.activityLog[1].Text != "stream went offline" {
-		t.Fatalf("activityLog after going offline = %#v, want a second \"stream went offline\" entry", model.activityLog)
+	if len(model.activity.activityLog) != 2 || model.activity.activityLog[1].Text != "stream went offline" {
+		t.Fatalf("activityLog after going offline = %#v, want a second \"stream went offline\" entry", model.activity.activityLog)
 	}
 }
 
@@ -3279,19 +3279,19 @@ func TestUpdateFrameMsgAdvancesAndReschedules(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "fast"
 	model := newMockModel("alpha", cfg)
-	model.frameTickScheduled = true
+	model.frames.frameTickScheduled = true
 
 	now := time.Now()
 	updated, cmd := model.Update(animation.FrameMsg{At: now})
 	model = updated.(shellModel)
 
-	if model.lastFrameAt != now {
-		t.Fatalf("lastFrameAt = %v, want %v", model.lastFrameAt, now)
+	if model.frames.lastFrameAt != now {
+		t.Fatalf("lastFrameAt = %v, want %v", model.frames.lastFrameAt, now)
 	}
 	if cmd == nil {
 		t.Fatal("Update(FrameMsg) returned nil cmd, want a re-scheduled frame tick")
 	}
-	if !model.frameTickScheduled {
+	if !model.frames.frameTickScheduled {
 		t.Fatal("frameTickScheduled = false after FrameMsg, want true")
 	}
 }

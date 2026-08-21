@@ -152,7 +152,7 @@ func (m *shellModel) debounceCategorySearch() tea.Cmd {
 func (m *shellModel) scheduleCategorySearch() tea.Cmd {
 	query := strings.TrimSpace(m.categoryPicker.query)
 	generation := m.categoryPicker.generation
-	if m.gameLookup == nil || query == "" {
+	if m.services.gameLookup == nil || query == "" {
 		m.categoryPicker.loading = false
 		m.categoryPicker.err = ""
 		m.categoryPicker.results = nil
@@ -160,7 +160,7 @@ func (m *shellModel) scheduleCategorySearch() tea.Cmd {
 	}
 	m.categoryPicker.loading = true
 	m.categoryPicker.err = ""
-	lookup := m.gameLookup
+	lookup := m.services.gameLookup
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), categoryPickerRequestTimeout)
 		defer cancel()
@@ -220,7 +220,7 @@ func (m shellModel) categoryPickerLines(width, height int) []string {
 	}
 	header := " Category search (enter=select, esc=cancel)"
 	switch {
-	case m.gameLookup == nil:
+	case m.services.gameLookup == nil:
 		header = " Category search: unavailable (missing Twitch API credentials)"
 	case m.categoryPicker.loading:
 		header = " Category search: searching..."

@@ -88,8 +88,8 @@ func (m *shellModel) toggleCommandPalette() {
 // internal/animation Sequence machinery that reveals chat rows.
 func (m *shellModel) refreshPaletteReveal(now time.Time) {
 	if !m.palette.open || m.animationMode == string(animation.ModeOff) {
-		m.paletteRevealSeq = animation.Sequence{}
-		m.paletteRevealKey = ""
+		m.frames.paletteRevealSeq = animation.Sequence{}
+		m.frames.paletteRevealKey = ""
 		return
 	}
 	layout := m.layout()
@@ -102,12 +102,12 @@ func (m *shellModel) refreshPaletteReveal(now time.Time) {
 	}
 	lines := m.commandPaletteLines(contentWidth, layout.paletteContentHeight)
 	key := strings.Join(lines, "\x00")
-	if key == m.paletteRevealKey {
-		m.paletteRevealSeq.Advance(now)
+	if key == m.frames.paletteRevealKey {
+		m.frames.paletteRevealSeq.Advance(now)
 		return
 	}
-	m.paletteRevealKey = key
-	m.paletteRevealSeq = animation.NewSequence(paletteLinesToRows(lines), animationConfigFor(m.animationMode), now)
+	m.frames.paletteRevealKey = key
+	m.frames.paletteRevealSeq = animation.NewSequence(paletteLinesToRows(lines), animationConfigFor(m.animationMode), now)
 }
 
 func paletteLinesToRows(lines []string) []render.Row {
@@ -130,7 +130,7 @@ func (m shellModel) paletteRevealedLines(lines []string, width int) []string {
 	if m.animationMode == string(animation.ModeOff) {
 		return lines
 	}
-	frame := m.paletteRevealSeq.Frame()
+	frame := m.frames.paletteRevealSeq.Frame()
 	if len(frame) != len(lines) {
 		return lines
 	}
@@ -519,7 +519,7 @@ func (m *shellModel) requestReconnect() tea.Cmd {
 		m.debugConnectionState("app.reconnect.already_in_progress", state)
 		return nil
 	}
-	client, ok := m.client.(reconnectingChatClient)
+	client, ok := m.services.client.(reconnectingChatClient)
 	if !ok {
 		state := m.activeChannelState().status
 		state.Channel = channel

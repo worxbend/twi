@@ -17,47 +17,47 @@ import (
 
 // cycleMessageLayout advances the chat layout: inline → grouped → compact.
 func (m *shellModel) cycleMessageLayout() {
-	switch m.messageLayout {
+	switch m.display.messageLayout {
 	case render.LayoutInline:
-		m.messageLayout = render.LayoutGrouped
+		m.display.messageLayout = render.LayoutGrouped
 	case render.LayoutGrouped:
-		m.messageLayout = render.LayoutCompact
+		m.display.messageLayout = render.LayoutCompact
 	default:
-		m.messageLayout = render.LayoutInline
+		m.display.messageLayout = render.LayoutInline
 	}
-	m.persistDisplayPreference("layout "+string(m.messageLayout), func(cfg *config.Config) {
-		cfg.Features.MessageLayout = string(m.messageLayout)
+	m.persistDisplayPreference("layout "+string(m.display.messageLayout), func(cfg *config.Config) {
+		cfg.Features.MessageLayout = string(m.display.messageLayout)
 	})
 }
 
 // cycleBadgeMode advances badge rendering: glyph → text → off.
 func (m *shellModel) cycleBadgeMode() {
-	switch m.badgeMode {
+	switch m.display.badgeMode {
 	case render.BadgeModeGlyph:
-		m.badgeMode = render.BadgeModeText
+		m.display.badgeMode = render.BadgeModeText
 	case render.BadgeModeText:
-		m.badgeMode = render.BadgeModeOff
+		m.display.badgeMode = render.BadgeModeOff
 	default:
-		m.badgeMode = render.BadgeModeGlyph
+		m.display.badgeMode = render.BadgeModeGlyph
 	}
-	m.persistDisplayPreference("badges "+string(m.badgeMode), func(cfg *config.Config) {
-		cfg.Features.BadgeMode = string(m.badgeMode)
+	m.persistDisplayPreference("badges "+string(m.display.badgeMode), func(cfg *config.Config) {
+		cfg.Features.BadgeMode = string(m.display.badgeMode)
 	})
 }
 
 // toggleEmoteHighlight turns the emote/emoji chip background on and off.
 func (m *shellModel) toggleEmoteHighlight() {
-	m.highlightEmotes = !m.highlightEmotes
-	m.persistDisplayPreference(onOffLabel("emote highlight", m.highlightEmotes), func(cfg *config.Config) {
-		cfg.Features.HighlightEmotes = m.highlightEmotes
+	m.display.highlightEmotes = !m.display.highlightEmotes
+	m.persistDisplayPreference(onOffLabel("emote highlight", m.display.highlightEmotes), func(cfg *config.Config) {
+		cfg.Features.HighlightEmotes = m.display.highlightEmotes
 	})
 }
 
 // toggleFullUsername turns the "DisplayName (login)" form on and off.
 func (m *shellModel) toggleFullUsername() {
-	m.fullUsername = !m.fullUsername
-	m.persistDisplayPreference(onOffLabel("full usernames", m.fullUsername), func(cfg *config.Config) {
-		cfg.Features.FullUsername = m.fullUsername
+	m.display.fullUsername = !m.display.fullUsername
+	m.persistDisplayPreference(onOffLabel("full usernames", m.display.fullUsername), func(cfg *config.Config) {
+		cfg.Features.FullUsername = m.display.fullUsername
 	})
 }
 

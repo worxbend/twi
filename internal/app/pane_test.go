@@ -44,9 +44,9 @@ func TestFocusedPaneChromeAnimatesFromSharedFrame(t *testing.T) {
 	forceColorProfile(t)
 	model := newMockModel("alpha", config.Default())
 	spec := paneSpec{icon: "💬", title: "Chat", width: 24, contentHeight: 1, accent: model.theme.Accent, focused: true}
-	model.lastFrameAt = time.UnixMilli(1600)
+	model.frames.lastFrameAt = time.UnixMilli(1600)
 	first := model.renderPane(spec)
-	model.lastFrameAt = time.UnixMilli(1800)
+	model.frames.lastFrameAt = time.UnixMilli(1800)
 	second := model.renderPane(spec)
 	if first == second {
 		t.Fatal("focused pane chrome did not animate with the shared frame clock")
@@ -64,9 +64,9 @@ func TestChatPaneChromeIsStaticAcrossSharedFrames(t *testing.T) {
 	model.width, model.height = 88, 22
 	layout := model.layout()
 
-	model.lastFrameAt = time.UnixMilli(1600)
+	model.frames.lastFrameAt = time.UnixMilli(1600)
 	first := model.chatView(layout)
-	model.lastFrameAt = time.UnixMilli(1800)
+	model.frames.lastFrameAt = time.UnixMilli(1800)
 	second := model.chatView(layout)
 	if first != second {
 		t.Fatal("chat pane chrome changed with the shared frame clock; want a static border and title")

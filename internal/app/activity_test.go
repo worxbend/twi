@@ -28,14 +28,14 @@ func TestRecordActivityFromMessageClassifiesRaidsAndSubs(t *testing.T) {
 	model.recordActivityFromMessage(twitch.ChatMessage{Channel: "example", Type: twitch.MessageTypeChat, Text: "hello"})
 	model.recordActivityFromMessage(twitch.ChatMessage{Channel: "example", Type: twitch.MessageTypeSystem, Text: "Mock chat is ready."})
 
-	if len(model.activityLog) != 2 {
-		t.Fatalf("activityLog = %#v, want 2 entries (raid, resub)", model.activityLog)
+	if len(model.activity.activityLog) != 2 {
+		t.Fatalf("activityLog = %#v, want 2 entries (raid, resub)", model.activity.activityLog)
 	}
-	if model.activityLog[0].Kind != activityIRCEvent || model.activityLog[0].Channel != "example" {
-		t.Fatalf("entry[0] = %#v, want irc_event in #example", model.activityLog[0])
+	if model.activity.activityLog[0].Kind != activityIRCEvent || model.activity.activityLog[0].Channel != "example" {
+		t.Fatalf("entry[0] = %#v, want irc_event in #example", model.activity.activityLog[0])
 	}
-	if model.activityLog[0].At != time.Date(2026, 7, 14, 20, 0, 0, 0, time.UTC) {
-		t.Fatalf("entry[0].At = %v, want message timestamp preserved", model.activityLog[0].At)
+	if model.activity.activityLog[0].At != time.Date(2026, 7, 14, 20, 0, 0, 0, time.UTC) {
+		t.Fatalf("entry[0].At = %v, want message timestamp preserved", model.activity.activityLog[0].At)
 	}
 }
 
@@ -53,10 +53,10 @@ func TestRecordActivityFromMessageClassifiesCheers(t *testing.T) {
 	// A plain chat message with no bits is not a cheer.
 	model.recordActivityFromMessage(twitch.ChatMessage{Channel: "example", Type: twitch.MessageTypeChat, Text: "hello"})
 
-	if len(model.activityLog) != 1 {
-		t.Fatalf("activityLog = %#v, want 1 cheer entry", model.activityLog)
+	if len(model.activity.activityLog) != 1 {
+		t.Fatalf("activityLog = %#v, want 1 cheer entry", model.activity.activityLog)
 	}
-	entry := model.activityLog[0]
+	entry := model.activity.activityLog[0]
 	if entry.Kind != activityCheer || entry.Channel != "example" {
 		t.Fatalf("entry = %#v, want Kind=cheer in #example", entry)
 	}
@@ -68,8 +68,8 @@ func TestRecordActivityFromMessageClassifiesCheers(t *testing.T) {
 func TestRecordActivityFromMessageCheerUsesSingularBit(t *testing.T) {
 	model := newMockModel("example", config.Default())
 	model.recordActivityFromMessage(twitch.ChatMessage{Channel: "example", Type: twitch.MessageTypeChat, DisplayName: "Cheerer", Bits: 1})
-	if len(model.activityLog) != 1 || model.activityLog[0].Text != "Cheerer cheered 1 bit" {
-		t.Fatalf("activityLog = %#v, want singular \"1 bit\"", model.activityLog)
+	if len(model.activity.activityLog) != 1 || model.activity.activityLog[0].Text != "Cheerer cheered 1 bit" {
+		t.Fatalf("activityLog = %#v, want singular \"1 bit\"", model.activity.activityLog)
 	}
 }
 
@@ -79,11 +79,11 @@ func TestApplyNewFollowerActivityEstablishesBaselineSilently(t *testing.T) {
 		{UserID: "1", UserName: "First"},
 		{UserID: "2", UserName: "Second"},
 	})
-	if len(model.activityLog) != 0 {
-		t.Fatalf("activityLog after first poll = %#v, want empty (baseline only)", model.activityLog)
+	if len(model.activity.activityLog) != 0 {
+		t.Fatalf("activityLog after first poll = %#v, want empty (baseline only)", model.activity.activityLog)
 	}
-	if len(model.seenFollowerIDs) != 2 {
-		t.Fatalf("seenFollowerIDs = %#v, want 2 entries", model.seenFollowerIDs)
+	if len(model.activity.seenFollowerIDs) != 2 {
+		t.Fatalf("seenFollowerIDs = %#v, want 2 entries", model.activity.seenFollowerIDs)
 	}
 }
 
@@ -95,11 +95,11 @@ func TestApplyNewFollowerActivityDetectsNewFollowersAfterBaseline(t *testing.T) 
 		{UserID: "2", UserName: "Second", FollowedAt: time.Date(2026, 7, 14, 21, 0, 0, 0, time.UTC)},
 		{UserID: "1", UserName: "First"},
 	})
-	if len(model.activityLog) != 1 {
-		t.Fatalf("activityLog = %#v, want 1 new-follower entry", model.activityLog)
+	if len(model.activity.activityLog) != 1 {
+		t.Fatalf("activityLog = %#v, want 1 new-follower entry", model.activity.activityLog)
 	}
-	if model.activityLog[0].Kind != activityFollow || model.activityLog[0].Text != "Second followed" {
-		t.Fatalf("entry = %#v, want Kind=follow Text=\"Second followed\"", model.activityLog[0])
+	if model.activity.activityLog[0].Kind != activityFollow || model.activity.activityLog[0].Text != "Second followed" {
+		t.Fatalf("entry = %#v, want Kind=follow Text=\"Second followed\"", model.activity.activityLog[0])
 	}
 
 	// Polling again with the same data must not re-report the same follower.
@@ -107,8 +107,8 @@ func TestApplyNewFollowerActivityDetectsNewFollowersAfterBaseline(t *testing.T) 
 		{UserID: "2", UserName: "Second"},
 		{UserID: "1", UserName: "First"},
 	})
-	if len(model.activityLog) != 1 {
-		t.Fatalf("activityLog after repeat poll = %#v, want still 1 entry", model.activityLog)
+	if len(model.activity.activityLog) != 1 {
+		t.Fatalf("activityLog after repeat poll = %#v, want still 1 entry", model.activity.activityLog)
 	}
 }
 
@@ -117,7 +117,7 @@ func TestAppendActivityBoundsLogSize(t *testing.T) {
 	for i := 0; i < maxActivityEntries+10; i++ {
 		model.appendActivity(activityEntry{Kind: activityIRCEvent, Text: "entry"})
 	}
-	if len(model.activityLog) != maxActivityEntries {
-		t.Fatalf("activityLog length = %d, want bounded to %d", len(model.activityLog), maxActivityEntries)
+	if len(model.activity.activityLog) != maxActivityEntries {
+		t.Fatalf("activityLog length = %d, want bounded to %d", len(model.activity.activityLog), maxActivityEntries)
 	}
 }

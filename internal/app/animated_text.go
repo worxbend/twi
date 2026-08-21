@@ -26,7 +26,7 @@ func (m shellModel) textEffectConfig(effect animation.TextEffect) animation.Text
 // comes from the shared animation clock's last tick, never the wall clock, so
 // View() stays pure and every frame is reproducible in tests.
 func (m shellModel) frameElapsed() time.Duration {
-	return animation.FrameElapsed(m.lastFrameAt)
+	return animation.FrameElapsed(m.frames.lastFrameAt)
 }
 
 // animatedText renders one frame of an effect as a styled string on

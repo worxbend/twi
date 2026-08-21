@@ -64,7 +64,7 @@ func (m shellModel) channelIsOpen(channel string) bool {
 }
 
 func (m shellModel) joinChannelOnTransport(channel string) {
-	joiner, ok := m.client.(ChannelJoiner)
+	joiner, ok := m.services.client.(ChannelJoiner)
 	if !ok {
 		return
 	}
@@ -74,7 +74,7 @@ func (m shellModel) joinChannelOnTransport(channel string) {
 }
 
 func (m shellModel) partChannelOnTransport(channel string) {
-	joiner, ok := m.client.(ChannelJoiner)
+	joiner, ok := m.services.client.(ChannelJoiner)
 	if !ok {
 		return
 	}

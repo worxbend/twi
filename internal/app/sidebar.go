@@ -21,13 +21,13 @@ const (
 // the visible thing regardless of what auto had decided.
 func (m *shellModel) toggleSidebar() {
 	if m.layout().sidebarWidth > 0 {
-		m.sidebarVisibility = sidebarHidden
+		m.panes.sidebarVisibility = sidebarHidden
 		if m.focus == focusSidebar {
 			m.focus = focusChat
 		}
 		return
 	}
-	m.sidebarVisibility = sidebarShown
+	m.panes.sidebarVisibility = sidebarShown
 	m.clampSidebarSelection()
 }
 
@@ -38,7 +38,7 @@ func (m shellModel) sidebarVisibleFor(width, chatHeight int) bool {
 	if width < sidebarMinWidth || chatHeight < 3 {
 		return false
 	}
-	switch m.sidebarVisibility {
+	switch m.panes.sidebarVisibility {
 	case sidebarShown:
 		return true
 	case sidebarHidden:
@@ -53,29 +53,29 @@ func (m shellModel) sidebarVisibleFor(width, chatHeight int) bool {
 func (m *shellModel) clampSidebarSelection() {
 	names := m.channels.channelNames()
 	if len(names) == 0 {
-		m.sidebarSelected = 0
+		m.panes.sidebarSelected = 0
 		return
 	}
-	if m.sidebarSelected < 0 {
-		m.sidebarSelected = 0
+	if m.panes.sidebarSelected < 0 {
+		m.panes.sidebarSelected = 0
 	}
-	if m.sidebarSelected >= len(names) {
-		m.sidebarSelected = len(names) - 1
+	if m.panes.sidebarSelected >= len(names) {
+		m.panes.sidebarSelected = len(names) - 1
 	}
 }
 
 func (m *shellModel) moveSidebarSelection(delta int) {
 	names := m.channels.channelNames()
 	if len(names) == 0 {
-		m.sidebarSelected = 0
+		m.panes.sidebarSelected = 0
 		return
 	}
-	m.sidebarSelected += delta
-	if m.sidebarSelected < 0 {
-		m.sidebarSelected = len(names) - 1
+	m.panes.sidebarSelected += delta
+	if m.panes.sidebarSelected < 0 {
+		m.panes.sidebarSelected = len(names) - 1
 	}
-	if m.sidebarSelected >= len(names) {
-		m.sidebarSelected = 0
+	if m.panes.sidebarSelected >= len(names) {
+		m.panes.sidebarSelected = 0
 	}
 }
 
@@ -84,7 +84,7 @@ func (m shellModel) selectedSidebarChannel() string {
 	if len(names) == 0 {
 		return ""
 	}
-	index := m.sidebarSelected
+	index := m.panes.sidebarSelected
 	if index < 0 || index >= len(names) {
 		index = 0
 	}
@@ -161,7 +161,7 @@ func (m *shellModel) syncSidebarSelectionToActive() {
 	active := m.channels.activeName()
 	for i, name := range names {
 		if channelKey(name) == channelKey(active) {
-			m.sidebarSelected = i
+			m.panes.sidebarSelected = i
 			return
 		}
 	}

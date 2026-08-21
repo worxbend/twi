@@ -17,7 +17,7 @@ func splashTestModel(t *testing.T, width, height int) (shellModel, time.Time) {
 	model := newMockModel("alpha", config.Default())
 	model.width, model.height = width, height
 	start := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
-	model.splashUntil = start.Add(splashDuration)
+	model.frames.splashUntil = start.Add(splashDuration)
 	return model, start
 }
 
@@ -163,7 +163,7 @@ func TestSplashIsSkippable(t *testing.T) {
 	model, _ := splashTestModel(t, 80, 24)
 	// splashActive consults the wall clock, so the deadline has to be ahead
 	// of real now rather than the fixed instant the render tests use.
-	model.splashUntil = time.Now().Add(splashDuration)
+	model.frames.splashUntil = time.Now().Add(splashDuration)
 	if !model.splashActive() {
 		t.Fatal("test setup: splash is not active")
 	}

@@ -91,7 +91,7 @@ func TestResetRestoresAutomaticWidths(t *testing.T) {
 		t.Fatalf("after =, layout = (chat %d, activity %d), want the automatic (chat %d, activity %d)",
 			got.chatWidth, got.activityWidth, original.chatWidth, original.activityWidth)
 	}
-	if model.activityWidthOverride != 0 || model.sidebarWidthOverride != 0 {
+	if model.panes.activityWidthOverride != 0 || model.panes.sidebarWidthOverride != 0 {
 		t.Fatal("= left an override in place, so the panes would not resize with the terminal")
 	}
 }
@@ -294,8 +294,8 @@ func TestResizeKeysDoNothingWithoutAPane(t *testing.T) {
 		t.Fatal("test setup: expected no activity column at 60 columns")
 	}
 	resized := paneKey(model, '>')
-	if resized.activityWidthOverride != 0 {
-		t.Fatalf("activityWidthOverride = %d with no visible pane, want 0", resized.activityWidthOverride)
+	if resized.panes.activityWidthOverride != 0 {
+		t.Fatalf("activityWidthOverride = %d with no visible pane, want 0", resized.panes.activityWidthOverride)
 	}
 }
 

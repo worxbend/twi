@@ -72,98 +72,215 @@ type fdWriter interface {
 }
 
 type shellModel struct {
+	// --- collaborators and configuration, set once when the shell is built
+	//
+	// services holds everything this shell reaches Twitch through.
+	services        twitchServices
+	effectiveConfig config.Config
+	debugLogger     debuglog.Logger
+	terminalOutput  io.Writer
+	theme           theme.Palette
+	// mentionLogin is the login whose mentions are highlighted -- whoever
+	// the OAuth token belongs to.
+	mentionLogin   string
+	animationMode  string
+	avatarMode     string
+	mouseEnabled   bool
+	debugRecording bool
+	// sourceDetail names where chat is coming from ("live IRC", "mock") for
+	// the status line.
+	sourceDetail string
+
+	// --- chat content
+	//
+	// channels holds the per-channel state: backlog, scroll position,
+	// composer text, connection status.
 	channels *channelStateSet
 	// rowCache memoizes per-message rendered rows across repaints. It is a
 	// pointer so the copies Bubble Tea makes on every Update share one cache.
-	rowCache                    *chatRowCache
-	theme                       theme.Palette
-	effectiveConfig             config.Config
-	terminalOutput              io.Writer
-	mentionLogin                string
-	animationMode               string
-	mouseEnabled                bool
-	avatarMode                  string
-	sourceDetail                string
-	client                      ChatClient
-	systemNotifier              SystemNotifier
-	debugLogger                 debuglog.Logger
-	incoming                    []twitch.ChatMessage
-	nextIncoming                int
-	nextReveal                  int
-	width                       int
-	height                      int
-	focus                       shellFocus
-	terminalFocused             bool
-	lastSystemNotification      *SystemNotification
-	helpExpanded                bool
-	inspectOpen                 bool
-	palette                     commandPaletteState
-	themeSettings               themeSettingsState
-	emotePicker                 emotePickerState
-	channelPicker               channelPickerState
-	categoryPicker              categoryPickerState
-	reconnectInFlight           bool
-	nextSend                    int
-	frameTickScheduled          bool
-	lastFrameAt                 time.Time
-	splashUntil                 time.Time
-	splashSkipped               bool
-	frameTimestamps             []time.Time
-	paletteRevealSeq            animation.Sequence
-	paletteRevealKey            string
-	streamStatusResolver        StreamStatusResolver
-	streamStatusTickScheduled   bool
-	followerLookup              twitch.FollowerLookup
-	subscriptionLookup          twitch.SubscriptionLookup
+	rowCache *chatRowCache
+	// incoming, nextIncoming and nextReveal drive the mock chat source only.
+	incoming     []twitch.ChatMessage
+	nextIncoming int
+	nextReveal   int
+
+	// --- terminal and focus
+	width           int
+	height          int
+	focus           shellFocus
+	terminalFocused bool
+	activeTab       shellTab
+
+	// --- grouped state, each covered by its own type below
+	display  displayState
+	panes    paneState
+	frames   frameState
+	activity activityState
+	metrics  channelMetricsState
+	runtime  runtimeMetricsState
+	emotes   emoteIndexState
+
+	// --- overlays and tabs
+	palette             commandPaletteState
+	themeSettings       themeSettingsState
+	emotePicker         emotePickerState
+	channelPicker       channelPickerState
+	categoryPicker      categoryPickerState
+	mentionAutocomplete mentionAutocompleteState
+	streamInfo          streamInfoState
+	misc                miscState
+	helpExpanded        bool
+	inspectOpen         bool
+	// leaderPending marks an armed space-leader chord.
+	leaderPending bool
+	// pendingClearChat marks a ctrl+L awaiting confirmation.
+	pendingClearChat bool
+
+	// --- in-flight work and one-shot results
+	reconnectInFlight         bool
+	nextSend                  int
+	streamStatusTickScheduled bool
+	lastSystemNotification    *SystemNotification
+	followedChannelList       []twitch.FollowedChannel
+	followedChannelsRequested bool
+	// selfBroadcasterID is the token owner's Twitch user ID, resolved once
+	// and needed by every broadcaster-scoped Helix call.
+	selfBroadcasterID string
+}
+
+// twitchServices are the collaborators the shell reaches Twitch through.
+//
+// They are grouped rather than left loose among the model's other fields
+// because they are wiring, not state: each is injected once when the shell is
+// built and never reassigned, and any of them may be nil when the credentials
+// or configuration that would enable it are missing -- which is how twi keeps
+// working, with those features quietly off, for someone who has only ever run
+// `twi chat --mock`. Separating them makes the fields that remain on
+// shellModel recognisably the things that actually change as you use twi.
+//
+// The set mirrors ClientOptions, which is how they arrive.
+type twitchServices struct {
+	// client is the chat transport events are read from and sends go to.
+	client ChatClient
+	// notifier raises desktop notifications; nil disables them.
+	systemNotifier SystemNotifier
+	// streamStatusResolver backs the LIVE indicator.
+	streamStatusResolver StreamStatusResolver
+	// channelManager reads and writes the Stream Info tab's fields.
+	channelManager twitch.ChannelManager
+	// gameLookup resolves a category name to a Twitch game ID.
+	gameLookup twitch.GameLookup
+	// userLookup resolves logins to user IDs, for the broadcaster ID the
+	// Helix calls need and for channel-specific emote autocomplete.
+	userLookup twitch.UserLookup
+	// markerManager creates and lists the Misc tab's stream markers.
+	markerManager twitch.MarkerManager
+	// clipManager backs the /clip command.
+	clipManager twitch.ClipManager
+	// followerLookup and subscriptionLookup back the status line's counts.
+	followerLookup     twitch.FollowerLookup
+	subscriptionLookup twitch.SubscriptionLookup
+	// followedChannels backs the channel picker's autocomplete.
+	followedChannels twitch.FollowedChannelLookup
+}
+
+// channelMetricsState is the follower and subscriber counts shown in the
+// status line, and the tick that refreshes them.
+//
+// The "known" flags exist because zero is a real count: a channel genuinely
+// can have no subscribers, and that must read as "0" rather than as "not
+// loaded yet", which is what a bare int cannot express.
+type channelMetricsState struct {
 	followerCount               int
 	followerCountKnown          bool
 	subscriberCount             int
 	subscriberCountKnown        bool
 	channelMetricsTickScheduled bool
-	activityLog                 []activityEntry
-	seenFollowerIDs             map[string]bool
-	membershipBurstAt           time.Time
-	membershipBurstCount        int
-	membershipBurstIndex        int
-	// pendingClearChat marks a ctrl+L awaiting confirmation.
-	pendingClearChat bool
-	// activityVisibility is the standing show/hide choice for the activity
-	// column. The width overrides are zero while a pane sizes itself from
-	// the terminal width.
-	activityVisibility        activityVisibility
-	sidebarWidthOverride      int
-	activityWidthOverride     int
-	mentionAutocomplete       mentionAutocompleteState
-	messageLayout             render.LayoutMode
-	badgeMode                 render.BadgeMode
-	highlightEmotes           bool
-	fullUsername              bool
-	debugRecording            bool
-	cpuSampleAt               time.Time
-	cpuSampleTime             time.Duration
-	cpuPercent                float64
-	cpuAvailable              bool
-	memoryMB                  float64
-	chatByteSamples           []chatByteSample
-	revealTickScheduled       bool
-	emoteIndex                *assets.EmoteIndex
-	emoteEntries              map[string][]assets.EmoteEntry
-	emoteEntriesRequested     map[string]bool
-	sidebarVisibility         sidebarVisibility
-	sidebarSelected           int
-	leaderPending             bool
-	followedChannels          twitch.FollowedChannelLookup
-	followedChannelList       []twitch.FollowedChannel
-	followedChannelsRequested bool
-	activeTab                 shellTab
-	channelManager            twitch.ChannelManager
-	gameLookup                twitch.GameLookup
-	userLookup                twitch.UserLookup
-	selfBroadcasterID         string
-	streamInfo                streamInfoState
-	misc                      miscState
-	markerManager             twitch.MarkerManager
-	clipManager               twitch.ClipManager
+}
+
+// runtimeMetricsState is what the status line reports about twi itself --
+// processor share, resident memory, and how much chat is arriving.
+//
+// cpuAvailable is separate from cpuPercent because the sampling is
+// platform-specific and simply absent on some systems, where the status line
+// must omit the figure rather than claim zero.
+type runtimeMetricsState struct {
+	cpuSampleAt     time.Time
+	cpuSampleTime   time.Duration
+	cpuPercent      float64
+	cpuAvailable    bool
+	memoryMB        float64
+	chatByteSamples []chatByteSample
+}
+
+// activityState backs the activity column: the entries it lists, and the
+// bookkeeping that keeps them meaningful.
+//
+// seenFollowerIDs suppresses repeats, because the followers endpoint returns
+// the same recent followers on every poll. The membershipBurst fields collapse
+// the flood of JOIN/PART lines Twitch delivers in batches into a single
+// summarised entry instead of scrolling everything else away.
+type activityState struct {
+	activityLog          []activityEntry
+	seenFollowerIDs      map[string]bool
+	membershipBurstAt    time.Time
+	membershipBurstCount int
+	membershipBurstIndex int
+}
+
+// emoteIndexState is the emote metadata behind autocomplete and the emote
+// picker.
+//
+// emoteEntriesRequested is tracked separately from emoteEntries so a channel
+// whose lookup legitimately returned nothing is not re-fetched on every
+// keystroke.
+type emoteIndexState struct {
+	emoteIndex            *assets.EmoteIndex
+	emoteEntries          map[string][]assets.EmoteEntry
+	emoteEntriesRequested map[string]bool
+}
+
+// displayState is the set of rendering choices the display-toggle keys flip.
+// They start from the config file and are changed live from the keyboard.
+type displayState struct {
+	messageLayout   render.LayoutMode
+	badgeMode       render.BadgeMode
+	highlightEmotes bool
+	fullUsername    bool
+}
+
+// frameState is the animation clock: what is currently being animated, and
+// which timers are already in flight.
+//
+// The "scheduled" flags matter more than they look. Bubble Tea timers are
+// commands, not a running loop, so scheduling one twice makes animation run
+// at double speed and burn processor twice over; these flags are what make
+// scheduling idempotent. frameTimestamps is the sliding window the status
+// line's frame rate is measured over.
+type frameState struct {
+	frameTickScheduled  bool
+	lastFrameAt         time.Time
+	splashUntil         time.Time
+	splashSkipped       bool
+	frameTimestamps     []time.Time
+	revealTickScheduled bool
+	paletteRevealSeq    animation.Sequence
+	paletteRevealKey    string
+}
+
+// paneState is the standing show/hide and width choices for the columns
+// beside chat.
+//
+// A zero width override means "size this pane from the terminal width"; a
+// configured or resized value is clamped at layout time rather than when it
+// is set, because what a terminal can afford is not knowable until it reports
+// its size.
+type paneState struct {
+	activityVisibility    activityVisibility
+	sidebarWidthOverride  int
+	activityWidthOverride int
+	sidebarVisibility     sidebarVisibility
+	sidebarSelected       int
 }
 
 var _ tea.Model = shellModel{}
@@ -366,7 +483,7 @@ func RunClientWithOptions(w io.Writer, cfg config.Config, client ChatClient, opt
 		_, err := fmt.Fprintln(w, model.View())
 		return err
 	}
-	model.splashUntil = splashDeadline(model.animationMode)
+	model.frames.splashUntil = splashDeadline(model.animationMode)
 	model.terminalOutput = w
 	primeTerminalBackground(w, model.canvasBackground())
 
@@ -412,31 +529,34 @@ func newShellModel(channel string, cfg config.Config, clock animation.Clock) she
 		cfg.Features.ScrollbackLimit,
 	)
 	return shellModel{
-		channels:        channels,
-		rowCache:        newChatRowCache(),
-		theme:           cfg.ResolveTheme(),
-		mentionLogin:    cfg.Twitch.Username,
-		animationMode:   string(animationConfig.Mode),
-		mouseEnabled:    cfg.Features.EnableMouse,
-		avatarMode:      cfg.Features.AvatarMode,
-		messageLayout:   render.NormalizeLayoutMode(cfg.Features.MessageLayout),
-		badgeMode:       render.NormalizeBadgeMode(cfg.Features.BadgeMode),
-		highlightEmotes: cfg.Features.HighlightEmotes,
-		fullUsername:    cfg.Features.FullUsername,
-		// Zero means "size from the terminal width"; a configured value is
-		// clamped at layout time rather than here, because what a terminal
-		// can afford is not knowable until it reports its size.
-		sidebarWidthOverride:  cfg.Features.SidebarWidth,
-		activityWidthOverride: cfg.Features.ActivityWidth,
-		debugRecording:        cfg.Debug.Enabled,
-		effectiveConfig:       cfg,
-		// -1 means "no membership burst is being coalesced". Zero would name
-		// the first activity row as an open burst before one exists.
-		membershipBurstIndex: -1,
-		width:                defaultShellWidth,
-		height:               defaultShellHeight,
-		focus:                focusChat,
-		terminalFocused:      true,
+		channels:      channels,
+		rowCache:      newChatRowCache(),
+		theme:         cfg.ResolveTheme(),
+		mentionLogin:  cfg.Twitch.Username,
+		animationMode: string(animationConfig.Mode),
+		mouseEnabled:  cfg.Features.EnableMouse,
+		avatarMode:    cfg.Features.AvatarMode,
+		display: displayState{
+			messageLayout:   render.NormalizeLayoutMode(cfg.Features.MessageLayout),
+			badgeMode:       render.NormalizeBadgeMode(cfg.Features.BadgeMode),
+			highlightEmotes: cfg.Features.HighlightEmotes,
+			fullUsername:    cfg.Features.FullUsername,
+		},
+		panes: paneState{
+			sidebarWidthOverride:  cfg.Features.SidebarWidth,
+			activityWidthOverride: cfg.Features.ActivityWidth,
+		},
+		debugRecording:  cfg.Debug.Enabled,
+		effectiveConfig: cfg,
+		activity: activityState{
+			// -1 means "no membership burst is being coalesced". Zero would
+			// name the first activity row as an open burst before one exists.
+			membershipBurstIndex: -1,
+		},
+		width:           defaultShellWidth,
+		height:          defaultShellHeight,
+		focus:           focusChat,
+		terminalFocused: true,
 	}
 }
 
@@ -455,20 +575,22 @@ func newLiveModelWithClockAndOptions(channel string, cfg config.Config, client C
 	}
 
 	model.sourceDetail = "live IRC"
-	model.client = client
-	model.systemNotifier = opts.SystemNotifier
-	model.streamStatusResolver = opts.StreamStatusResolver
-	model.emoteIndex = opts.EmoteIndex
-	model.channelManager = opts.ChannelManager
-	model.gameLookup = opts.GameLookup
-	model.userLookup = opts.UserLookup
-	model.markerManager = opts.MarkerManager
-	model.followerLookup = opts.FollowerLookup
-	model.subscriptionLookup = opts.SubscriptionLookup
-	model.clipManager = opts.ClipManager
-	model.followedChannels = opts.FollowedChannels
-	model.emoteEntries = make(map[string][]assets.EmoteEntry)
-	model.emoteEntriesRequested = make(map[string]bool)
+	model.services = twitchServices{
+		client:               client,
+		systemNotifier:       opts.SystemNotifier,
+		streamStatusResolver: opts.StreamStatusResolver,
+		channelManager:       opts.ChannelManager,
+		gameLookup:           opts.GameLookup,
+		userLookup:           opts.UserLookup,
+		markerManager:        opts.MarkerManager,
+		followerLookup:       opts.FollowerLookup,
+		subscriptionLookup:   opts.SubscriptionLookup,
+		clipManager:          opts.ClipManager,
+		followedChannels:     opts.FollowedChannels,
+	}
+	model.emotes.emoteIndex = opts.EmoteIndex
+	model.emotes.emoteEntries = make(map[string][]assets.EmoteEntry)
+	model.emotes.emoteEntriesRequested = make(map[string]bool)
 	model.debugLogger = opts.DebugLogger
 	return model
 }
@@ -590,7 +712,7 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case reconnectCompletedMsg:
 		m.completeReconnect(msg)
 	case animation.FrameMsg:
-		m.frameTickScheduled = false
+		m.frames.frameTickScheduled = false
 		m.advanceFrame(msg.At)
 		return m, m.scheduleFrameTick()
 	case streamStatusTickMsg:
@@ -602,7 +724,7 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case channelMetricsTickMsg:
-		m.channelMetricsTickScheduled = false
+		m.metrics.channelMetricsTickScheduled = false
 		return m, tea.Batch(m.resolveChannelMetricsCommand(), m.scheduleChannelMetricsTick())
 	case channelMetricsResolvedMsg:
 		return m.applyChannelMetrics(msg), nil
@@ -630,7 +752,7 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clipCreatedMsg:
 		return m.applyClipCreated(msg), nil
 	case mockAnimationTickMsg:
-		m.revealTickScheduled = false
+		m.frames.revealTickScheduled = false
 		active := m.activeChannelState()
 		result := active.revealQueue.Advance()
 		m.completeReveals(result.Completed)
@@ -763,7 +885,7 @@ func (m *shellModel) handleAlwaysOnKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool
 	case msg.Type == tea.KeyCtrlC:
 		return *m, tea.Quit, true
 	case m.splashActive():
-		m.splashSkipped = true
+		m.frames.splashSkipped = true
 		return *m, nil, true
 	}
 	if msg.Type == tea.KeyRunes && msg.Alt && len(msg.Runes) == 1 {
@@ -1014,7 +1136,7 @@ func (m shellModel) View() string {
 // droppedMessageCount reports messages lost to a full buffer, or zero for a
 // source that cannot drop (mock mode, test fakes).
 func (m shellModel) droppedMessageCount() uint64 {
-	counter, ok := m.client.(MessageDropCounter)
+	counter, ok := m.services.client.(MessageDropCounter)
 	if !ok {
 		return 0
 	}
@@ -1230,7 +1352,7 @@ func (m shellModel) sidebarView(layout shellLayout) string {
 	}
 	contentWidth := clampMin(layout.sidebarWidth-2, 1)
 	focused := m.focus == focusSidebar && !m.anyOverlayOpen()
-	selected := m.sidebarSelected
+	selected := m.panes.sidebarSelected
 	lines := make([]string, 0, layout.sidebarContentHeight)
 	for index, key := range m.channels.order {
 		state := m.channels.states[key]
@@ -1293,7 +1415,7 @@ func (m shellModel) activityLogView(layout shellLayout) string {
 	lines := make([]string, 0, layout.activityContentHeight)
 
 	maxRows := clampMin(layout.activityContentHeight, 0)
-	entries := m.activityLog
+	entries := m.activity.activityLog
 	if len(entries) > maxRows {
 		entries = entries[len(entries)-maxRows:]
 	}
@@ -1309,7 +1431,7 @@ func (m shellModel) activityLogView(layout shellLayout) string {
 
 	return m.renderPane(paneSpec{
 		icon:          "⚡",
-		title:         fmt.Sprintf("Activity · %02d", len(m.activityLog)),
+		title:         fmt.Sprintf("Activity · %02d", len(m.activity.activityLog)),
 		content:       strings.Join(lines, "\n"),
 		width:         layout.activityWidth,
 		contentHeight: layout.activityContentHeight,
@@ -1933,7 +2055,7 @@ func (m shellModel) sidebarWidth(width, chatHeight int) int {
 	// The activity column is measured first and passed in as the competing
 	// pane, so the two can never together starve chat.
 	return paneWidthOrDefault(
-		m.sidebarWidthOverride, fallback,
+		m.panes.sidebarWidthOverride, fallback,
 		sidebarMinSize, sidebarMaxSize,
 		width, m.activityWidthFor(width, chatHeight),
 	)
@@ -1952,7 +2074,7 @@ func (m shellModel) activityWidthFor(width, chatHeight int) int {
 		fallback = activityLogWideSize
 	}
 	return paneWidthOrDefault(
-		m.activityWidthOverride, fallback,
+		m.panes.activityWidthOverride, fallback,
 		activityMinSize, activityMaxSize,
 		width, 0,
 	)
@@ -2182,7 +2304,7 @@ func (m *shellModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m.closeChannel(state.name)
 		}
 		m.focus = focusSidebar
-		m.sidebarSelected = index
+		m.panes.sidebarSelected = index
 		if m.channels.setActive(state.name) {
 			m.clampScroll()
 			return m.withAsyncAssetCommands(nil)
@@ -2346,10 +2468,10 @@ func (m shellModel) nextIncomingCommand() tea.Cmd {
 }
 
 func (m shellModel) nextClientMessageCommand() tea.Cmd {
-	if m.client == nil {
+	if m.services.client == nil {
 		return nil
 	}
-	messages := m.client.Messages()
+	messages := m.services.client.Messages()
 	return func() tea.Msg {
 		message, ok := <-messages
 		return chatClientMessageMsg{message: message, ok: ok}
@@ -2357,10 +2479,10 @@ func (m shellModel) nextClientMessageCommand() tea.Cmd {
 }
 
 func (m shellModel) nextConnectionStateCommand() tea.Cmd {
-	if m.client == nil {
+	if m.services.client == nil {
 		return nil
 	}
-	states := m.client.ConnectionStates()
+	states := m.services.client.ConnectionStates()
 	return func() tea.Msg {
 		state, ok := <-states
 		return chatClientConnectionStateMsg{state: state, ok: ok}
@@ -2371,10 +2493,10 @@ func (m shellModel) nextConnectionStateCommand() tea.Cmd {
 // supports it. Transports that do not implement MembershipSource (mock mode,
 // test fakes) simply never produce membership messages.
 func (m shellModel) nextClientMembershipCommand() tea.Cmd {
-	if m.client == nil {
+	if m.services.client == nil {
 		return nil
 	}
-	source, ok := m.client.(MembershipSource)
+	source, ok := m.services.client.(MembershipSource)
 	if !ok {
 		return nil
 	}
@@ -2392,10 +2514,10 @@ func (m shellModel) nextClientMembershipCommand() tea.Cmd {
 // supports it. Transports that do not implement UserStateSource (mock mode,
 // test fakes) simply never produce these messages.
 func (m shellModel) nextClientUserStateCommand() tea.Cmd {
-	if m.client == nil {
+	if m.services.client == nil {
 		return nil
 	}
-	source, ok := m.client.(UserStateSource)
+	source, ok := m.services.client.(UserStateSource)
 	if !ok {
 		return nil
 	}
@@ -2413,10 +2535,10 @@ func (m shellModel) nextClientUserStateCommand() tea.Cmd {
 // transport supports it. Transports that do not implement ModerationSource
 // (mock mode, test fakes) simply never produce these messages.
 func (m shellModel) nextClientModerationCommand() tea.Cmd {
-	if m.client == nil {
+	if m.services.client == nil {
 		return nil
 	}
-	source, ok := m.client.(ModerationSource)
+	source, ok := m.services.client.(ModerationSource)
 	if !ok {
 		return nil
 	}
@@ -2579,10 +2701,10 @@ func (m *shellModel) maybeNotifyForSystemEvent(message twitch.ChatMessage) tea.C
 		return nil
 	}
 	m.lastSystemNotification = &notification
-	if m.systemNotifier == nil {
+	if m.services.systemNotifier == nil {
 		return nil
 	}
-	notifier := m.systemNotifier
+	notifier := m.services.systemNotifier
 	return func() tea.Msg {
 		_ = notifier.Notify(context.Background(), notification)
 		return nil
@@ -2686,10 +2808,10 @@ func (s *channelState) removeActiveRevealID(id string) {
 // driving the pulsing status indicators, startup splash,
 // and command-palette typewriter reveal from one ticker.
 func (m *shellModel) scheduleFrameTick() tea.Cmd {
-	if m.frameTickScheduled || m.animationMode == string(animation.ModeOff) {
+	if m.frames.frameTickScheduled || m.animationMode == string(animation.ModeOff) {
 		return nil
 	}
-	m.frameTickScheduled = true
+	m.frames.frameTickScheduled = true
 	return animation.ScheduleFrame(animation.DefaultFrameInterval)
 }
 
@@ -2698,16 +2820,16 @@ func (m *shellModel) scheduleFrameTick() tea.Cmd {
 // splash expires based on a wall-clock deadline checked at render time, so it
 // needs no per-tick bookkeeping here.
 func (m *shellModel) advanceFrame(now time.Time) {
-	m.lastFrameAt = now
-	m.frameTimestamps = append(m.frameTimestamps, now)
+	m.frames.lastFrameAt = now
+	m.frames.frameTimestamps = append(m.frames.frameTimestamps, now)
 	cutoff := now.Add(-time.Second)
-	trimmed := m.frameTimestamps[:0]
-	for _, ts := range m.frameTimestamps {
+	trimmed := m.frames.frameTimestamps[:0]
+	for _, ts := range m.frames.frameTimestamps {
 		if ts.After(cutoff) {
 			trimmed = append(trimmed, ts)
 		}
 	}
-	m.frameTimestamps = trimmed
+	m.frames.frameTimestamps = trimmed
 	m.sampleResourceUsage(now)
 	m.trimChatByteSamples(now)
 	if m.palette.open {
@@ -2716,10 +2838,10 @@ func (m *shellModel) advanceFrame(now time.Time) {
 }
 
 func (m *shellModel) scheduleRevealTick() tea.Cmd {
-	if m.revealTickScheduled || m.activeChannelState().revealQueue.Len() == 0 {
+	if m.frames.revealTickScheduled || m.activeChannelState().revealQueue.Len() == 0 {
 		return nil
 	}
-	m.revealTickScheduled = true
+	m.frames.revealTickScheduled = true
 	return tea.Tick(mockRevealDelay, func(time.Time) tea.Msg {
 		return mockAnimationTickMsg{}
 	})
@@ -2798,7 +2920,7 @@ func (m *shellModel) queueComposerSend() (tea.Model, tea.Cmd) {
 	if text == "" {
 		return *m, nil
 	}
-	if m.client == nil {
+	if m.services.client == nil {
 		state.sendState = composerSendFailed
 		state.sendFeedback = "send unavailable for this chat source"
 		return *m, nil
@@ -2839,7 +2961,7 @@ func (m *shellModel) startNextComposerSend(state *channelState) tea.Cmd {
 		state.sendFeedback = "sending action to #" + next.Channel
 	}
 	m.debugSendStart(next)
-	client := m.client
+	client := m.services.client
 	req := SendRequest{
 		Channel:          next.Channel,
 		Text:             next.Text,
@@ -3129,10 +3251,10 @@ func (m shellModel) renderOptions(width int) render.Options {
 	opts.Palette = m.theme
 	opts.Assets = render.FallbackAssetOptions()
 	opts.Assets.ShowAvatars = m.avatarMode != "off"
-	opts.Layout = m.messageLayout
-	opts.Badges = m.badgeMode
-	opts.HighlightEmotes = m.highlightEmotes
-	opts.FullUsername = m.fullUsername
+	opts.Layout = m.display.messageLayout
+	opts.Badges = m.display.badgeMode
+	opts.HighlightEmotes = m.display.highlightEmotes
+	opts.FullUsername = m.display.fullUsername
 	return opts
 }
 

@@ -26,7 +26,7 @@ type emoteIndexResolvedMsg struct {
 // credential plumbing. A missing/failed lookup just means emote search falls
 // back to global emotes only.
 func (m *shellModel) scheduleBroadcasterIDLookup() tea.Cmd {
-	if m.userLookup == nil {
+	if m.services.userLookup == nil {
 		return nil
 	}
 	channel := m.activeChannelName()
@@ -35,7 +35,7 @@ func (m *shellModel) scheduleBroadcasterIDLookup() tea.Cmd {
 		return nil
 	}
 	state.broadcasterIDRequested = true
-	lookup := m.userLookup
+	lookup := m.services.userLookup
 	key := channelKey(channel)
 	return func() tea.Msg {
 		results, err := lookup.GetUsers(context.Background(), twitch.UserLookupRequest{UserLogins: []string{channel}})
@@ -66,23 +66,23 @@ func (m *shellModel) applyBroadcasterIDResult(msg broadcasterIDResolvedMsg) {
 // handles TTL-based refresh, so this only needs to guard against re-issuing
 // a redundant in-flight request for a channel already resolved this session.
 func (m *shellModel) scheduleEmoteIndexLookup() tea.Cmd {
-	if m.emoteIndex == nil {
+	if m.emotes.emoteIndex == nil {
 		return nil
 	}
 	channel := m.activeChannelName()
 	key := channelKey(channel)
-	if _, ok := m.emoteEntries[key]; ok {
+	if _, ok := m.emotes.emoteEntries[key]; ok {
 		return nil
 	}
-	if m.emoteEntriesRequested == nil {
-		m.emoteEntriesRequested = make(map[string]bool)
+	if m.emotes.emoteEntriesRequested == nil {
+		m.emotes.emoteEntriesRequested = make(map[string]bool)
 	}
-	if m.emoteEntriesRequested[key] {
+	if m.emotes.emoteEntriesRequested[key] {
 		return nil
 	}
-	m.emoteEntriesRequested[key] = true
+	m.emotes.emoteEntriesRequested[key] = true
 	broadcasterID := m.activeChannelState().broadcasterID
-	index := m.emoteIndex
+	index := m.emotes.emoteIndex
 	return func() tea.Msg {
 		entries, err := index.Load(context.Background(), broadcasterID)
 		return emoteIndexResolvedMsg{channel: key, entries: entries, err: err}
@@ -91,7 +91,7 @@ func (m *shellModel) scheduleEmoteIndexLookup() tea.Cmd {
 
 func (m *shellModel) applyEmoteIndexResult(msg emoteIndexResolvedMsg) {
 	if msg.err != nil {
-		delete(m.emoteEntriesRequested, msg.channel)
+		delete(m.emotes.emoteEntriesRequested, msg.channel)
 		return
 	}
 	activeChannel := msg.channel == channelKey(m.activeChannelName())
@@ -99,10 +99,10 @@ func (m *shellModel) applyEmoteIndexResult(msg emoteIndexResolvedMsg) {
 	if activeChannel {
 		pickerSelection = selectedEmoteName(m.visibleEmotePickerEntries(), m.emotePicker.selected)
 	}
-	if m.emoteEntries == nil {
-		m.emoteEntries = make(map[string][]assets.EmoteEntry)
+	if m.emotes.emoteEntries == nil {
+		m.emotes.emoteEntries = make(map[string][]assets.EmoteEntry)
 	}
-	m.emoteEntries[msg.channel] = msg.entries
+	m.emotes.emoteEntries[msg.channel] = msg.entries
 	if activeChannel {
 		m.emotePicker.selected = emoteIndexByName(m.visibleEmotePickerEntries(), pickerSelection, m.emotePicker.selected)
 	}
@@ -140,7 +140,7 @@ func emoteIndexByName(entries []assets.EmoteEntry, name string, fallback int) in
 // or when that lookup is disabled; resolved entries are merged without
 // duplicates and retain their provider ordering.
 func (m shellModel) activeEmoteEntries() []assets.EmoteEntry {
-	resolved := m.emoteEntries[channelKey(m.activeChannelName())]
+	resolved := m.emotes.emoteEntries[channelKey(m.activeChannelName())]
 	entries := make([]assets.EmoteEntry, 0, len(resolved)+10)
 	seen := make(map[string]bool, len(resolved)+10)
 	for _, entry := range resolved {

@@ -126,14 +126,14 @@ type clipCreatedMsg struct {
 // send flow uses) carry progress and the result back to the status line,
 // since a clip isn't itself a chat message.
 func (m *shellModel) scheduleClipCreate(state *channelState, offsets clipOffsets) tea.Cmd {
-	if m.clipManager == nil {
+	if m.services.clipManager == nil {
 		state.sendState = composerSendFailed
 		state.sendFeedback = "clip: unavailable (requires Twitch API credentials; run `twi login`)"
 		return nil
 	}
 
-	clipManager := m.clipManager
-	userLookup := m.userLookup
+	clipManager := m.services.clipManager
+	userLookup := m.services.userLookup
 	username := m.effectiveConfig.Twitch.Username
 	knownID := m.selfBroadcasterID
 	channel := state.name

@@ -48,7 +48,7 @@ type miscMarkerCreatedMsg struct {
 // already-resolved broadcaster ID from shellModel.selfBroadcasterID
 // when Stream Info already resolved it.
 func (m *shellModel) scheduleMiscLoad() tea.Cmd {
-	if m.markerManager == nil {
+	if m.services.markerManager == nil {
 		m.misc.loadErr = "Misc requires Twitch API credentials (client ID + OAuth token); run `twi login`."
 		return nil
 	}
@@ -58,8 +58,8 @@ func (m *shellModel) scheduleMiscLoad() tea.Cmd {
 	m.misc.loading = true
 	m.misc.loadErr = ""
 
-	markerManager := m.markerManager
-	userLookup := m.userLookup
+	markerManager := m.services.markerManager
+	userLookup := m.services.userLookup
 	username := m.effectiveConfig.Twitch.Username
 	knownID := m.selfBroadcasterID
 
@@ -106,11 +106,11 @@ func (m shellModel) applyMiscLoaded(msg miscMarkersLoadedMsg) shellModel {
 // stream with an optional description. Twitch rejects this when the
 // broadcaster isn't currently live; that error surfaces as-is in createErr.
 func (m *shellModel) scheduleCreateMarker(description string) tea.Cmd {
-	if m.markerManager == nil || m.misc.creating {
+	if m.services.markerManager == nil || m.misc.creating {
 		return nil
 	}
-	markerManager := m.markerManager
-	userLookup := m.userLookup
+	markerManager := m.services.markerManager
+	userLookup := m.services.userLookup
 	username := m.effectiveConfig.Twitch.Username
 	knownID := m.selfBroadcasterID
 
@@ -256,7 +256,7 @@ func (m shellModel) miscLines(width, height int) []string {
 
 	var lines []string
 	switch {
-	case m.markerManager == nil:
+	case m.services.markerManager == nil:
 		lines = []string{
 			" Misc: Stream Markers",
 			" Unavailable: requires Twitch API credentials (client ID + OAuth token).",

@@ -43,10 +43,10 @@ const (
 // mirrors toggleSidebar exactly; the two panes should not behave differently.
 func (m *shellModel) toggleActivity() {
 	if m.layout().activityWidth > 0 {
-		m.activityVisibility = activityHidden
+		m.panes.activityVisibility = activityHidden
 		return
 	}
-	m.activityVisibility = activityShown
+	m.panes.activityVisibility = activityShown
 }
 
 // activityVisibleFor decides whether the activity column has room and reason
@@ -57,7 +57,7 @@ func (m shellModel) activityVisibleFor(width, chatHeight int) bool {
 	if chatHeight < 3 {
 		return false
 	}
-	switch m.activityVisibility {
+	switch m.panes.activityVisibility {
 	case activityShown:
 		// A deliberate show still needs enough width to leave chat readable,
 		// but does not require the auto threshold: someone who asked for the
@@ -82,7 +82,7 @@ func (m *shellModel) resizeSidebar(delta int) {
 	if layout.sidebarWidth <= 0 {
 		return
 	}
-	m.sidebarWidthOverride = clampPaneWidth(
+	m.panes.sidebarWidthOverride = clampPaneWidth(
 		layout.sidebarWidth+delta, sidebarMinSize, sidebarMaxSize,
 		layout.width, layout.activityWidth,
 	)
@@ -93,7 +93,7 @@ func (m *shellModel) resizeActivity(delta int) {
 	if layout.activityWidth <= 0 {
 		return
 	}
-	m.activityWidthOverride = clampPaneWidth(
+	m.panes.activityWidthOverride = clampPaneWidth(
 		layout.activityWidth+delta, activityMinSize, activityMaxSize,
 		layout.width, layout.sidebarWidth,
 	)
@@ -114,8 +114,8 @@ func (m *shellModel) resizeFocusedPane(delta int) {
 // resetPaneWidths drops both overrides, returning the panes to sizing
 // themselves from the terminal width.
 func (m *shellModel) resetPaneWidths() {
-	m.sidebarWidthOverride = 0
-	m.activityWidthOverride = 0
+	m.panes.sidebarWidthOverride = 0
+	m.panes.activityWidthOverride = 0
 }
 
 // clampPaneWidth keeps a pane inside its own bounds and inside what the

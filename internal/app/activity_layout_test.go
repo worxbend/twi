@@ -105,8 +105,8 @@ func TestSidePanesNeverStarveChatBelowFloor(t *testing.T) {
 				cfg.Features.AnimationMode = "off"
 				model := newMockModel("example", cfg)
 				model.width, model.height = width, 30
-				model.activityVisibility = visibility
-				model.sidebarVisibility = sidebar
+				model.panes.activityVisibility = visibility
+				model.panes.sidebarVisibility = sidebar
 
 				layout := model.layout()
 				if layout.activityWidth == 0 && layout.sidebarWidth == 0 {

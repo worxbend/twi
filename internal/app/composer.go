@@ -244,14 +244,14 @@ func (m shellModel) composerCursorVisible() bool {
 	if !m.composerFocused() {
 		return false
 	}
-	if m.animationMode == string(animation.ModeOff) || m.lastFrameAt.IsZero() {
+	if m.animationMode == string(animation.ModeOff) || m.frames.lastFrameAt.IsZero() {
 		return true
 	}
 	interval := 500 * time.Millisecond
 	if m.animationMode == string(animation.ModeReduced) {
 		interval = time.Second
 	}
-	return (m.lastFrameAt.UnixNano()/int64(interval))%2 == 0
+	return (m.frames.lastFrameAt.UnixNano()/int64(interval))%2 == 0
 }
 
 func renderComposerSegments(segments []composerSegment, width int, background string) string {

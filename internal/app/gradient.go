@@ -10,14 +10,14 @@ import (
 )
 
 func (m shellModel) gradientPhase(width int) int {
-	if width <= 0 || m.animationMode == string(animation.ModeOff) || m.lastFrameAt.IsZero() {
+	if width <= 0 || m.animationMode == string(animation.ModeOff) || m.frames.lastFrameAt.IsZero() {
 		return 0
 	}
 	frameMillis := int64(200)
 	if m.animationMode == string(animation.ModeReduced) {
 		frameMillis = 400
 	}
-	return int(m.lastFrameAt.UnixMilli()/frameMillis) % width
+	return int(m.frames.lastFrameAt.UnixMilli()/frameMillis) % width
 }
 
 // gradientEndColor keeps decorative gradients visible when a colorful theme

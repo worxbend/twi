@@ -78,7 +78,7 @@ func TestLiveShellClipInputCreatesClip(t *testing.T) {
 	fake := &appFakeClipManager{clip: twitch.Clip{ID: "abc", EditURL: "https://clips.twitch.tv/abc/edit"}}
 	model := newLiveModelWithClock("example", config.Default(), NewFakeChatClient(1), nil)
 	model.focus = focusComposer
-	model.clipManager = fake
+	model.services.clipManager = fake
 	model.selfBroadcasterID = "123"
 	model.activeChannelState().composerText = "/clip T-5m"
 
@@ -105,18 +105,18 @@ func TestLiveShellClipInputCreatesClip(t *testing.T) {
 	if !strings.Contains(feedback, "https://clips.twitch.tv/abc/edit") || !strings.Contains(feedback, "5m ago") {
 		t.Fatalf("sendFeedback = %q, want edit URL and requested range", feedback)
 	}
-	if len(model.activityLog) != 1 || model.activityLog[0].Kind != activityClip {
-		t.Fatalf("activityLog = %#v, want one activityClip entry", model.activityLog)
+	if len(model.activity.activityLog) != 1 || model.activity.activityLog[0].Kind != activityClip {
+		t.Fatalf("activityLog = %#v, want one activityClip entry", model.activity.activityLog)
 	}
-	if !strings.Contains(model.activityLog[0].Text, "https://clips.twitch.tv/abc/edit") {
-		t.Fatalf("activity entry text = %q, want edit URL", model.activityLog[0].Text)
+	if !strings.Contains(model.activity.activityLog[0].Text, "https://clips.twitch.tv/abc/edit") {
+		t.Fatalf("activity entry text = %q, want edit URL", model.activity.activityLog[0].Text)
 	}
 }
 
 func TestLiveShellClipInputSurfacesParseError(t *testing.T) {
 	model := newLiveModelWithClock("example", config.Default(), NewFakeChatClient(1), nil)
 	model.focus = focusComposer
-	model.clipManager = &appFakeClipManager{}
+	model.services.clipManager = &appFakeClipManager{}
 	model.activeChannelState().composerText = "/clip T-2m T-4m"
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -153,7 +153,7 @@ func TestClipCreateFailureIsUserFriendlyOnMissingScope(t *testing.T) {
 
 	cfg := config.Default()
 	model := newMockModel("example", cfg)
-	model.clipManager = helix.NewClipsClient(helix.ClipsClientConfig{Endpoint: server.URL})
+	model.services.clipManager = helix.NewClipsClient(helix.ClipsClientConfig{Endpoint: server.URL})
 	model.selfBroadcasterID = "123"
 	state := model.channels.ensure("example")
 	model.channels.active = "example"
@@ -178,7 +178,7 @@ func TestClipCreateFailureIsUserFriendlyOnNotLive(t *testing.T) {
 
 	cfg := config.Default()
 	model := newMockModel("example", cfg)
-	model.clipManager = helix.NewClipsClient(helix.ClipsClientConfig{Endpoint: server.URL})
+	model.services.clipManager = helix.NewClipsClient(helix.ClipsClientConfig{Endpoint: server.URL})
 	model.selfBroadcasterID = "123"
 	state := model.channels.ensure("example")
 	model.channels.active = "example"

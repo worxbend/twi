@@ -43,8 +43,8 @@ func RunMockWithOptions(w io.Writer, cfg config.Config, opts ClientOptions) erro
 	if opts.SystemNotifier == nil {
 		opts.SystemNotifier = newDefaultSystemNotifier(w)
 	}
-	model.systemNotifier = opts.SystemNotifier
-	model.splashUntil = splashDeadline(model.animationMode)
+	model.services.systemNotifier = opts.SystemNotifier
+	model.frames.splashUntil = splashDeadline(model.animationMode)
 	model.terminalOutput = w
 	primeTerminalBackground(w, model.canvasBackground())
 
@@ -81,7 +81,7 @@ func newMockModelWithClock(channel string, cfg config.Config, clock animation.Cl
 	}
 	model.sourceDetail = "mock source: no network"
 	model.incoming = incomingMockMessages(channels.activeName(), connectedAt)
-	model.emoteEntries = emoteEntries
+	model.emotes.emoteEntries = emoteEntries
 	return model
 }
 

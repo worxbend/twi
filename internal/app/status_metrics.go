@@ -33,7 +33,7 @@ type streamStatusResolvedMsg struct {
 // (StreamStatusResolver is nil) without live credentials or when
 // stream_status_mode is "off".
 func (m *shellModel) scheduleStreamStatusTick() tea.Cmd {
-	if m.streamStatusResolver == nil || m.streamStatusTickScheduled {
+	if m.services.streamStatusResolver == nil || m.streamStatusTickScheduled {
 		return nil
 	}
 	m.streamStatusTickScheduled = true
@@ -43,7 +43,7 @@ func (m *shellModel) scheduleStreamStatusTick() tea.Cmd {
 }
 
 func (m shellModel) resolveStreamStatusCommand() tea.Cmd {
-	resolver := m.streamStatusResolver
+	resolver := m.services.streamStatusResolver
 	if resolver == nil {
 		return nil
 	}
@@ -95,7 +95,7 @@ func (m *shellModel) applyStreamStatusResults(results []twitch.StreamInfo) {
 // bitrate through any public API, so this reports actual chat-message
 // throughput instead of implying a stream encode bitrate.
 func (m *shellModel) recordChatBytes(message twitch.ChatMessage) {
-	m.chatByteSamples = append(m.chatByteSamples, chatByteSample{
+	m.runtime.chatByteSamples = append(m.runtime.chatByteSamples, chatByteSample{
 		at:    time.Now(),
 		bytes: len(message.Text),
 	})
@@ -110,43 +110,43 @@ func (m *shellModel) recordChatBytes(message twitch.ChatMessage) {
 func (m *shellModel) sampleResourceUsage(now time.Time) {
 	cpuTime, ok := sampleProcessCPUTime()
 	if !ok {
-		m.cpuAvailable = false
+		m.runtime.cpuAvailable = false
 	} else {
-		if !m.cpuSampleAt.IsZero() {
-			wall := now.Sub(m.cpuSampleAt)
+		if !m.runtime.cpuSampleAt.IsZero() {
+			wall := now.Sub(m.runtime.cpuSampleAt)
 			if wall > 0 {
-				m.cpuPercent = float64(cpuTime-m.cpuSampleTime) / float64(wall) * 100
-				m.cpuAvailable = true
+				m.runtime.cpuPercent = float64(cpuTime-m.runtime.cpuSampleTime) / float64(wall) * 100
+				m.runtime.cpuAvailable = true
 			}
 		}
-		m.cpuSampleAt = now
-		m.cpuSampleTime = cpuTime
+		m.runtime.cpuSampleAt = now
+		m.runtime.cpuSampleTime = cpuTime
 	}
 
 	var stats runtime.MemStats
 	runtime.ReadMemStats(&stats)
-	m.memoryMB = float64(stats.Alloc) / (1024 * 1024)
+	m.runtime.memoryMB = float64(stats.Alloc) / (1024 * 1024)
 }
 
 // trimChatByteSamples drops samples outside the rolling bitrate window.
 func (m *shellModel) trimChatByteSamples(now time.Time) {
 	cutoff := now.Add(-chatBitrateWindow)
-	trimmed := m.chatByteSamples[:0]
-	for _, sample := range m.chatByteSamples {
+	trimmed := m.runtime.chatByteSamples[:0]
+	for _, sample := range m.runtime.chatByteSamples {
 		if sample.at.After(cutoff) {
 			trimmed = append(trimmed, sample)
 		}
 	}
-	m.chatByteSamples = trimmed
+	m.runtime.chatByteSamples = trimmed
 }
 
 // chatBitrateBps returns the rolling-window chat-message byte throughput.
 func (m shellModel) chatBitrateBps() float64 {
-	if len(m.chatByteSamples) == 0 {
+	if len(m.runtime.chatByteSamples) == 0 {
 		return 0
 	}
 	total := 0
-	for _, sample := range m.chatByteSamples {
+	for _, sample := range m.runtime.chatByteSamples {
 		total += sample.bytes
 	}
 	return float64(total) / chatBitrateWindow.Seconds()
@@ -155,7 +155,7 @@ func (m shellModel) chatBitrateBps() float64 {
 // fps returns the shared animation clock's achieved frame rate over the last
 // second (see advanceFrame's frameTimestamps bookkeeping).
 func (m shellModel) fps() float64 {
-	return float64(len(m.frameTimestamps))
+	return float64(len(m.frames.frameTimestamps))
 }
 
 // formatStatusMetrics renders the LIVE/REC telemetry segment of the status
@@ -177,19 +177,19 @@ func (m shellModel) formatStatusMetrics(now time.Time, debugRecording bool) stri
 	} else {
 		parts = append(parts, "OFFLINE")
 	}
-	if m.followerCountKnown {
-		parts = append(parts, fmt.Sprintf("followers=%d", m.followerCount))
+	if m.metrics.followerCountKnown {
+		parts = append(parts, fmt.Sprintf("followers=%d", m.metrics.followerCount))
 	}
-	if m.subscriberCountKnown {
-		parts = append(parts, fmt.Sprintf("subs=%d", m.subscriberCount))
+	if m.metrics.subscriberCountKnown {
+		parts = append(parts, fmt.Sprintf("subs=%d", m.metrics.subscriberCount))
 	}
 	if debugRecording {
 		parts = append(parts, pulseLabel("REC", pulse))
 	}
-	if m.cpuAvailable {
-		parts = append(parts, fmt.Sprintf("cpu=%.0f%%", m.cpuPercent))
+	if m.runtime.cpuAvailable {
+		parts = append(parts, fmt.Sprintf("cpu=%.0f%%", m.runtime.cpuPercent))
 	}
-	parts = append(parts, fmt.Sprintf("mem=%.0fMB", m.memoryMB))
+	parts = append(parts, fmt.Sprintf("mem=%.0fMB", m.runtime.memoryMB))
 	parts = append(parts, fmt.Sprintf("fps=%.0f", m.fps()))
 	parts = append(parts, fmt.Sprintf("chat=%.1fKB/s", m.chatBitrateBps()/1024))
 	return strings.Join(parts, " ")
@@ -201,7 +201,7 @@ func (m shellModel) formatStatusMetrics(now time.Time, debugRecording bool) stri
 // state, matching how the rest of the app (chat reveal, scene flash) is
 // tested with an injectable clock rather than free-floating real time.
 func (m shellModel) metricsNow() time.Time {
-	return m.lastFrameAt
+	return m.frames.lastFrameAt
 }
 
 // compactStatusMetrics renders just the LIVE/OFFLINE badge and elapsed time

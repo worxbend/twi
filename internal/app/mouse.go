@@ -59,7 +59,7 @@ func (m shellModel) sidebarRowAtMouse(event tea.MouseEvent, layout shellLayout) 
 	// the pane border.
 	closeStart := layout.sidebarWidth - 1 - uniseg.StringWidth(sidebarCloseAffordance)
 	focused := m.focus == focusSidebar && !m.anyOverlayOpen()
-	closeHit = focused && index == m.sidebarSelected && event.X >= closeStart
+	closeHit = focused && index == m.panes.sidebarSelected && event.X >= closeStart
 	return index, closeHit, true
 }
 

@@ -74,7 +74,7 @@ type streamInfoSavedMsg struct {
 // Repeat opens reuse the already-resolved broadcaster ID instead of looking
 // it up again.
 func (m *shellModel) scheduleStreamInfoLoad() tea.Cmd {
-	if m.channelManager == nil {
+	if m.services.channelManager == nil {
 		m.streamInfo.loadErr = "Stream Info requires Twitch API credentials (client ID + OAuth token); run `twi login`."
 		return nil
 	}
@@ -84,8 +84,8 @@ func (m *shellModel) scheduleStreamInfoLoad() tea.Cmd {
 	m.streamInfo.loading = true
 	m.streamInfo.loadErr = ""
 
-	channelManager := m.channelManager
-	userLookup := m.userLookup
+	channelManager := m.services.channelManager
+	userLookup := m.services.userLookup
 	username := m.effectiveConfig.Twitch.Username
 	knownID := m.selfBroadcasterID
 
@@ -136,7 +136,7 @@ func (m shellModel) applyStreamInfoLoaded(msg streamInfoLoadedMsg) shellModel {
 // picking a real category in the category picker (category_picker.go), never
 // typed - so no name->ID resolution is needed here.
 func (m *shellModel) scheduleStreamInfoSave() tea.Cmd {
-	if m.channelManager == nil || m.selfBroadcasterID == "" || m.streamInfo.saving {
+	if m.services.channelManager == nil || m.selfBroadcasterID == "" || m.streamInfo.saving {
 		return nil
 	}
 
@@ -147,7 +147,7 @@ func (m *shellModel) scheduleStreamInfoSave() tea.Cmd {
 	language := strings.TrimSpace(m.streamInfo.language)
 	tags := parseStreamInfoTags(m.streamInfo.tags)
 	broadcasterID := m.selfBroadcasterID
-	channelManager := m.channelManager
+	channelManager := m.services.channelManager
 
 	m.streamInfo.saving = true
 	m.streamInfo.saveErr = ""
@@ -386,7 +386,7 @@ func (m shellModel) streamInfoLines(width, height int) []string {
 
 	var lines []string
 	switch {
-	case m.channelManager == nil:
+	case m.services.channelManager == nil:
 		lines = []string{
 			" Stream Info",
 			" Unavailable: requires Twitch API credentials (client ID + OAuth token).",

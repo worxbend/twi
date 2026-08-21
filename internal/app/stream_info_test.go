@@ -105,14 +105,14 @@ func TestStreamInfoLoadsAndDisplaysChannelInfo(t *testing.T) {
 	cfg.Twitch.Username = "streamer"
 	model := newMockModel("example", cfg)
 	model.width, model.height = 88, 20
-	model.channelManager = &appFakeChannelManager{info: twitch.ChannelInfo{
+	model.services.channelManager = &appFakeChannelManager{info: twitch.ChannelInfo{
 		BroadcasterID: "123",
 		Title:         "Hello world",
 		GameName:      "Just Chatting",
 		Language:      "en",
 		Tags:          []string{"English", "Chill"},
 	}}
-	model.userLookup = &appFakeUserLookup{users: []twitch.UserIdentity{{UserID: "123", Login: "streamer"}}}
+	model.services.userLookup = &appFakeUserLookup{users: []twitch.UserIdentity{{UserID: "123", Login: "streamer"}}}
 
 	updated, cmd := model.switchToTab(tabStreamInfo)
 	model = updated.(shellModel)
@@ -145,7 +145,7 @@ func TestStreamInfoLoadFailureSurfacesError(t *testing.T) {
 	model := newMockModel("example", cfg)
 	model.width, model.height = 88, 20
 	model.activeTab = tabStreamInfo
-	model.channelManager = &appFakeChannelManager{getErr: errors.New("twitch says no")}
+	model.services.channelManager = &appFakeChannelManager{getErr: errors.New("twitch says no")}
 	model.selfBroadcasterID = "123" // skip user lookup
 
 	cmd := model.scheduleStreamInfoLoad()
@@ -174,7 +174,7 @@ func TestStreamInfoEditAndSaveUpdatesOnlyChangedFields(t *testing.T) {
 		Language:      "en",
 		Tags:          []string{"Chill"},
 	}}
-	model.channelManager = channelManager
+	model.services.channelManager = channelManager
 	model.selfBroadcasterID = "123"
 
 	loaded := model.scheduleStreamInfoLoad()().(streamInfoLoadedMsg)
@@ -236,7 +236,7 @@ func TestStreamInfoCategoryChangeSendsPickedGameID(t *testing.T) {
 		BroadcasterID: "123",
 		GameName:      "Old Game",
 	}}
-	model.channelManager = channelManager
+	model.services.channelManager = channelManager
 	model.selfBroadcasterID = "123"
 	loaded := model.scheduleStreamInfoLoad()().(streamInfoLoadedMsg)
 	model = model.applyStreamInfoLoaded(loaded)
@@ -264,12 +264,12 @@ func TestCategoryPickerSearchesAndSelectsCategory(t *testing.T) {
 	model := newMockModel("example", cfg)
 	model.width, model.height = 88, 20
 	model.activeTab = tabStreamInfo
-	model.channelManager = &appFakeChannelManager{info: twitch.ChannelInfo{
+	model.services.channelManager = &appFakeChannelManager{info: twitch.ChannelInfo{
 		BroadcasterID: "123",
 		GameName:      "Old Game",
 		GameID:        "1",
 	}}
-	model.gameLookup = &appFakeGameLookup{games: map[string]twitch.Game{
+	model.services.gameLookup = &appFakeGameLookup{games: map[string]twitch.Game{
 		"Old Game":          {ID: "1", Name: "Old Game"},
 		"Fortnite":          {ID: "33214", Name: "Fortnite"},
 		"Fortnite Creative": {ID: "509670", Name: "Fortnite Creative"},
@@ -333,7 +333,7 @@ func TestCategoryPickerSearchesAndSelectsCategory(t *testing.T) {
 func TestCategoryPickerNoCategoryEntryClearsCategory(t *testing.T) {
 	cfg := config.Default()
 	model := newMockModel("example", cfg)
-	model.gameLookup = &appFakeGameLookup{games: map[string]twitch.Game{}}
+	model.services.gameLookup = &appFakeGameLookup{games: map[string]twitch.Game{}}
 	model.streamInfo.category = "Old Game"
 	model.streamInfo.categoryGameID = "1"
 	model.categoryPicker = categoryPickerState{open: true}
@@ -365,7 +365,7 @@ func TestCategoryPickerEscCancelsWithoutChangingCategory(t *testing.T) {
 func TestCategoryPickerStaleDebounceAndResultsAreDiscarded(t *testing.T) {
 	cfg := config.Default()
 	model := newMockModel("example", cfg)
-	model.gameLookup = &appFakeGameLookup{games: map[string]twitch.Game{
+	model.services.gameLookup = &appFakeGameLookup{games: map[string]twitch.Game{
 		"Fortnite": {ID: "33214", Name: "Fortnite"},
 	}}
 	model.categoryPicker = categoryPickerState{open: true}
@@ -404,7 +404,7 @@ func TestStreamInfoMissingScopeErrorIsUserFriendly(t *testing.T) {
 	model := newMockModel("example", cfg)
 	model.width, model.height = 88, 20
 	model.activeTab = tabStreamInfo
-	model.channelManager = helix.NewChannelsClient(helix.ChannelsClientConfig{Endpoint: server.URL})
+	model.services.channelManager = helix.NewChannelsClient(helix.ChannelsClientConfig{Endpoint: server.URL})
 	model.selfBroadcasterID = "123"
 
 	loaded := model.scheduleStreamInfoLoad()().(streamInfoLoadedMsg)

@@ -61,9 +61,9 @@ func TestComposerCursorBlinksFromSharedFrameClock(t *testing.T) {
 	model.focus = focusComposer
 	layout := model.layout()
 
-	model.lastFrameAt = time.UnixMilli(1000)
+	model.frames.lastFrameAt = time.UnixMilli(1000)
 	visible := model.composerView(layout)
-	model.lastFrameAt = time.UnixMilli(1500)
+	model.frames.lastFrameAt = time.UnixMilli(1500)
 	hidden := model.composerView(layout)
 	if !strings.Contains(visible, "█") || strings.Contains(hidden, "█") {
 		t.Fatalf("cursor blink states incorrect:\nvisible:\n%s\nhidden:\n%s", visible, hidden)
