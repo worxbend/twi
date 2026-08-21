@@ -214,14 +214,9 @@ func tokenValidationCheck(ctx context.Context, cfg config.Config, validator twit
 	detailed := func(lead string) []string {
 		return append([]string{lead}, summary()...)
 	}
-	// missingScopesDetail names the scopes the token lacks, preferring what
-	// Twitch itself reported over what twi worked out from the granted list.
-	missing := validation.MissingScopes
-	if len(missing) == 0 {
-		missing = twitch.MissingRequiredIRCScopes(validation.Scopes)
-	}
+	missing := validation.MissingRequiredIRCScopes()
 
-	if validation.Status == twitch.TokenValidationValid && staleUsername(cfg.Twitch.Username, validation.Identity.Login) {
+	if validation.Status == twitch.TokenValidationValid && twitch.LoginMismatch(cfg.Twitch.Username, validation.Identity.Login) {
 		return warn(staleUsernameDetail(cfg.Twitch.Username, validation.Identity.Login))
 	}
 
@@ -589,15 +584,6 @@ func joinTokenValidationDetails(parts ...string) string {
 		}
 	}
 	return strings.Join(kept, "; ")
-}
-
-// staleUsername reports a configured username that names a different account
-// than the token's owner. An unset username is not stale - it is the
-// recommended configuration, since the login is derived from the token.
-func staleUsername(configured, actual string) bool {
-	configured = strings.TrimSpace(configured)
-	actual = strings.TrimSpace(actual)
-	return configured != "" && actual != "" && !strings.EqualFold(configured, actual)
 }
 
 func tokenScopesCSV(scopes []twitch.TokenScope) string {

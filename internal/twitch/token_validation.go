@@ -93,6 +93,32 @@ func (r TokenValidationResult) Valid() bool {
 	return r.Status == TokenValidationValid
 }
 
+// MissingRequiredIRCScopes names the scopes chat needs that this token does
+// not have.
+//
+// It prefers what Twitch itself reported over what twi worked out from the
+// granted list, because Twitch knows about scopes twi may not. Both callers --
+// starting live chat and `twi doctor` -- need the same answer and each had
+// written the fallback out itself; they still word their own messages.
+func (r TokenValidationResult) MissingRequiredIRCScopes() []TokenScope {
+	if len(r.MissingScopes) > 0 {
+		return r.MissingScopes
+	}
+	return MissingRequiredIRCScopes(r.Scopes)
+}
+
+// LoginMismatch reports a configured username that names a different account
+// than the token's owner.
+//
+// An unset username is not a mismatch: it is the recommended configuration,
+// since the login is derived from the token. Comparison is case-insensitive
+// because Twitch logins are.
+func LoginMismatch(configured, actual string) bool {
+	configured = strings.TrimSpace(configured)
+	actual = strings.TrimSpace(actual)
+	return configured != "" && actual != "" && !strings.EqualFold(configured, actual)
+}
+
 // RequiredIRCScopes returns the Twitch OAuth scopes required for IRC read and
 // send support.
 func RequiredIRCScopes() []TokenScope {

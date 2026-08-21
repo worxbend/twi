@@ -552,10 +552,7 @@ func validateLiveChatToken(ctx context.Context, cfg config.Config, validator twi
 		warning = stale
 	}
 
-	missing := validation.MissingScopes
-	if len(missing) == 0 {
-		missing = twitch.MissingRequiredIRCScopes(validation.Scopes)
-	}
+	missing := validation.MissingRequiredIRCScopes()
 	if len(missing) > 0 {
 		return "", "", liveTokenValidationError(redactor, "missing required scopes: "+strings.Join(auth.ScopeValues(missing), ", "))
 	}
@@ -580,9 +577,7 @@ func validateLiveChatToken(ctx context.Context, cfg config.Config, validator twi
 // with the token's owner. twi uses the token's login regardless; the warning
 // exists so the stale setting is visible rather than silently overridden.
 func staleUsernameWarning(configured, resolved string) string {
-	configured = strings.TrimSpace(configured)
-	resolved = strings.TrimSpace(resolved)
-	if configured == "" || resolved == "" || strings.EqualFold(configured, resolved) {
+	if !twitch.LoginMismatch(configured, resolved) {
 		return ""
 	}
 	return fmt.Sprintf(
