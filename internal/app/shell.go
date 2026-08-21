@@ -45,16 +45,9 @@ const (
 	emptyStateScannerWidth = 16
 )
 
-// StreamStatusResolver is the app-facing boundary for real Twitch broadcast
-// status (Twitch Helix "Get Streams"). Implementations must not perform
-// network work from View.
-type StreamStatusResolver interface {
-	GetStreams(ctx context.Context, logins []string) ([]twitch.StreamInfo, error)
-}
-
 type ClientOptions struct {
 	SystemNotifier       SystemNotifier
-	StreamStatusResolver StreamStatusResolver
+	StreamStatusResolver twitch.StreamLookup
 	EmoteIndex           *assets.EmoteIndex
 	DebugLogger          debuglog.Logger
 	ChannelManager       twitch.ChannelManager
@@ -165,7 +158,7 @@ type twitchServices struct {
 	// notifier raises desktop notifications; nil disables them.
 	systemNotifier SystemNotifier
 	// streamStatusResolver backs the LIVE indicator.
-	streamStatusResolver StreamStatusResolver
+	streamStatusResolver twitch.StreamLookup
 	// channelManager reads and writes the Stream Info tab's fields.
 	channelManager twitch.ChannelManager
 	// gameLookup resolves a category name to a Twitch game ID.

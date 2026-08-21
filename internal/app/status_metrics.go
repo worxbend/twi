@@ -30,7 +30,7 @@ type streamStatusResolvedMsg struct {
 
 // scheduleStreamStatusTick polls Twitch Helix "Get Streams" for every
 // configured channel every streamStatusPollInterval. Polling is disabled
-// (StreamStatusResolver is nil) without live credentials or when
+// (the stream status resolver is nil) without live credentials or when
 // stream_status_mode is "off".
 func (m *shellModel) scheduleStreamStatusTick() tea.Cmd {
 	if m.services.streamStatusResolver == nil || m.streamStatusTickScheduled {

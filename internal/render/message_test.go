@@ -381,7 +381,7 @@ func TestRowsExposeRepresentativeFragmentKinds(t *testing.T) {
 	if got, notWant := username.Style.Foreground, theme.DefaultPalette().Foreground; got == notWant {
 		t.Fatalf("username color = fallback %q, want a stable identity color", got)
 	}
-	if styled := rows[0].String(); styled == "" || !strings.Contains(styled, "alice") {
+	if styled := rows[0].TerminalString(); styled == "" || !strings.Contains(styled, "alice") {
 		t.Fatalf("styled row missing username: %q", styled)
 	}
 }
@@ -582,7 +582,11 @@ func TestTextRowUsesFallbackAuthor(t *testing.T) {
 		Text:        "message",
 	}
 
-	row := TextRow(msg, 80)
+	rows := plainRows(msg, 80)
+	if len(rows) == 0 {
+		t.Fatal("plainRows returned no rows")
+	}
+	row := rows[0]
 
 	if !strings.Contains(row, "login") {
 		t.Fatalf("row = %q, want fallback author login", row)

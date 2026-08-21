@@ -36,20 +36,21 @@ type Event struct {
 
 type EventKind string
 
+// The kinds a transport may report. EventError is deliberately kept even
+// though the IRC adapter never sets it: Event is the port type of ChatClient,
+// not an adapter's private enum, and a future transport's failures reaching
+// the user as silence is a worse outcome than one unused constant.
 const (
-	EventConnected    EventKind = "connected"
-	EventDisconnected EventKind = "disconnected"
-	EventMessage      EventKind = "message"
-	EventNotice       EventKind = "notice"
-	EventUserNotice   EventKind = "user_notice"
-	EventRoomState    EventKind = "room_state"
-	EventModeration   EventKind = "moderation"
-	EventUserState    EventKind = "user_state"
-	EventMembership   EventKind = "membership"
-	EventConnection   EventKind = "connection"
-	EventRaw          EventKind = "raw"
-	EventClear        EventKind = "clear"
-	EventError        EventKind = "error"
+	EventMessage    EventKind = "message"
+	EventNotice     EventKind = "notice"
+	EventUserNotice EventKind = "user_notice"
+	EventRoomState  EventKind = "room_state"
+	EventModeration EventKind = "moderation"
+	EventUserState  EventKind = "user_state"
+	EventMembership EventKind = "membership"
+	EventConnection EventKind = "connection"
+	EventRaw        EventKind = "raw"
+	EventError      EventKind = "error"
 )
 
 type Notice struct {

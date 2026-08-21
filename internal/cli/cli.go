@@ -271,12 +271,12 @@ func newEmoteIndex(cfg config.Config, tokenSource func() string) *assets.EmoteIn
 
 // newStreamStatusResolver wires the real Twitch Helix "Get Streams" LIVE
 // indicator, gated only on stream_status_mode and Twitch API credentials.
-func newStreamStatusResolver(cfg config.Config, tokenSource func() string) app.StreamStatusResolver {
+func newStreamStatusResolver(cfg config.Config, tokenSource func() string) twitch.StreamLookup {
 	if strings.EqualFold(strings.TrimSpace(cfg.Features.StreamStatusMode), "off") {
 		return nil
 	}
 	return newHelixAdapter(cfg, tokenSource, helixInteractiveTimeout,
-		func(c helix.ClientConfig) app.StreamStatusResolver { return helix.NewStreamsClient(c) })
+		func(c helix.ClientConfig) twitch.StreamLookup { return helix.NewStreamsClient(c) })
 }
 
 var runLiveChat = app.RunClientWithOptions

@@ -81,14 +81,6 @@ func (r Row) Plain() string {
 }
 
 // String returns the row with ANSI styling applied.
-func (r Row) String() string {
-	var builder strings.Builder
-	for _, fragment := range r.Fragments {
-		builder.WriteString(renderFragment(fragment))
-	}
-	return builder.String()
-}
-
 // TerminalString returns the row with styled text fallbacks (avatars,
 // badges, emotes, and emoji always render as text - there is no image
 // rendering path).
@@ -394,35 +386,6 @@ func groupedHeaderFragments(msg twitch.ChatMessage, opts Options) []Fragment {
 		fragments = append(fragments, authorMetaFragments(opts)...)
 	}
 	return fragments
-}
-
-// PlainRows renders fallback text rows for callers that do their own styling.
-func PlainRows(msg twitch.ChatMessage, width int) []string {
-	rows := Rows(msg, DefaultOptions(width))
-	plain := make([]string, 0, len(rows))
-	for _, row := range rows {
-		plain = append(plain, row.Plain())
-	}
-	return plain
-}
-
-// StringRows renders ANSI-styled rows.
-func StringRows(msg twitch.ChatMessage, width int) []string {
-	rows := Rows(msg, DefaultOptions(width))
-	rendered := make([]string, 0, len(rows))
-	for _, row := range rows {
-		rendered = append(rendered, row.String())
-	}
-	return rendered
-}
-
-// TextRow returns the first plain row for older single-row callers.
-func TextRow(msg twitch.ChatMessage, width int) string {
-	rows := PlainRows(msg, width)
-	if len(rows) == 0 {
-		return ""
-	}
-	return rows[0]
 }
 
 // usernameFragment renders the author name in their stable identity color.
