@@ -821,44 +821,20 @@ func readFileContext(ctx context.Context, path string) ([]byte, error) {
 	}
 }
 
-func copyFileAtomicContext(ctx context.Context, srcPath, dstPath string) error {
-	src, err := os.Open(srcPath)
-	if err != nil {
-		return err
-	}
-	defer src.Close()
-
-	tmp, err := os.CreateTemp(filepath.Dir(dstPath), ".asset-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	removeTmp := true
-	defer func() {
-		if removeTmp {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-
-	if err := copyContext(ctx, tmp, src); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := renameReplace(tmpPath, dstPath); err != nil {
-		return err
-	}
-	removeTmp = false
-	return nil
-}
-
-func writeFileAtomicContext(ctx context.Context, path string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".metadata-*.tmp")
+// writeAtomicContext writes new contents for path through a temporary file
+// beside it, then renames that into place.
+//
+// The rename is what makes it atomic: a reader either sees the whole previous
+// file or the whole new one, never a half-written one, and a failure part-way
+// through leaves the previous contents untouched. The temporary file is
+// removed on every path that does not reach the rename.
+//
+// write produces the contents. The caller supplies it because the two things
+// this cache stores arrive differently -- an asset is copied in from another
+// file, its metadata is marshalled in memory -- while everything around that
+// is identical.
+func writeAtomicContext(ctx context.Context, path, tempPattern string, write func(io.Writer) error) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), tempPattern)
 	if err != nil {
 		return err
 	}
@@ -870,13 +846,15 @@ func writeFileAtomicContext(ctx context.Context, path string, data []byte) error
 		}
 	}()
 
-	if err := writeContext(ctx, tmp, data); err != nil {
+	if err := write(tmp); err != nil {
 		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+	// Check for cancellation once more before the rename: everything up to
+	// here is discardable, and the rename is the point of no return.
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -885,6 +863,24 @@ func writeFileAtomicContext(ctx context.Context, path string, data []byte) error
 	}
 	removeTmp = false
 	return nil
+}
+
+func copyFileAtomicContext(ctx context.Context, srcPath, dstPath string) error {
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	return writeAtomicContext(ctx, dstPath, ".asset-*.tmp", func(dst io.Writer) error {
+		return copyContext(ctx, dst, src)
+	})
+}
+
+func writeFileAtomicContext(ctx context.Context, path string, data []byte) error {
+	return writeAtomicContext(ctx, path, ".metadata-*.tmp", func(dst io.Writer) error {
+		return writeContext(ctx, dst, data)
+	})
 }
 
 func copyContext(ctx context.Context, dst io.Writer, src io.Reader) error {
