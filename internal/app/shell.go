@@ -1705,99 +1705,48 @@ func (m shellModel) layout() shellLayout {
 		remaining = height - layout.tabBarHeight - layout.statusHeight - layout.composerHeight
 	}
 
-	if m.palette.open && remaining >= 4 {
-		layout.paletteHeight = 5
-		if height >= 18 {
-			layout.paletteHeight = 7
+	// The overlay panes -- command palette, inspector, emote picker, channel
+	// picker, category picker -- all occupy the same strip above the composer,
+	// so at most one is ever sized. This switch is what decides which one wins
+	// when several are somehow open at once; the order of the cases is that
+	// priority. It replaces a chain of conditions in which each pane repeated
+	// the negation of every pane above it, where adding a sixth overlay meant
+	// correctly editing all five conditions before it.
+	if remaining >= 4 {
+		switch {
+		case m.palette.open:
+			pane := sizeOverlayPane(remaining, height, width, 7)
+			layout.paletteHeight = pane.height
+			layout.paletteFramed = pane.framed
+			layout.paletteContentHeight = pane.contentHeight
+			remaining -= pane.height
+		case m.inspectOpen:
+			pane := sizeOverlayPane(remaining, height, width, 7)
+			layout.inspectHeight = pane.height
+			layout.inspectFramed = pane.framed
+			layout.inspectContentHeight = pane.contentHeight
+			remaining -= pane.height
+		case m.emotePicker.open:
+			pane := sizeOverlayPane(remaining, height, width, 7)
+			layout.emotePickerHeight = pane.height
+			layout.emotePickerFramed = pane.framed
+			layout.emotePickerContentHeight = pane.contentHeight
+			remaining -= pane.height
+		case m.channelPicker.open:
+			// The channel picker lists channels rather than a few commands,
+			// so it takes two extra rows where the terminal can spare them.
+			pane := sizeOverlayPane(remaining, height, width, 9)
+			layout.channelPickerHeight = pane.height
+			layout.channelPickerFramed = pane.framed
+			layout.channelPickerContentHeight = pane.contentHeight
+			remaining -= pane.height
+		case m.categoryPicker.open:
+			pane := sizeOverlayPane(remaining, height, width, 7)
+			layout.categoryPickerHeight = pane.height
+			layout.categoryPickerFramed = pane.framed
+			layout.categoryPickerContentHeight = pane.contentHeight
+			remaining -= pane.height
 		}
-		if layout.paletteHeight > remaining-1 {
-			layout.paletteHeight = remaining - 1
-		}
-		if layout.paletteHeight < 3 {
-			layout.paletteHeight = 0
-		}
-		layout.paletteFramed = layout.paletteHeight >= 3 && width >= 5
-		layout.paletteContentHeight = layout.paletteHeight
-		if layout.paletteFramed {
-			layout.paletteContentHeight = layout.paletteHeight - 2
-		}
-		remaining -= layout.paletteHeight
-	}
-
-	if !m.palette.open && m.inspectOpen && remaining >= 4 {
-		layout.inspectHeight = 5
-		if height >= 18 {
-			layout.inspectHeight = 7
-		}
-		if layout.inspectHeight > remaining-1 {
-			layout.inspectHeight = remaining - 1
-		}
-		if layout.inspectHeight < 3 {
-			layout.inspectHeight = 0
-		}
-		layout.inspectFramed = layout.inspectHeight >= 3 && width >= 5
-		layout.inspectContentHeight = layout.inspectHeight
-		if layout.inspectFramed {
-			layout.inspectContentHeight = layout.inspectHeight - 2
-		}
-		remaining -= layout.inspectHeight
-	}
-
-	if !m.palette.open && !m.inspectOpen && m.emotePicker.open && remaining >= 4 {
-		layout.emotePickerHeight = 5
-		if height >= 18 {
-			layout.emotePickerHeight = 7
-		}
-		if layout.emotePickerHeight > remaining-1 {
-			layout.emotePickerHeight = remaining - 1
-		}
-		if layout.emotePickerHeight < 3 {
-			layout.emotePickerHeight = 0
-		}
-		layout.emotePickerFramed = layout.emotePickerHeight >= 3 && width >= 5
-		layout.emotePickerContentHeight = layout.emotePickerHeight
-		if layout.emotePickerFramed {
-			layout.emotePickerContentHeight = layout.emotePickerHeight - 2
-		}
-		remaining -= layout.emotePickerHeight
-	}
-
-	if !m.palette.open && !m.inspectOpen && !m.emotePicker.open && m.channelPicker.open && remaining >= 4 {
-		layout.channelPickerHeight = 5
-		if height >= 18 {
-			layout.channelPickerHeight = 9
-		}
-		if layout.channelPickerHeight > remaining-1 {
-			layout.channelPickerHeight = remaining - 1
-		}
-		if layout.channelPickerHeight < 3 {
-			layout.channelPickerHeight = 0
-		}
-		layout.channelPickerFramed = layout.channelPickerHeight >= 3 && width >= 5
-		layout.channelPickerContentHeight = layout.channelPickerHeight
-		if layout.channelPickerFramed {
-			layout.channelPickerContentHeight = layout.channelPickerHeight - 2
-		}
-		remaining -= layout.channelPickerHeight
-	}
-
-	if !m.palette.open && !m.inspectOpen && !m.emotePicker.open && !m.channelPicker.open && m.categoryPicker.open && remaining >= 4 {
-		layout.categoryPickerHeight = 5
-		if height >= 18 {
-			layout.categoryPickerHeight = 7
-		}
-		if layout.categoryPickerHeight > remaining-1 {
-			layout.categoryPickerHeight = remaining - 1
-		}
-		if layout.categoryPickerHeight < 3 {
-			layout.categoryPickerHeight = 0
-		}
-		layout.categoryPickerFramed = layout.categoryPickerHeight >= 3 && width >= 5
-		layout.categoryPickerContentHeight = layout.categoryPickerHeight
-		if layout.categoryPickerFramed {
-			layout.categoryPickerContentHeight = layout.categoryPickerHeight - 2
-		}
-		remaining -= layout.categoryPickerHeight
 	}
 
 	layout.chatHeight = clampMin(remaining, 0)
@@ -1805,62 +1754,109 @@ func (m shellModel) layout() shellLayout {
 	layout.activityWidth = m.activityWidthFor(width, layout.chatHeight)
 	layout.chatWidth = clampMin(width-layout.sidebarWidth-layout.activityWidth, 1)
 	layout.chatFramed = layout.chatHeight >= 3 && width >= 5
-	layout.chatContentHeight = layout.chatHeight
-	if layout.chatFramed {
-		layout.chatContentHeight = layout.chatHeight - 2
-	}
-	layout.sidebarContentHeight = layout.chatHeight - 2
-	if layout.sidebarContentHeight < 0 {
-		layout.sidebarContentHeight = 0
-	}
-	layout.activityContentHeight = layout.sidebarContentHeight
-	if layout.chatContentHeight < 0 {
-		layout.chatContentHeight = 0
-	}
+	layout.applyChatContentHeights()
 
 	used := layout.tabBarHeight + layout.statusHeight + layout.chatHeight + layout.paletteHeight + layout.inspectHeight + layout.emotePickerHeight + layout.channelPickerHeight + layout.categoryPickerHeight + layout.composerHeight + layout.helpHeight
 	if used < height {
 		layout.chatHeight += height - used
-		if layout.chatFramed {
-			layout.chatContentHeight = layout.chatHeight - 2
-		} else {
-			layout.chatContentHeight = layout.chatHeight
-		}
-		layout.sidebarContentHeight = layout.chatHeight - 2
-		if layout.sidebarContentHeight < 0 {
-			layout.sidebarContentHeight = 0
-		}
-		layout.activityContentHeight = layout.sidebarContentHeight
+		layout.applyChatContentHeights()
 	}
 
 	switch {
 	case onStreamInfo:
-		layout.sidebarWidth = 0
-		layout.activityWidth = 0
-		layout.chatWidth = width
-		layout.sidebarContentHeight = 0
-		layout.activityContentHeight = 0
-		layout.streamInfoHeight = layout.chatHeight
-		layout.streamInfoContentHeight = layout.chatContentHeight
-		layout.streamInfoFramed = layout.chatFramed
-		layout.chatHeight = 0
-		layout.chatContentHeight = 0
-		layout.chatFramed = false
+		body := layout.takeBodyFromChat(width)
+		layout.streamInfoHeight = body.height
+		layout.streamInfoContentHeight = body.contentHeight
+		layout.streamInfoFramed = body.framed
 	case onMisc:
-		layout.sidebarWidth = 0
-		layout.activityWidth = 0
-		layout.chatWidth = width
-		layout.sidebarContentHeight = 0
-		layout.activityContentHeight = 0
-		layout.miscHeight = layout.chatHeight
-		layout.miscContentHeight = layout.chatContentHeight
-		layout.miscFramed = layout.chatFramed
-		layout.chatHeight = 0
-		layout.chatContentHeight = 0
-		layout.chatFramed = false
+		body := layout.takeBodyFromChat(width)
+		layout.miscHeight = body.height
+		layout.miscContentHeight = body.contentHeight
+		layout.miscFramed = body.framed
 	}
 
 	return layout
+}
+
+// applyChatContentHeights recomputes every row count that follows from
+// chatHeight: the chat pane's own content rows, and the sidebar and activity
+// columns standing beside it. Call it again whenever chatHeight changes.
+func (l *shellLayout) applyChatContentHeights() {
+	l.chatContentHeight = l.chatHeight
+	if l.chatFramed {
+		l.chatContentHeight = l.chatHeight - 2
+	}
+	l.chatContentHeight = clampMin(l.chatContentHeight, 0)
+	l.sidebarContentHeight = clampMin(l.chatHeight-2, 0)
+	l.activityContentHeight = l.sidebarContentHeight
+}
+
+// bodyPane is the geometry of whatever pane occupies the body of the window
+// between the tab bar and the composer.
+type bodyPane struct {
+	height        int
+	contentHeight int
+	framed        bool
+}
+
+// takeBodyFromChat hands the chat pane's geometry to a tab that draws across
+// the full width of the body -- Stream Info and Misc -- and clears the chat
+// pane along with the sidebar and activity columns, none of which those tabs
+// show. It returns the geometry the calling tab has just taken over.
+func (l *shellLayout) takeBodyFromChat(width int) bodyPane {
+	body := bodyPane{
+		height:        l.chatHeight,
+		contentHeight: l.chatContentHeight,
+		framed:        l.chatFramed,
+	}
+	l.sidebarWidth = 0
+	l.activityWidth = 0
+	l.chatWidth = width
+	l.sidebarContentHeight = 0
+	l.activityContentHeight = 0
+	l.chatHeight = 0
+	l.chatContentHeight = 0
+	l.chatFramed = false
+	return body
+}
+
+// overlayPaneSize is the vertical geometry of one overlay pane: how many
+// rows it occupies, whether it is drawn with a border, and how many rows are
+// left for its contents once that border is accounted for.
+type overlayPaneSize struct {
+	height        int
+	framed        bool
+	contentHeight int
+}
+
+// sizeOverlayPane sizes one of the overlay panes that share the strip above
+// the composer.
+//
+// remaining is the rows still unclaimed by the panes around it, height and
+// width are the terminal's, and tallHeight is the size the pane grows to when
+// the terminal is tall enough to afford it. The pane always leaves at least
+// one row for the chat behind it, and collapses to nothing rather than
+// rendering shorter than the three rows a bordered pane needs.
+func sizeOverlayPane(remaining, height, width, tallHeight int) overlayPaneSize {
+	paneHeight := 5
+	if height >= 18 {
+		paneHeight = tallHeight
+	}
+	if paneHeight > remaining-1 {
+		paneHeight = remaining - 1
+	}
+	if paneHeight < 3 {
+		paneHeight = 0
+	}
+	pane := overlayPaneSize{
+		height:        paneHeight,
+		framed:        paneHeight >= 3 && width >= 5,
+		contentHeight: paneHeight,
+	}
+	if pane.framed {
+		pane.contentHeight = paneHeight - 2
+	}
+	return pane
 }
 
 func (m shellModel) sidebarWidth(width, chatHeight int) int {
