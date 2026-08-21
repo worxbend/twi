@@ -4,7 +4,43 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
 )
+
+// NormalizeIRCOAuthToken puts a token into the form Twitch IRC requires.
+//
+// Twitch's IRC login expects the access token prefixed with "oauth:", while
+// every other place a token appears -- Helix headers, the OAuth endpoints,
+// what a user pastes from the Twitch developer console -- uses it bare. The
+// rule lives here because three packages need it and had a copy each: the
+// config loader, the CLI, and the IRC transport writing the token to the wire
+// after a refresh. Three copies of a rule about credentials is three chances
+// for them to disagree about what gets sent.
+//
+// A blank token is returned unchanged: "oauth:" on its own is not a credential
+// and would only turn a missing-token error into a rejected-login one.
+func NormalizeIRCOAuthToken(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.HasPrefix(strings.ToLower(value), "oauth:") {
+		return value
+	}
+	return "oauth:" + value
+}
+
+// IsLoginRune reports whether r can appear in a Twitch login name.
+//
+// Twitch logins are letters, digits and underscore. Four packages needed to
+// know this -- the IRC normalizer splitting mentions out of message text, the
+// renderer doing the same for display, the message filter, and mention
+// autocomplete -- and each had written the predicate out itself. What a login
+// is made of is a fact about Twitch, so it belongs with the rest of the model.
+//
+// Only the predicate is shared. The loops that use it genuinely differ: one
+// stops at the first non-login rune, another strips a leading "@", another
+// truncates. Sharing those would merge behaviors that are not the same.
+func IsLoginRune(r rune) bool {
+	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
+}
 
 // MaxChatMessageRunes is Twitch's per-message limit. Longer messages are
 // rejected by the server, so twi truncates rather than sending something it

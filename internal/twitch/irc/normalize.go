@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	gempir "github.com/gempir/go-twitch-irc/v4"
 
@@ -474,7 +473,7 @@ func splitMentionFragments(text string) []twitch.MessageFragment {
 }
 
 func isMentionRune(r rune) bool {
-	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
+	return twitch.IsLoginRune(r)
 }
 
 func coalesceMessageFragments(in []twitch.MessageFragment) []twitch.MessageFragment {

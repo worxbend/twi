@@ -117,3 +117,28 @@ func TestEmoteIndexEmptyChannelIDSkipsChannelLookup(t *testing.T) {
 		t.Fatalf("channelCalls = %d, want 0 for empty channel ID", lister.channelCalls)
 	}
 }
+
+// TestZeroValueEmoteIndexIsUsable covers constructing the index by struct
+// literal, which every field except the entries map already supported.
+//
+// Load wrote to that map without initializing it, so &EmoteIndex{Lister: l}
+// compiled, looked correct, and panicked on the first lookup.
+func TestZeroValueEmoteIndexIsUsable(t *testing.T) {
+	index := &EmoteIndex{Lister: &fakeEmoteLister{
+		channel: map[string][]twitch.EmoteMetadata{
+			"channel-id": {{ID: "1", Name: "Kappa"}},
+		},
+	}}
+
+	got, err := index.Load(context.Background(), "channel-id")
+	if err != nil {
+		t.Fatalf("Load on a zero-valued index returned error: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("Load returned no emotes")
+	}
+	// The cache must work too, not merely avoid panicking.
+	if _, err := index.Load(context.Background(), "channel-id"); err != nil {
+		t.Fatalf("second Load returned error: %v", err)
+	}
+}

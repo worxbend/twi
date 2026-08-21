@@ -1080,28 +1080,11 @@ func isTerminalEvent(event twitch.Event) bool {
 	return event.Kind == twitch.EventConnection && event.Connection.Type == twitch.ConnectionEventDisconnect
 }
 
-// safeError reports a redacted message while keeping the original error
-// reachable through errors.Is and errors.As.
-//
-// Replacing an error with errors.New(redacted) is what this code used to do.
-// It kept credentials out of the display, but it also discarded the chain, so
-// every errors.Is check downstream stopped matching -- including the
-// context.DeadlineExceeded branch in Reconnect, which could not fire because
-// the error reaching it had already been flattened to a string.
-type safeError struct {
-	detail string
-	cause  error
-}
-
-func (e *safeError) Error() string { return e.detail }
-
-func (e *safeError) Unwrap() error { return e.cause }
-
 func credentialSafeError(err error) error {
 	if err == nil {
 		return nil
 	}
-	return &safeError{detail: credentialSafeDetail(err), cause: err}
+	return twitch.NewSafeError(credentialSafeDetail(err), err)
 }
 
 // isRateLimited reports whether the send was refused by twi's own limiter
@@ -1116,7 +1099,7 @@ func credentialSafeSendError(err error) error {
 	if err == nil {
 		return nil
 	}
-	return &safeError{detail: credentialSafeSendDetail(err), cause: err}
+	return twitch.NewSafeError(credentialSafeSendDetail(err), err)
 }
 
 // credentialSafeDetail renders err for display without leaking credentials.

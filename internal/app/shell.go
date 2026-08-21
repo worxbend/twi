@@ -1313,7 +1313,7 @@ func (m shellModel) emptyStateHeadline(text string, width int, elapsed time.Dura
 // still has to be there.
 func (m shellModel) emptyStateScanner(width int, elapsed time.Duration) string {
 	indentWidth := uniseg.StringWidth(emptyStateIndent)
-	track := minInt(width-indentWidth-2, emptyStateScannerWidth)
+	track := min(width-indentWidth-2, emptyStateScannerWidth)
 	if track < 4 || m.animationMode == string(animation.ModeOff) {
 		return ""
 	}
@@ -1458,7 +1458,7 @@ func (m shellModel) activityLogLine(entry activityEntry, width int) string {
 	var builder strings.Builder
 	used := 0
 	write := func(value, foreground string, bold bool) {
-		value = fitLine(value, minInt(uniseg.StringWidth(value), clampMin(width-used, 0)))
+		value = fitLine(value, min(uniseg.StringWidth(value), clampMin(width-used, 0)))
 		if value == "" {
 			return
 		}

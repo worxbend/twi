@@ -690,7 +690,7 @@ func (c oauthRefreshConfig) refresh(ctx context.Context, refreshedAt time.Time) 
 		return OAuthRefresh{}, err
 	}
 
-	accessToken := normalizeOAuthToken(decoded.AccessToken)
+	accessToken := twitch.NormalizeIRCOAuthToken(decoded.AccessToken)
 	if accessToken == "" {
 		c.Logger.Log(ctx, "twitch.oauth_refresh.failed", slog.String("error", "missing access token"))
 		return OAuthRefresh{}, errors.New("twitch OAuth refresh response did not include an access token")
@@ -716,12 +716,4 @@ func (c oauthRefreshConfig) refresh(ctx context.Context, refreshedAt time.Time) 
 		result.ExpiresAt = refreshedAt.Add(time.Duration(decoded.ExpiresIn) * time.Second)
 	}
 	return result, nil
-}
-
-func normalizeOAuthToken(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" || strings.HasPrefix(strings.ToLower(value), "oauth:") {
-		return value
-	}
-	return "oauth:" + value
 }

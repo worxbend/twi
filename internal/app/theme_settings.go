@@ -229,7 +229,7 @@ func (m shellModel) themeSettingsEntryLine(name string, width int, selected bool
 	var builder strings.Builder
 	used := 0
 	write := func(text, color string, bold bool) {
-		text = fitLine(text, minInt(uniseg.StringWidth(text), clampMin(width-used, 0)))
+		text = fitLine(text, min(uniseg.StringWidth(text), clampMin(width-used, 0)))
 		if text == "" {
 			return
 		}
@@ -286,7 +286,7 @@ func themeSettingsLabelWidth(activeName string) int {
 		if strings.EqualFold(name, activeName) {
 			width += uniseg.StringWidth(" (active)")
 		}
-		widest = maxInt(widest, width)
+		widest = max(widest, width)
 	}
 	return widest
 }

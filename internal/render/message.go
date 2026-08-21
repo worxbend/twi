@@ -1444,7 +1444,7 @@ func textWidth(value string) int {
 
 func isMentionPart(cluster string) bool {
 	for _, r := range cluster {
-		return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
+		return twitch.IsLoginRune(r)
 	}
 	return false
 }

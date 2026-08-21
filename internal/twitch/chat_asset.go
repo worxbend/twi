@@ -1,19 +1,8 @@
 package twitch
 
 import (
-	"context"
 	"strings"
 )
-
-// ChatAssetLookup resolves Twitch emote and badge metadata through a Twitch API
-// boundary. Implementations return public image URLs or templates only; callers
-// are responsible for caching and downloading image bytes.
-type ChatAssetLookup interface {
-	GetGlobalEmotes(context.Context) ([]EmoteMetadata, error)
-	GetChannelEmotes(context.Context, string) ([]EmoteMetadata, error)
-	GetGlobalBadges(context.Context) ([]BadgeMetadata, error)
-	GetChannelBadges(context.Context, string) ([]BadgeMetadata, error)
-}
 
 // EmoteMetadata contains the Helix fields needed to build a CDN image URL.
 type EmoteMetadata struct {

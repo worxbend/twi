@@ -44,8 +44,6 @@ type ChatAssetsClient struct {
 	transport
 }
 
-var _ twitch.ChatAssetLookup = (*ChatAssetsClient)(nil)
-
 // NewChatAssetsClient creates a chat asset metadata adapter. It performs
 // no network I/O until one of the lookup methods is called.
 func NewChatAssetsClient(cfg ChatAssetsClientConfig) *ChatAssetsClient {

@@ -76,7 +76,7 @@ func (m shellModel) splashViewAt(now time.Time) string {
 	taglineLine := m.splashTaglineLine(contentWidth, elapsed, canvas)
 	decorativeLine := m.splashDecorativeLine(contentWidth, elapsed, canvas)
 	blankLine := splashStyledLine(centeredFittedLine("", contentWidth), m.theme.Muted, canvas, false)
-	progressWidth := minInt(splashProgressWidth, clampMin(contentWidth-2, 0))
+	progressWidth := min(splashProgressWidth, clampMin(contentWidth-2, 0))
 	progressLine := gradientForegroundText(
 		centeredFittedLine(splashProgressBar(fraction, progressWidth), contentWidth),
 		m.theme.Accent,
@@ -114,7 +114,7 @@ func splashChatBudget(height, logoLines int) int {
 	if spare < 1 {
 		return 0
 	}
-	return minInt(spare, splashChatMaxRows)
+	return min(spare, splashChatMaxRows)
 }
 
 func splashLinesForHeight(height int, logo []string, tagline, decorative, blank, progress, phase string, chat []string) []string {
@@ -192,7 +192,7 @@ func splashContentWidth(width int) int {
 	if width <= 2 {
 		return width
 	}
-	return minInt(width-2, 54)
+	return min(width-2, 54)
 }
 
 func splashProgressBar(fraction float64, width int) string {
@@ -251,7 +251,7 @@ func revealDisplayCells(value string, cells int) string {
 func widestLine(lines []string) int {
 	widest := 0
 	for _, line := range lines {
-		widest = maxInt(widest, uniseg.StringWidth(line))
+		widest = max(widest, uniseg.StringWidth(line))
 	}
 	return widest
 }
@@ -272,20 +272,6 @@ func clampFraction(value float64) float64 {
 		return 1
 	}
 	return value
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // centeredPlainLine center-pads plain (non-ANSI) text to width with spaces.

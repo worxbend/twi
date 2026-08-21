@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/worxbend/twi/internal/theme"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 const redacted = "[redacted]"
@@ -367,7 +368,7 @@ func applyFile(cfg *Config, path string) error {
 // that Twitch IRC requires, and adds it.
 var legacyEnvAliases = map[string]func(cfg *Config, value string){
 	"TWITCH_USERNAME":      func(cfg *Config, v string) { cfg.Twitch.Username = v },
-	"TWITCH_ACCESS_TOKEN":  func(cfg *Config, v string) { cfg.Twitch.OAuthToken = normalizeIRCOAuthToken(v) },
+	"TWITCH_ACCESS_TOKEN":  func(cfg *Config, v string) { cfg.Twitch.OAuthToken = twitch.NormalizeIRCOAuthToken(v) },
 	"TWITCH_REFRESH_TOKEN": func(cfg *Config, v string) { cfg.Twitch.RefreshToken = v },
 	"TWITCH_CLIENT_ID":     func(cfg *Config, v string) { cfg.Twitch.ClientID = v },
 	"TWITCH_CLIENT_SECRET": func(cfg *Config, v string) { cfg.Twitch.ClientSecret = v },
@@ -426,14 +427,6 @@ func applyKey(cfg *Config, key, value string) {
 	if s, ok := settingsByKey[key]; ok {
 		s.apply(cfg, value)
 	}
-}
-
-func normalizeIRCOAuthToken(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" || strings.HasPrefix(strings.ToLower(value), "oauth:") {
-		return value
-	}
-	return "oauth:" + value
 }
 
 func trimValue(value string) string {

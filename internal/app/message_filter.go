@@ -2,7 +2,6 @@ package app
 
 import (
 	"strings"
-	"unicode"
 
 	"github.com/worxbend/twi/internal/twitch"
 )
@@ -177,7 +176,7 @@ func normalizeMentionLogin(value string) string {
 }
 
 func isMessageFilterMentionRune(r rune) bool {
-	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
+	return twitch.IsLoginRune(r)
 }
 
 func messageHasRoleBadge(message twitch.ChatMessage) bool {

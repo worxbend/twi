@@ -80,6 +80,13 @@ func (idx *EmoteIndex) Load(ctx context.Context, channelID string) ([]EmoteEntry
 	emotes := mergeEmoteEntries(channel, global)
 
 	idx.mu.Lock()
+	// Initialize here rather than requiring a constructor. EmoteIndex is
+	// otherwise usable as &EmoteIndex{Lister: l} -- every other field has a
+	// working zero value -- and a struct that looks constructible but panics
+	// on first write is a trap for the next caller.
+	if idx.entries == nil {
+		idx.entries = make(map[string]emoteIndexEntry)
+	}
 	idx.entries[channelID] = emoteIndexEntry{fetchedAt: idx.now(), emotes: emotes}
 	idx.mu.Unlock()
 	return emotes, nil

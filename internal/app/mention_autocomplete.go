@@ -5,6 +5,7 @@ import (
 	"unicode"
 
 	"github.com/worxbend/twi/internal/render"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 // roleGlyph maps a roster role label onto the same icon the message renderer
@@ -81,7 +82,7 @@ func composerMentionPrefix(text string) (string, bool) {
 }
 
 func isMentionRune(r rune) bool {
-	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
+	return twitch.IsLoginRune(r)
 }
 
 // mentionSuggestions returns the completions offered for the current draft,

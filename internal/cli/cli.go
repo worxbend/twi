@@ -932,7 +932,7 @@ func applyCredentialRecord(cfg *config.Config, record storage.CredentialRecord) 
 		cfg.Twitch.Username = strings.TrimSpace(record.Login)
 	}
 	if strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
-		cfg.Twitch.OAuthToken = normalizeIRCOAuthToken(record.AccessToken.Reveal())
+		cfg.Twitch.OAuthToken = twitch.NormalizeIRCOAuthToken(record.AccessToken.Reveal())
 	}
 	if strings.TrimSpace(cfg.Twitch.RefreshToken) == "" {
 		cfg.Twitch.RefreshToken = record.RefreshToken.Reveal()
@@ -999,14 +999,6 @@ func refreshedCredentialRecord(cfg config.Config, base storage.CredentialRecord,
 		record.UpdatedAt = time.Now().UTC()
 	}
 	return record
-}
-
-func normalizeIRCOAuthToken(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" || strings.HasPrefix(strings.ToLower(value), "oauth:") {
-		return value
-	}
-	return "oauth:" + value
 }
 
 func credentialFileDoctorCheck(status credentialLoadStatus) app.DoctorCheck {
