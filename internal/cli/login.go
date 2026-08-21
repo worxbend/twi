@@ -19,6 +19,7 @@ import (
 
 	"github.com/worxbend/twi/internal/auth"
 	"github.com/worxbend/twi/internal/config"
+	"github.com/worxbend/twi/internal/debuglog"
 	"github.com/worxbend/twi/internal/storage"
 )
 
@@ -83,21 +84,32 @@ var newLoginCallbackWaiter = func(redirectURI string) (loginCallbackWaiter, erro
 
 var openLoginBrowser = openBrowser
 
-func runLogin(args []string, stdout, stderr io.Writer) int {
+// loginOptions is the parsed command line of `twi login`.
+type loginOptions struct {
+	configPath  string
+	redirectURI string
+	// redirectURIExplicit records whether --redirect-uri was actually
+	// given, which is how runLogin knows it may fall back to the value in
+	// the config file instead.
+	redirectURIExplicit bool
+	timeout             time.Duration
+	dryRun              bool
+	writeDefaultConfig  bool
+	debugFlags          debugFlagOptions
+}
+
+// parseLoginFlags parses the `twi login` command line. ok is false when the
+// caller should return code immediately -- because --help was asked for, or
+// because the arguments were rejected.
+func parseLoginFlags(args []string, stdout, stderr io.Writer) (opts loginOptions, code int, ok bool) {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	var cfgPath string
-	var redirectURI string
-	var timeout time.Duration
-	var dryRun bool
-	var writeDefaultConfig bool
-	var debugFlags debugFlagOptions
-	fs.StringVar(&cfgPath, "config", "", "config file path")
-	fs.StringVar(&redirectURI, "redirect-uri", defaultLoginRedirectURI, "localhost OAuth callback URL registered for the Twitch app")
-	fs.DurationVar(&timeout, "timeout", defaultLoginTimeout, "maximum time to wait for browser authorization and callback")
-	fs.BoolVar(&dryRun, "dry-run", false, "explain login requirements without opening a browser, listening for a callback, or contacting Twitch")
-	fs.BoolVar(&writeDefaultConfig, "write-default-config", false, "write a starter config.toml at the effective config path first, only if it does not already exist (skipped during --dry-run)")
-	addDebugFlags(fs, &debugFlags)
+	fs.StringVar(&opts.configPath, "config", "", "config file path")
+	fs.StringVar(&opts.redirectURI, "redirect-uri", defaultLoginRedirectURI, "localhost OAuth callback URL registered for the Twitch app")
+	fs.DurationVar(&opts.timeout, "timeout", defaultLoginTimeout, "maximum time to wait for browser authorization and callback")
+	fs.BoolVar(&opts.dryRun, "dry-run", false, "explain login requirements without opening a browser, listening for a callback, or contacting Twitch")
+	fs.BoolVar(&opts.writeDefaultConfig, "write-default-config", false, "write a starter config.toml at the effective config path first, only if it does not already exist (skipped during --dry-run)")
+	addDebugFlags(fs, &opts.debugFlags)
 	fs.Usage = func() {
 		fmt.Fprint(stderr, loginUsage)
 		fs.PrintDefaults()
@@ -107,40 +119,50 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stdout, loginUsage)
 		fs.SetOutput(stdout)
 		fs.PrintDefaults()
-		return 0
+		return opts, 0, false
 	}
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return opts, 2, false
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintf(stderr, "unexpected login argument %q\n\n", fs.Arg(0))
 		fs.Usage()
-		return 2
+		return opts, 2, false
 	}
-	if timeout <= 0 {
+	if opts.timeout <= 0 {
 		fmt.Fprintln(stderr, "login timeout must be greater than zero")
-		return 2
+		return opts, 2, false
 	}
-	redirectURIExplicit := false
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "redirect-uri" {
-			redirectURIExplicit = true
+			opts.redirectURIExplicit = true
 		}
 	})
+	return opts, 0, true
+}
 
-	overrides := config.Overrides{ConfigPath: cfgPath}
-	applyDebugFlagOverrides(&overrides, debugFlags)
+func runLogin(args []string, stdout, stderr io.Writer) int {
+	opts, code, ok := parseLoginFlags(args, stdout, stderr)
+	if !ok {
+		return code
+	}
+	overrides := config.Overrides{ConfigPath: opts.configPath}
+	applyDebugFlagOverrides(&overrides, opts.debugFlags)
 	cfg, err := config.Load(os.Environ(), overrides)
 	if err != nil {
 		fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
 		return 1
 	}
-	if !redirectURIExplicit {
+	// An explicit --redirect-uri wins; otherwise the config file's value is
+	// preferred over the built-in default, so a Twitch app registered with a
+	// different callback URL works without repeating the flag every time.
+	redirectURI := opts.redirectURI
+	if !opts.redirectURIExplicit {
 		if configured := strings.TrimSpace(cfg.Twitch.RedirectURL); configured != "" {
 			redirectURI = configured
 		}
 	}
-	if writeDefaultConfig && !dryRun {
+	if opts.writeDefaultConfig && !opts.dryRun {
 		wrote, err := writeDefaultConfigIfMissing(cfg)
 		if err != nil {
 			fmt.Fprintf(stderr, "write default config: %s\n", config.RedactDisplayValue(err.Error()))
@@ -159,63 +181,78 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 	}
 	defer closeLog()
 	logger.Log(context.Background(), "cli.login.start",
-		slog.Bool("dry_run", dryRun),
+		slog.Bool("dry_run", opts.dryRun),
 		slog.String("redirect_uri", redirectURI),
-		slog.Int64("timeout_ms", int64(timeout/time.Millisecond)),
+		slog.Int64("timeout_ms", int64(opts.timeout/time.Millisecond)),
 	)
 
-	if dryRun {
-		printLoginDryRun(stdout, cfg, redirectURI, timeout)
+	if opts.dryRun {
+		printLoginDryRun(stdout, cfg, redirectURI, opts.timeout)
 		logger.Log(context.Background(), "cli.login.complete", slog.Bool("dry_run", true))
 		return 0
 	}
 
+	return loginAndSaveCredentials(cfg, opts, redirectURI, logger, stdout, stderr)
+}
+
+// loginAndSaveCredentials performs the interactive half of `twi login`: it
+// opens the browser for authorization, waits for the localhost callback,
+// exchanges the code for tokens, and saves them. It returns the process exit
+// code, having already reported any failure to stderr and the debug log.
+//
+// It is separate from runLogin so the command's setup -- flags, config, the
+// debug log, --dry-run -- can be read without the OAuth handshake in the way,
+// and so the handshake itself reads as one sequence of steps.
+func loginAndSaveCredentials(cfg config.Config, opts loginOptions, redirectURI string, logger debuglog.Logger, stdout, stderr io.Writer) int {
 	request := auth.LoginRequest{
 		ClientID:     strings.TrimSpace(cfg.Twitch.ClientID),
 		ClientSecret: auth.NewSecret(cfg.Twitch.ClientSecret),
 		RedirectURI:  strings.TrimSpace(redirectURI),
 		Scopes:       auth.LoginScopes(),
 	}
-	baseRedactor := auth.NewRedactor(
+	// The redactor starts with the secrets already in the config and is
+	// extended as the login learns more of them, so every message printed or
+	// logged from here on redacts everything known at that point.
+	redactor := auth.NewRedactor(
 		auth.NewSecret(cfg.Twitch.OAuthToken),
 		auth.NewSecret(cfg.Twitch.RefreshToken),
 		auth.NewSecret(cfg.Twitch.ClientSecret),
 	)
 	if err := validateLoginConfig(request); err != nil {
-		logger.Log(context.Background(), "cli.login.config_invalid", slog.String("error", baseRedactor.Redact(err.Error())))
-		fmt.Fprintln(stderr, baseRedactor.Redact(err.Error()))
+		logger.Log(context.Background(), "cli.login.config_invalid", slog.String("error", redactor.Redact(err.Error())))
+		fmt.Fprintln(stderr, redactor.Redact(err.Error()))
 		return 2
 	}
 
 	store, err := newCredentialStore()
 	if err != nil {
-		logger.Log(context.Background(), "cli.login.storage_failed", slog.String("error", baseRedactor.Redact(err.Error())))
-		printLoginError(stderr, "prepare credential storage", err, baseRedactor)
+		logger.Log(context.Background(), "cli.login.storage_failed", slog.String("error", redactor.Redact(err.Error())))
+		printLoginError(stderr, "prepare credential storage", err, redactor)
 		return 1
 	}
 	if store == nil {
 		err := errors.New("credential store unavailable")
 		logger.Log(context.Background(), "cli.login.storage_failed", slog.String("error", err.Error()))
-		printLoginError(stderr, "prepare credential storage", err, baseRedactor)
+		printLoginError(stderr, "prepare credential storage", err, redactor)
 		return 1
 	}
 
 	waiter, err := newLoginCallbackWaiter(request.RedirectURI)
 	if err != nil {
-		logger.Log(context.Background(), "cli.login.callback_unavailable", slog.String("error", baseRedactor.Redact(err.Error())))
-		fmt.Fprintf(stderr, "login callback unavailable: %s\n", baseRedactor.Redact(err.Error()))
+		logger.Log(context.Background(), "cli.login.callback_unavailable", slog.String("error", redactor.Redact(err.Error())))
+		fmt.Fprintf(stderr, "login callback unavailable: %s\n", redactor.Redact(err.Error()))
 		return 2
 	}
 	defer waiter.Close()
 
-	ctx, cancel := newLoginContext(timeout)
+	ctx, cancel := newLoginContext(opts.timeout)
 	defer cancel()
 
 	flow := newLoginFlow()
 	challenge, err := flow.BeginLogin(ctx, request)
 	if err != nil {
-		logger.Log(context.Background(), "cli.login.begin_failed", slog.String("error", baseRedactor.Redact(err.Error())))
-		printLoginError(stderr, "start login", err, baseRedactor)
+		logger.Log(context.Background(), "cli.login.begin_failed", slog.String("error", redactor.Redact(err.Error())))
+		printLoginError(stderr, "start login", err, redactor)
 		return 1
 	}
 	logger = logger.WithSecrets(challenge.AuthorizationURL, challenge.State)
@@ -224,29 +261,23 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 		slog.Time("expires_at", challenge.ExpiresAt),
 	)
 
-	challengeRedactor := auth.NewRedactor(
-		auth.NewSecret(cfg.Twitch.OAuthToken),
-		auth.NewSecret(cfg.Twitch.RefreshToken),
-		auth.NewSecret(cfg.Twitch.ClientSecret),
-		challenge.AuthorizationURL,
-		challenge.State,
-	)
+	redactor = redactor.With(challenge.AuthorizationURL, challenge.State)
 
 	fmt.Fprintf(stdout, "Starting Twitch OAuth login for scopes: %s\n", strings.Join(auth.ScopeValues(challenge.Scopes), ", "))
 	fmt.Fprintln(stdout, "A browser window will open. Approve the requested scopes, then return to this terminal.")
 	fmt.Fprintln(stdout, "Tokens will be validated, saved privately, and never printed.")
 
 	if err := openLoginBrowser(ctx, challenge.AuthorizationURL.Reveal()); err != nil {
-		logger.Log(context.Background(), "cli.login.browser_failed", slog.String("error", challengeRedactor.Redact(err.Error())))
-		printLoginError(stderr, "open browser", err, challengeRedactor)
+		logger.Log(context.Background(), "cli.login.browser_failed", slog.String("error", redactor.Redact(err.Error())))
+		printLoginError(stderr, "open browser", err, redactor)
 		return 1
 	}
 	logger.Log(context.Background(), "cli.login.browser_opened")
 
 	callback, err := waiter.Wait(ctx, challenge.State)
 	if err != nil {
-		logger.Log(context.Background(), "cli.login.callback_failed", slog.String("error", challengeRedactor.Redact(err.Error())))
-		printLoginError(stderr, "wait for OAuth callback", err, challengeRedactor)
+		logger.Log(context.Background(), "cli.login.callback_failed", slog.String("error", redactor.Redact(err.Error())))
+		printLoginError(stderr, "wait for OAuth callback", err, redactor)
 		return 1
 	}
 	logger = logger.WithSecrets(callback.Code, callback.State, callback.ExpectedState)
@@ -255,20 +286,11 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 		slog.Bool("state_present", callback.State.Present()),
 	)
 
-	callbackRedactor := auth.NewRedactor(
-		auth.NewSecret(cfg.Twitch.OAuthToken),
-		auth.NewSecret(cfg.Twitch.RefreshToken),
-		auth.NewSecret(cfg.Twitch.ClientSecret),
-		challenge.AuthorizationURL,
-		challenge.State,
-		callback.Code,
-		callback.State,
-		callback.ExpectedState,
-	)
+	redactor = redactor.With(callback.Code, callback.State, callback.ExpectedState)
 	result, err := flow.CompleteLogin(ctx, callback)
 	if err != nil {
-		logger.Log(context.Background(), "cli.login.complete_failed", slog.String("error", callbackRedactor.Redact(err.Error())))
-		printLoginError(stderr, "complete login", err, callbackRedactor)
+		logger.Log(context.Background(), "cli.login.complete_failed", slog.String("error", redactor.Redact(err.Error())))
+		printLoginError(stderr, "complete login", err, redactor)
 		return 1
 	}
 	logger = logger.WithSecrets(result.Tokens.AccessToken, result.Tokens.RefreshToken)
@@ -278,26 +300,15 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 		slog.Bool("refresh_available", result.Tokens.RefreshAvailable()),
 	)
 
-	resultRedactor := auth.NewRedactor(
-		auth.NewSecret(cfg.Twitch.OAuthToken),
-		auth.NewSecret(cfg.Twitch.RefreshToken),
-		auth.NewSecret(cfg.Twitch.ClientSecret),
-		challenge.AuthorizationURL,
-		challenge.State,
-		callback.Code,
-		callback.State,
-		callback.ExpectedState,
-		result.Tokens.AccessToken,
-		result.Tokens.RefreshToken,
-	)
+	redactor = redactor.With(result.Tokens.AccessToken, result.Tokens.RefreshToken)
 	record := storage.CredentialRecordFromLoginResult(result, request.ClientID, time.Now().UTC())
 	if err := store.SaveCredentials(ctx, record); err != nil {
-		logger.Log(context.Background(), "cli.login.save_failed", slog.String("error", resultRedactor.Redact(err.Error())))
-		printLoginError(stderr, "save credentials", err, resultRedactor)
+		logger.Log(context.Background(), "cli.login.save_failed", slog.String("error", redactor.Redact(err.Error())))
+		printLoginError(stderr, "save credentials", err, redactor)
 		return 1
 	}
 	logger.Log(context.Background(), "cli.login.save_succeeded")
-	printLoginSuccess(stdout, result, resultRedactor)
+	printLoginSuccess(stdout, result, redactor)
 	logger.Log(context.Background(), "cli.login.complete", slog.Bool("dry_run", false))
 	return 0
 }

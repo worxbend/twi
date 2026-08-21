@@ -86,6 +86,21 @@ func NewRedactor(secrets ...Secret) Redactor {
 	return Redactor{secrets: secretStrings(secrets)}
 }
 
+// With returns a copy of r that also redacts secrets.
+//
+// A multi-step flow learns its secrets as it goes: an OAuth login knows the
+// configured credentials up front, then the authorization URL and state, then
+// the callback code, then the tokens. Every step has to redact everything
+// learned so far, and extending the redactor says that directly. Building a
+// fresh redactor at each step instead means restating the earlier secrets
+// every time, which is where one eventually gets left out.
+func (r Redactor) With(secrets ...Secret) Redactor {
+	if len(secrets) == 0 {
+		return r
+	}
+	return Redactor{secrets: mergeSecretStrings(r.secrets, secrets)}
+}
+
 // Redact removes known OAuth credential patterns and the explicit secrets
 // configured on the redactor.
 func (r Redactor) Redact(value string) string {
@@ -103,8 +118,22 @@ func (r Redactor) Redact(value string) string {
 }
 
 func secretStrings(secrets []Secret) []string {
+	return mergeSecretStrings(nil, secrets)
+}
+
+// mergeSecretStrings folds secrets into the already-known strings, dropping
+// blanks and duplicates, and returns them longest-first.
+//
+// The ordering matters: redaction is plain string replacement, so if one
+// secret contains another (an "oauth:abc" token contains "abc"), replacing
+// the shorter one first would leave the "oauth:" prefix and a redaction
+// marker behind instead of removing the whole token.
+func mergeSecretStrings(known []string, secrets []Secret) []string {
 	seen := map[string]bool{}
-	values := make([]string, 0, len(secrets))
+	values := make([]string, 0, len(known)+len(secrets))
+	for _, value := range known {
+		appendSecretString(&values, seen, value)
+	}
 	for _, secret := range secrets {
 		value := strings.TrimSpace(secret.Reveal())
 		if value == "" {
