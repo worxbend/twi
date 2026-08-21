@@ -242,24 +242,16 @@ func (m shellModel) channelPickerEntries() []channelPickerEntry {
 }
 
 func (m shellModel) channelPickerView(layout shellLayout) string {
-	contentWidth := layout.width
-	if layout.channelPickerFramed {
-		contentWidth = clampMin(layout.width-4, 1)
-	}
-	lines := m.channelPickerLines(contentWidth, layout.channelPickerContentHeight)
-	content := strings.Join(lines, "\n")
-	if !layout.channelPickerFramed {
-		return fitBlock(content, layout.width, layout.channelPickerHeight)
-	}
-	return m.renderPane(paneSpec{
+	return m.renderOverlayPane(overlayPaneSpec{
 		icon:          "📡",
 		title:         "Open Channel",
-		content:       content,
-		width:         layout.width,
-		contentHeight: layout.channelPickerContentHeight,
-		padding:       1,
 		accent:        m.theme.Success,
-		focused:       true,
+		height:        layout.channelPickerHeight,
+		contentHeight: layout.channelPickerContentHeight,
+		framed:        layout.channelPickerFramed,
+		lines: func(width, height int) []string {
+			return m.channelPickerLines(width, height)
+		},
 	})
 }
 

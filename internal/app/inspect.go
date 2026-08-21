@@ -11,28 +11,20 @@ import (
 )
 
 func (m shellModel) inspectView(layout shellLayout) string {
-	contentWidth := layout.width
-	if layout.inspectFramed {
-		contentWidth = clampMin(layout.width-4, 1)
-	}
-	lines := m.inspectLines(contentWidth, layout.inspectContentHeight)
-	for len(lines) < layout.inspectContentHeight {
-		lines = append(lines, fitLine("", contentWidth))
-	}
-	content := strings.Join(lines, "\n")
-	if !layout.inspectFramed {
-		return fitBlock(content, layout.width, layout.inspectHeight)
-	}
-
-	return m.renderPane(paneSpec{
+	return m.renderOverlayPane(overlayPaneSpec{
 		icon:          "🔎",
 		title:         "Inspect",
-		content:       content,
-		width:         layout.width,
-		contentHeight: layout.inspectContentHeight,
-		padding:       1,
 		accent:        m.theme.Warning,
-		focused:       true,
+		height:        layout.inspectHeight,
+		contentHeight: layout.inspectContentHeight,
+		framed:        layout.inspectFramed,
+		lines: func(width, height int) []string {
+			lines := m.inspectLines(width, height)
+			for len(lines) < height {
+				lines = append(lines, fitLine("", width))
+			}
+			return lines
+		},
 	})
 }
 

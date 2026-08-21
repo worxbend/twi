@@ -193,24 +193,16 @@ func (m shellModel) applyCategoryPickerResults(msg categoryPickerResultsMsg) she
 }
 
 func (m shellModel) categoryPickerView(layout shellLayout) string {
-	contentWidth := layout.width
-	if layout.categoryPickerFramed {
-		contentWidth = clampMin(layout.width-4, 1)
-	}
-	lines := m.categoryPickerLines(contentWidth, layout.categoryPickerContentHeight)
-	content := strings.Join(lines, "\n")
-	if !layout.categoryPickerFramed {
-		return fitBlock(content, layout.width, layout.categoryPickerHeight)
-	}
-	return m.renderPane(paneSpec{
+	return m.renderOverlayPane(overlayPaneSpec{
 		icon:          "🎮",
 		title:         "Category Search",
-		content:       content,
-		width:         layout.width,
-		contentHeight: layout.categoryPickerContentHeight,
-		padding:       1,
 		accent:        m.theme.Warning,
-		focused:       true,
+		height:        layout.categoryPickerHeight,
+		contentHeight: layout.categoryPickerContentHeight,
+		framed:        layout.categoryPickerFramed,
+		lines: func(width, height int) []string {
+			return m.categoryPickerLines(width, height)
+		},
 	})
 }
 

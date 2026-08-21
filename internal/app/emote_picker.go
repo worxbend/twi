@@ -130,24 +130,16 @@ func (m shellModel) executeEmotePickerSelection() (shellModel, tea.Cmd) {
 }
 
 func (m shellModel) emotePickerView(layout shellLayout) string {
-	contentWidth := layout.width
-	if layout.emotePickerFramed {
-		contentWidth = clampMin(layout.width-4, 1)
-	}
-	lines := m.emotePickerLines(contentWidth, layout.emotePickerContentHeight)
-	content := strings.Join(lines, "\n")
-	if !layout.emotePickerFramed {
-		return fitBlock(content, layout.width, layout.emotePickerHeight)
-	}
-	return m.renderPane(paneSpec{
+	return m.renderOverlayPane(overlayPaneSpec{
 		icon:          "😀",
 		title:         "Emote Search",
-		content:       content,
-		width:         layout.width,
-		contentHeight: layout.emotePickerContentHeight,
-		padding:       1,
 		accent:        m.theme.Error,
-		focused:       true,
+		height:        layout.emotePickerHeight,
+		contentHeight: layout.emotePickerContentHeight,
+		framed:        layout.emotePickerFramed,
+		lines: func(width, height int) []string {
+			return m.emotePickerLines(width, height)
+		},
 	})
 }
 

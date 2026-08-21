@@ -395,25 +395,17 @@ func (m shellModel) commandPaletteCommands() []commandPaletteCommand {
 }
 
 func (m shellModel) commandPaletteView(layout shellLayout) string {
-	contentWidth := layout.width
-	if layout.paletteFramed {
-		contentWidth = clampMin(layout.width-4, 1)
-	}
-	lines := m.commandPaletteLines(contentWidth, layout.paletteContentHeight)
-	lines = m.paletteRevealedLines(lines, contentWidth)
-	content := strings.Join(lines, "\n")
-	if !layout.paletteFramed {
-		return fitBlock(content, layout.width, layout.paletteHeight)
-	}
-	return m.renderPane(paneSpec{
+	return m.renderOverlayPane(overlayPaneSpec{
 		icon:          "⌘",
 		title:         "Command Palette",
-		content:       content,
-		width:         layout.width,
-		contentHeight: layout.paletteContentHeight,
-		padding:       1,
 		accent:        m.theme.Accent,
-		focused:       true,
+		height:        layout.paletteHeight,
+		contentHeight: layout.paletteContentHeight,
+		framed:        layout.paletteFramed,
+		lines: func(width, height int) []string {
+			lines := m.commandPaletteLines(width, height)
+			return m.paletteRevealedLines(lines, width)
+		},
 	})
 }
 
