@@ -159,92 +159,96 @@ func channelsCheck(channels []string) DoctorCheck {
 }
 
 func tokenValidationCheck(ctx context.Context, cfg config.Config, validator twitch.TokenValidator) DoctorCheck {
+	// Every result of this check is reported under the same name, and every
+	// one but the last is a warning, so both are bound once here.
+	warn := func(parts ...string) DoctorCheck {
+		return warnCheck("token validation", joinTokenValidationDetails(parts...))
+	}
+
 	if strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
-		return warnCheck("token validation", "skipped; OAuth token missing")
+		return warn("skipped; OAuth token missing")
 	}
 	if validator == nil {
-		return warnCheck("token validation", "not available; required scopes "+tokenScopesCSV(twitch.RequiredIRCScopes())+" were not verified")
+		return warn("not available; required scopes " + tokenScopesCSV(twitch.RequiredIRCScopes()) + " were not verified")
 	}
 
-	credentials := tokenCredentialsFromConfig(cfg.Twitch)
-	validation, err := validator.ValidateToken(ctx, credentials)
+	validation, err := validator.ValidateToken(ctx, tokenCredentialsFromConfig(cfg.Twitch))
 	if err != nil {
+		outcome := "failed"
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return warnCheck("token validation", fmt.Sprintf("canceled: %v; token identity, expiry, and scopes were not verified", err))
+			outcome = "canceled"
 		}
-		return warnCheck("token validation", fmt.Sprintf("failed: %v; token identity, expiry, and scopes were not verified", err))
+		return warn(fmt.Sprintf("%s: %v; token identity, expiry, and scopes were not verified", outcome, err))
 	}
 
+	// capabilities is what the token may do and for how long. summary
+	// prefixes that with who it belongs to, and detailed puts a leading
+	// explanation in front of the whole thing -- between them they build
+	// every result below, which previously repeated these four lines five
+	// times over.
+	capabilities := func() []string {
+		return []string{
+			tokenScopeDetail("granted scopes", validation.Scopes),
+			tokenExpiryDetail(validation.ExpiresAt),
+			refreshAvailabilityDetail(validation.RefreshAvailable, cfg.Twitch),
+		}
+	}
+	summary := func() []string {
+		return append([]string{tokenIdentityDetail(validation.Identity)}, capabilities()...)
+	}
+	detailed := func(lead string) []string {
+		return append([]string{lead}, summary()...)
+	}
+	// missingScopesDetail names the scopes the token lacks, preferring what
+	// Twitch itself reported over what twi worked out from the granted list.
 	missing := validation.MissingScopes
 	if len(missing) == 0 {
 		missing = twitch.MissingRequiredIRCScopes(validation.Scopes)
 	}
 
 	if validation.Status == twitch.TokenValidationValid && staleUsername(cfg.Twitch.Username, validation.Identity.Login) {
-		return warnCheck("token validation", staleUsernameDetail(cfg.Twitch.Username, validation.Identity.Login))
+		return warn(staleUsernameDetail(cfg.Twitch.Username, validation.Identity.Login))
 	}
 
 	switch validation.Status {
 	case twitch.TokenValidationValid:
 	case twitch.TokenValidationMalformed:
-		return warnCheck("token validation", joinTokenValidationDetails(
+		return warn(
 			tokenValidationDetail(validation, "malformed OAuth token"),
 			refreshAvailabilityDetail(validation.RefreshAvailable, cfg.Twitch),
-		))
+		)
 	case twitch.TokenValidationExpired:
-		return warnCheck("token validation", joinTokenValidationDetails(
+		return warn(
 			tokenValidationDetail(validation, "OAuth token expired"),
 			tokenExpiryDetail(validation.ExpiresAt),
 			refreshAvailabilityDetail(validation.RefreshAvailable, cfg.Twitch),
-		))
+		)
 	case twitch.TokenValidationWrongUser:
 		// Not a blocker: live chat authenticates as the token's own account
 		// and ignores a stale twitch_username, so this only flags config that
 		// no longer matches reality.
-		return warnCheck("token validation", joinTokenValidationDetails(
-			staleUsernameDetail(cfg.Twitch.Username, validation.Identity.Login),
-			tokenIdentityDetail(validation.Identity),
-			tokenScopeDetail("granted scopes", validation.Scopes),
-			tokenExpiryDetail(validation.ExpiresAt),
-			refreshAvailabilityDetail(validation.RefreshAvailable, cfg.Twitch),
-		))
+		return warn(detailed(staleUsernameDetail(cfg.Twitch.Username, validation.Identity.Login))...)
 	case twitch.TokenValidationMissingScope:
+		lead := tokenValidationDetail(validation, "missing required IRC scope")
 		if len(missing) > 0 {
-			return warnCheck("token validation", joinTokenValidationDetails(
-				"missing required scopes: "+tokenScopesCSV(missing),
-				tokenIdentityDetail(validation.Identity),
-				tokenScopeDetail("granted scopes", validation.Scopes),
-				tokenExpiryDetail(validation.ExpiresAt),
-				refreshAvailabilityDetail(validation.RefreshAvailable, cfg.Twitch),
-			))
+			lead = "missing required scopes: " + tokenScopesCSV(missing)
 		}
-		return warnCheck("token validation", joinTokenValidationDetails(
-			tokenValidationDetail(validation, "missing required IRC scope"),
-			tokenIdentityDetail(validation.Identity),
-			tokenScopeDetail("granted scopes", validation.Scopes),
-			tokenExpiryDetail(validation.ExpiresAt),
-			refreshAvailabilityDetail(validation.RefreshAvailable, cfg.Twitch),
-		))
+		return warn(detailed(lead)...)
 	default:
-		return warnCheck("token validation", tokenValidationDetail(validation, "token validation returned unknown state"))
+		return warn(tokenValidationDetail(validation, "token validation returned unknown state"))
 	}
 
+	// The token is valid; the only thing that can still make this a warning
+	// is a required scope that was never granted.
 	if len(missing) > 0 {
-		return warnCheck("token validation", joinTokenValidationDetails(
-			"missing required scopes: "+tokenScopesCSV(missing),
-			tokenIdentityDetail(validation.Identity),
-			tokenScopeDetail("granted scopes", validation.Scopes),
-			tokenExpiryDetail(validation.ExpiresAt),
-			refreshAvailabilityDetail(validation.RefreshAvailable, cfg.Twitch),
-		))
+		return warn(detailed("missing required scopes: " + tokenScopesCSV(missing))...)
 	}
-	return okCheck("token validation", joinTokenValidationDetails(
-		tokenIdentityDetail(validation.Identity),
-		"required scopes present: "+tokenScopesCSV(twitch.RequiredIRCScopes()),
-		tokenScopeDetail("granted scopes", validation.Scopes),
-		tokenExpiryDetail(validation.ExpiresAt),
-		refreshAvailabilityDetail(validation.RefreshAvailable, cfg.Twitch),
-	))
+	return okCheck("token validation", joinTokenValidationDetails(append(
+		[]string{
+			tokenIdentityDetail(validation.Identity),
+			"required scopes present: " + tokenScopesCSV(twitch.RequiredIRCScopes()),
+		},
+		capabilities()...)...))
 }
 
 func reachabilityCheck(ctx context.Context, probe ReachabilityProbe) DoctorCheck {

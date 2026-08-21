@@ -56,8 +56,11 @@ type setupFlagOptions struct {
 	loginDryRun    bool
 }
 
-func runSetup(args []string, stdout, stderr io.Writer) int {
-	opts := setupFlagOptions{
+// parseSetupFlags parses the `twi setup` command line. ok is false when the
+// caller should return code immediately -- because --help was asked for, or
+// because the arguments were rejected.
+func parseSetupFlags(args []string, stdout, stderr io.Writer) (opts setupFlagOptions, code int, ok bool) {
+	opts = setupFlagOptions{
 		avatarMode:    newEnumFlag("avatar mode", setupAvatarModes),
 		animationMode: newEnumFlag("animation mode", setupAnimationModes),
 	}
@@ -83,19 +86,41 @@ func runSetup(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stdout, setupUsage)
 		fs.SetOutput(stdout)
 		fs.PrintDefaults()
-		return 0
+		return opts, 0, false
 	}
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return opts, 2, false
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintf(stderr, "unexpected setup argument %q\n\n", fs.Arg(0))
 		fs.Usage()
-		return 2
+		return opts, 2, false
 	}
 	if opts.login && opts.loginDryRun {
 		fmt.Fprintln(stderr, "choose only one of --login or --login-dry-run")
-		return 2
+		return opts, 2, false
+	}
+	return opts, 0, true
+}
+
+// setupCredentialAction is what setup should do about credentials once the
+// non-secret config is written: nothing, hand off to `twi login`, or hand off
+// to a login dry run. The flags choose it, and the wizard may change it.
+func setupCredentialActionFor(opts setupFlagOptions) setupCredentialAction {
+	switch {
+	case opts.loginDryRun:
+		return setupCredentialDryRun
+	case opts.login:
+		return setupCredentialLogin
+	default:
+		return setupCredentialSkip
+	}
+}
+
+func runSetup(args []string, stdout, stderr io.Writer) int {
+	opts, code, ok := parseSetupFlags(args, stdout, stderr)
+	if !ok {
+		return code
 	}
 
 	cfg, err := config.Load(os.Environ(), config.Overrides{ConfigPath: opts.cfgPath})
@@ -105,13 +130,7 @@ func runSetup(args []string, stdout, stderr io.Writer) int {
 	}
 	applySetupFlagOptions(&cfg, opts)
 
-	action := setupCredentialSkip
-	if opts.login {
-		action = setupCredentialLogin
-	}
-	if opts.loginDryRun {
-		action = setupCredentialDryRun
-	}
+	action := setupCredentialActionFor(opts)
 	if !opts.nonInteractive {
 		wizard := setupWizard{
 			reader: bufio.NewReader(setupInput),
