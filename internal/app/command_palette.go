@@ -14,9 +14,10 @@ import (
 )
 
 type commandPaletteState struct {
-	open     bool
-	query    string
-	selected int
+	open bool
+	// filterList holds the typed query and the highlighted row, shared with
+	// the other searchable overlays so they cannot drift apart.
+	filterList
 }
 
 type commandPaletteAction string
@@ -148,63 +149,15 @@ func (m shellModel) handleCommandPaletteKey(msg tea.KeyMsg) (shellModel, tea.Cmd
 		return m, nil
 	case tea.KeyEnter:
 		return m.executeCommandPaletteSelection()
-	case tea.KeyUp:
-		m.movePaletteSelection(-1)
-	case tea.KeyDown, tea.KeyTab:
-		m.movePaletteSelection(1)
-	case tea.KeyBackspace, tea.KeyCtrlH:
-		m.deletePaletteRune()
-	case tea.KeyCtrlU:
-		m.palette.query = ""
-		m.palette.selected = 0
-	case tea.KeySpace:
-		m.palette.query += " "
-		m.palette.selected = 0
-	case tea.KeyRunes:
-		m.palette.query += string(msg.Runes)
-		m.palette.selected = 0
 	}
-	m.clampPaletteSelection()
+	// Everything else is either a key every searchable overlay shares or one
+	// the palette ignores.
+	handleFilterListKey(msg, &m.palette.filterList, len(m.visibleCommandPaletteCommands()))
+	// The command list is rebuilt here because the key may have edited the
+	// query, which can leave the highlight past the end of a now shorter list.
+	m.palette.clamp(len(m.visibleCommandPaletteCommands()))
 	m.refreshPaletteReveal(time.Now())
 	return m, nil
-}
-
-func (m *shellModel) movePaletteSelection(delta int) {
-	commands := m.visibleCommandPaletteCommands()
-	if len(commands) == 0 {
-		m.palette.selected = 0
-		return
-	}
-	m.palette.selected += delta
-	if m.palette.selected < 0 {
-		m.palette.selected = len(commands) - 1
-	}
-	if m.palette.selected >= len(commands) {
-		m.palette.selected = 0
-	}
-}
-
-func (m *shellModel) deletePaletteRune() {
-	if m.palette.query == "" {
-		return
-	}
-	runes := []rune(m.palette.query)
-	m.palette.query = string(runes[:len(runes)-1])
-	m.palette.selected = 0
-}
-
-func (m *shellModel) clampPaletteSelection() {
-	commands := m.visibleCommandPaletteCommands()
-	if len(commands) == 0 {
-		m.palette.selected = 0
-		return
-	}
-	if m.palette.selected < 0 {
-		m.palette.selected = 0
-	}
-	if m.palette.selected >= len(commands) {
-		m.palette.selected = len(commands) - 1
-	}
 }
 
 func (m shellModel) executeCommandPaletteSelection() (shellModel, tea.Cmd) {

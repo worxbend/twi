@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/worxbend/twi/internal/twitch"
@@ -24,11 +23,12 @@ const (
 // Twitch search - the follow list is fetched once per session and filtered
 // locally, and any name can be typed even if it is not followed.
 type channelPickerState struct {
-	open     bool
-	query    string
-	selected int
-	loading  bool
-	err      string
+	open bool
+	// filterList holds the typed query and the highlighted row, shared with
+	// the other searchable overlays so they cannot drift apart.
+	filterList
+	loading bool
+	err     string
 }
 
 // channelPickerEntry is one row in the picker. Entries come from three
@@ -118,61 +118,24 @@ func (m shellModel) handleChannelPickerKey(msg tea.KeyMsg) (shellModel, tea.Cmd)
 		return m, nil
 	case tea.KeyEnter:
 		return m.commitChannelPickerSelection()
-	case tea.KeyUp:
-		m.moveChannelPickerSelection(-1)
-		return m, nil
-	case tea.KeyDown, tea.KeyTab:
-		m.moveChannelPickerSelection(1)
-		return m, nil
-	case tea.KeyBackspace, tea.KeyCtrlH:
-		if n := len(m.channelPicker.query); n > 0 {
-			_, size := utf8.DecodeLastRuneInString(m.channelPicker.query)
-			m.channelPicker.query = m.channelPicker.query[:n-size]
-		}
-		m.channelPicker.selected = 0
-		return m, nil
-	case tea.KeyCtrlU:
-		m.channelPicker.query = ""
-		m.channelPicker.selected = 0
-		return m, nil
-	case tea.KeySpace:
-		// Display names can contain spaces even though logins cannot, so the
-		// query accepts them rather than treating space as a leader here.
-		m.channelPicker.query += " "
-		m.channelPicker.selected = 0
-		return m, nil
-	case tea.KeyRunes:
-		m.channelPicker.query += string(msg.Runes)
-		m.channelPicker.selected = 0
-		return m, nil
 	}
+	// The rest are the keys every searchable overlay shares. Space is one of
+	// them here: display names can contain spaces even though logins cannot,
+	// so it types rather than acting as the leader key.
+	//
+	// Note that, unlike the command palette, this picker does not re-clamp the
+	// highlight afterwards. That is what it has always done, and changing it
+	// would change what the user sees; see
+	// TestChannelPickerLeavesAnOutOfRangeSelectionAlone.
+	handleFilterListKey(msg, &m.channelPicker.filterList, len(m.channelPickerEntries()))
 	return m, nil
 }
 
-func (m *shellModel) moveChannelPickerSelection(delta int) {
-	entries := m.channelPickerEntries()
-	if len(entries) == 0 {
-		m.channelPicker.selected = 0
-		return
-	}
-	m.channelPicker.selected += delta
-	if m.channelPicker.selected < 0 {
-		m.channelPicker.selected = len(entries) - 1
-	}
-	if m.channelPicker.selected >= len(entries) {
-		m.channelPicker.selected = 0
-	}
-}
-
+// clampChannelPickerSelection pulls the highlight back into range after the
+// follow list arrives and lengthens (or, on a failed retry, shortens) the row
+// list underneath it.
 func (m *shellModel) clampChannelPickerSelection() {
-	entries := m.channelPickerEntries()
-	if len(entries) == 0 || m.channelPicker.selected < 0 {
-		m.channelPicker.selected = 0
-		return
-	}
-	if m.channelPicker.selected >= len(entries) {
-		m.channelPicker.selected = len(entries) - 1
-	}
+	m.channelPicker.clamp(len(m.channelPickerEntries()))
 }
 
 // commitChannelPickerSelection opens the highlighted channel (or closes an
