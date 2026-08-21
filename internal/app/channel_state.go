@@ -472,12 +472,14 @@ func (s *channelState) restoreComposerText(texts ...string) {
 	s.composerText = text + " " + s.composerText
 }
 
+// normalizeChannelName and channelKey defer to internal/twitch so the UI, the
+// config loader and the IRC client all agree on what a channel name is.
+// normalizeChannelName keeps the user's capitals because it feeds what is shown
+// on screen; channelKey lower-cases because it decides identity.
 func normalizeChannelName(channel string) string {
-	channel = strings.TrimSpace(channel)
-	channel = strings.TrimPrefix(channel, "#")
-	return channel
+	return twitch.NormalizeChannel(channel)
 }
 
 func channelKey(channel string) string {
-	return strings.ToLower(normalizeChannelName(channel))
+	return twitch.ChannelKey(channel)
 }

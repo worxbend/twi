@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -474,5 +475,17 @@ func TestDefaultCacheDirUsesPlatformCacheDir(t *testing.T) {
 	want := filepath.Join(dir, "twi")
 	if got != want {
 		t.Fatalf("DefaultCacheDir = %q, want %q", got, want)
+	}
+}
+
+func TestChannelsListWithSpaceAfterCommaDropsTheHash(t *testing.T) {
+	// Regression: `channels = alpha, #beta` is the natural way to write a list,
+	// but splitting on commas leaves " #beta" with a leading space. This package
+	// used to trim the "#" before the whitespace, so the "#" survived and the
+	// channel picker showed "#beta" while every other layer called it "beta".
+	got := splitList("alpha, #beta, #Gamma ,, delta")
+	want := []string{"alpha", "beta", "Gamma", "delta"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("splitList = %q, want %q", got, want)
 	}
 }

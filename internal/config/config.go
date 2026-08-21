@@ -457,15 +457,13 @@ func splitList(value string) []string {
 	return normalizeChannels(parts)
 }
 
+// normalizeChannels defers to the shared rule in internal/twitch so that a
+// channel name means the same thing here, in the UI and on the IRC wire. This
+// package used to trim the "#" before the surrounding whitespace, which left
+// the "#" in place for a value like " #beta" -- the second entry of a config
+// line written `channels = alpha, #beta`.
 func normalizeChannels(values []string) []string {
-	channels := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(strings.TrimPrefix(value, "#"))
-		if value != "" {
-			channels = append(channels, value)
-		}
-	}
-	return channels
+	return twitch.NormalizeChannels(values)
 }
 
 func parseInt(value string, fallback int) int {
