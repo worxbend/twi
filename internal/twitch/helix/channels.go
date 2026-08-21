@@ -1,9 +1,7 @@
 package helix
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -84,37 +82,22 @@ func (c *ChannelsClient) ModifyChannelInformation(ctx context.Context, broadcast
 		return err
 	}
 
-	body, err := json.Marshal(helixChannelUpdateRequest{
-		Title:               update.Title,
-		GameID:              update.GameID,
-		BroadcasterLanguage: update.Language,
-		Tags:                update.Tags,
-	})
-	if err != nil {
-		return credentialSafeUserError("encode Twitch channel information update", err, c.token())
-	}
-
 	endpoint, err := c.channelsURL(broadcasterID)
 	if err != nil {
 		return credentialSafeUserError("create Twitch channel information update request", err, c.token())
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPatch, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return credentialSafeUserError("create Twitch channel information update request", err, c.token())
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	c.setAuthHeaders(httpReq)
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return credentialSafeUserError("modify Twitch channel information", err, c.token())
-	}
-	defer resp.Body.Close()
-
-	if !isSuccess(resp) {
-		return c.responseError(resp, channelErrorLabels("modify Twitch channel information", "Modify Channel Information"))
-	}
-	return nil
+	return send(ctx, c.transport, http.MethodPatch, endpoint,
+		helixChannelUpdateRequest{
+			Title:               update.Title,
+			GameID:              update.GameID,
+			BroadcasterLanguage: update.Language,
+			Tags:                update.Tags,
+		},
+		writeLabels{
+			encodeAction: "encode Twitch channel information update",
+			createAction: "create Twitch channel information update request",
+			errorLabels:  channelErrorLabels("modify Twitch channel information", "Modify Channel Information"),
+		})
 }
 
 // channelErrorLabels describes a Get/Modify Channel Information failure.
@@ -132,15 +115,10 @@ func channelErrorLabels(action, endpoint string) errorLabels {
 	}
 }
 
+// channelsURL points this adapter's endpoint at one broadcaster, which is the
+// only query parameter both Get and Modify Channel Information take.
 func (c *ChannelsClient) channelsURL(broadcasterID string) (string, error) {
-	parsed, err := url.Parse(c.endpoint)
-	if err != nil {
-		return "", err
-	}
-	query := parsed.Query()
-	query.Set("broadcaster_id", broadcasterID)
-	parsed.RawQuery = query.Encode()
-	return parsed.String(), nil
+	return queryURL(c.endpoint, url.Values{"broadcaster_id": {broadcasterID}})
 }
 
 type helixChannelsResponse struct {

@@ -21,12 +21,16 @@ type Palette struct {
 }
 
 // DefaultPalette returns the "claude" preset, twi's default theme.
+//
+// It reads the palette straight from the variable the preset map is built
+// from. Looking it up by name used to mean the function could come up empty --
+// a typo in the map key, a preset renamed -- and it answered that by panicking
+// at startup, which is the opposite of what ResolvePalette promises callers:
+// an unknown theme name warns and falls back, it never stops the program.
+// Returning the value the compiler already guarantees exists removes both the
+// lookup and the panic.
 func DefaultPalette() Palette {
-	palette, ok := Presets()["claude"]
-	if !ok {
-		panic("theme: claude preset missing")
-	}
-	return palette
+	return claudePalette
 }
 
 // ResolvePalette returns the named preset, or custom when name is "custom".
@@ -38,7 +42,7 @@ func ResolvePalette(name string, custom Palette) (Palette, bool) {
 	if name == "custom" {
 		return custom, true
 	}
-	if palette, ok := Presets()[name]; ok {
+	if palette, ok := presets[name]; ok {
 		return palette, true
 	}
 	return DefaultPalette(), false

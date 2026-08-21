@@ -1,6 +1,24 @@
 package theme
 
-import "sort"
+import (
+	"maps"
+	"sort"
+)
+
+// claudePalette is twi's default theme, named separately from the preset map
+// so DefaultPalette can return it without a lookup that might miss. The map
+// entry below is built from this variable, so the two cannot drift apart.
+var claudePalette = Palette{
+	Background: "#1a1523",
+	Foreground: "#f2ede4",
+	Accent:     "#d97757",
+	Muted:      "#948f9c",
+	Border:     "#4a4358",
+	Surface:    "#241d30",
+	Warning:    "#e0a72e",
+	Error:      "#e0685a",
+	Success:    "#7fbf8e",
+}
 
 // presets holds the built-in named palettes. Most take each scheme's
 // well-known published colors; Claude, Codex, Btop, and Mono are authored for
@@ -17,17 +35,7 @@ import "sort"
 // Background keeps panes reading as raised above the canvas in both light and
 // dark palettes.
 var presets = map[string]Palette{
-	"claude": {
-		Background: "#1a1523",
-		Foreground: "#f2ede4",
-		Accent:     "#d97757",
-		Muted:      "#948f9c",
-		Border:     "#4a4358",
-		Surface:    "#241d30",
-		Warning:    "#e0a72e",
-		Error:      "#e0685a",
-		Success:    "#7fbf8e",
-	},
+	"claude": claudePalette,
 	"codex": {
 		Background: "#0d1117",
 		Foreground: "#e6edf3",
@@ -695,9 +703,15 @@ var presets = map[string]Palette{
 }
 
 // Presets returns the built-in named palettes, keyed by lowercase name.
-// Callers must not mutate the returned map.
+//
+// The returned map is a copy. It used to be the package's own map, so a single
+// caller writing to it -- say, registering a user's palette under an existing
+// name -- rewrote the built-in theme for the rest of the process, and, because
+// Go runs a package's tests in one binary, for every test that ran afterwards.
+// Handing out a copy makes that impossible; changing a built-in now means
+// editing this file.
 func Presets() map[string]Palette {
-	return presets
+	return maps.Clone(presets)
 }
 
 // PresetNames returns preset keys in a stable, deterministic order.

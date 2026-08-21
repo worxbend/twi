@@ -3,14 +3,12 @@ package helix
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/worxbend/twi/internal/auth"
 	"github.com/worxbend/twi/internal/twitch"
 )
 
@@ -163,7 +161,7 @@ func validationResultFromOAuthResponse(resp oauthValidateResponse, credentials t
 	case resp.ExpiresIn <= 0:
 		result.Status = twitch.TokenValidationExpired
 		result.Detail = "OAuth token expired"
-	case usernameMismatch(credentials.Username, resp.Login):
+	case twitch.LoginMismatch(credentials.Username, resp.Login):
 		result.Status = twitch.TokenValidationWrongUser
 		result.Detail = fmt.Sprintf("OAuth token belongs to Twitch user %q, not configured username %q", resp.Login, strings.TrimSpace(credentials.Username))
 	case len(missing) > 0:
@@ -195,63 +193,4 @@ func readSmallBody(body io.Reader) (string, error) {
 
 func readSmallBodyBytes(body io.Reader) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(body, 4096))
-}
-
-func accessTokenForValidation(value string) string {
-	value = strings.TrimSpace(value)
-	if prefix, body, ok := strings.Cut(value, ":"); ok && strings.EqualFold(prefix, "oauth") {
-		return strings.TrimSpace(body)
-	}
-	return value
-}
-
-func usernameMismatch(expected, actual string) bool {
-	expected = strings.TrimSpace(expected)
-	actual = strings.TrimSpace(actual)
-	return expected != "" && actual != "" && !strings.EqualFold(expected, actual)
-}
-
-func credentialSafeError(action string, err error, credentials twitch.TokenCredentials) error {
-	if err == nil {
-		return nil
-	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return err
-	}
-	return errors.New(action + ": " + redactCredentials(err.Error(), credentials))
-}
-
-// redactCredentials makes a Helix response or error safe to show and to log.
-//
-// The rules live in internal/auth, which owns this policy for the whole
-// program. This package used to carry its own copy of the patterns, and it had
-// drifted: it never matched access_token, oauth_token, code_verifier,
-// code_challenge or state, so a Helix error body echoing any of those printed
-// the value. Every Helix adapter reports errors through here.
-func redactCredentials(value string, credentials twitch.TokenCredentials) string {
-	secrets := credentialSecrets(credentials)
-	values := make([]auth.Secret, 0, len(secrets))
-	for _, secret := range secrets {
-		values = append(values, auth.NewSecret(secret))
-	}
-	return auth.NewRedactor(values...).Redact(value)
-}
-
-func credentialSecrets(credentials twitch.TokenCredentials) []string {
-	values := []string{
-		strings.TrimSpace(credentials.OAuthToken),
-		strings.TrimSpace(accessTokenForValidation(credentials.OAuthToken)),
-		strings.TrimSpace(credentials.RefreshToken),
-		strings.TrimSpace(credentials.ClientSecret),
-	}
-	seen := make(map[string]bool, len(values))
-	secrets := make([]string, 0, len(values))
-	for _, value := range values {
-		if value == "" || seen[value] {
-			continue
-		}
-		seen[value] = true
-		secrets = append(secrets, value)
-	}
-	return secrets
 }

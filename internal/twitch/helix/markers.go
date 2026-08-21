@@ -1,9 +1,7 @@
 package helix
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -51,30 +49,16 @@ func (c *MarkersClient) CreateStreamMarker(ctx context.Context, userID, descript
 		return twitch.StreamMarker{}, err
 	}
 
-	body, err := json.Marshal(helixCreateMarkerRequest{UserID: userID, Description: strings.TrimSpace(description)})
+	decoded, err := sendJSON[helixCreateMarkerResponse](ctx, c.transport, http.MethodPost, c.endpoint,
+		helixCreateMarkerRequest{UserID: userID, Description: strings.TrimSpace(description)},
+		writeLabels{
+			encodeAction: "encode Twitch stream marker request",
+			createAction: "create Twitch stream marker request",
+			decodeAction: "decode Twitch stream marker response",
+			errorLabels:  markerErrorLabels("create Twitch stream marker", "Create Stream Marker"),
+		})
 	if err != nil {
-		return twitch.StreamMarker{}, credentialSafeUserError("encode Twitch stream marker request", err, c.token())
-	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
-	if err != nil {
-		return twitch.StreamMarker{}, credentialSafeUserError("create Twitch stream marker request", err, c.token())
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	c.setAuthHeaders(httpReq)
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return twitch.StreamMarker{}, credentialSafeUserError("create Twitch stream marker", err, c.token())
-	}
-	defer resp.Body.Close()
-
-	if !isSuccess(resp) {
-		return twitch.StreamMarker{}, c.responseError(resp, markerErrorLabels("create Twitch stream marker", "Create Stream Marker"))
-	}
-
-	var decoded helixCreateMarkerResponse
-	if err := decodeJSONBody(resp.Body, maxResponseBodySize, &decoded); err != nil {
-		return twitch.StreamMarker{}, credentialSafeUserError("decode Twitch stream marker response", err, c.token())
+		return twitch.StreamMarker{}, err
 	}
 	if len(decoded.Data) == 0 {
 		return twitch.StreamMarker{}, fmt.Errorf("create Twitch stream marker: empty response")
@@ -93,23 +77,17 @@ func (c *MarkersClient) GetStreamMarkers(ctx context.Context, userID string, lim
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if limit <= 0 {
-		limit = defaultStreamMarkerListLimit
-	}
-	if limit > maxStreamMarkerListLimit {
-		limit = maxStreamMarkerListLimit
-	}
+	limit = clampLimit(limit, defaultStreamMarkerListLimit, maxStreamMarkerListLimit)
 
-	parsed, err := url.Parse(c.endpoint)
+	endpoint, err := queryURL(c.endpoint, url.Values{
+		"user_id": {userID},
+		"first":   {strconv.Itoa(limit)},
+	})
 	if err != nil {
 		return nil, credentialSafeUserError("create Twitch stream markers request", err, c.token())
 	}
-	q := parsed.Query()
-	q.Set("user_id", userID)
-	q.Set("first", strconv.Itoa(limit))
-	parsed.RawQuery = q.Encode()
 
-	decoded, err := getJSON[helixStreamMarkersListResponse](ctx, c.transport, parsed.String(),
+	decoded, err := getJSON[helixStreamMarkersListResponse](ctx, c.transport, endpoint,
 		markerErrorLabels("get Twitch stream markers", "Get Stream Markers"))
 	if err != nil {
 		return nil, err

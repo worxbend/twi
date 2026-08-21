@@ -43,16 +43,6 @@ var clipScopes = []Scope{ScopeClipsEdit}
 
 var followedChannelScopes = []Scope{ScopeUserReadFollows}
 
-// ChatReadScopes returns the OAuth scopes required for read-only Twitch chat.
-func ChatReadScopes() []Scope {
-	return []Scope{ScopeChatRead}
-}
-
-// ChatSendScopes returns the OAuth scopes required to send Twitch chat messages.
-func ChatSendScopes() []Scope {
-	return []Scope{ScopeChatEdit}
-}
-
 // RequiredChatScopes returns the minimum OAuth scopes for twi's MVP chat read
 // and send behavior.
 func RequiredChatScopes() []Scope {

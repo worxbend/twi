@@ -46,23 +46,17 @@ func (c *GamesClient) SearchCategories(ctx context.Context, query string, limit 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if limit <= 0 {
-		limit = defaultCategorySearchLimit
-	}
-	if limit > maxCategorySearchLimit {
-		limit = maxCategorySearchLimit
-	}
+	limit = clampLimit(limit, defaultCategorySearchLimit, maxCategorySearchLimit)
 
-	parsed, err := url.Parse(c.endpoint)
+	endpoint, err := queryURL(c.endpoint, url.Values{
+		"query": {query},
+		"first": {strconv.Itoa(limit)},
+	})
 	if err != nil {
 		return nil, credentialSafeUserError("create Twitch category search request", err, c.token())
 	}
-	q := parsed.Query()
-	q.Set("query", query)
-	q.Set("first", strconv.Itoa(limit))
-	parsed.RawQuery = q.Encode()
 
-	decoded, err := getJSON[helixGamesResponse](ctx, c.transport, parsed.String(), errorLabels{
+	decoded, err := getJSON[helixGamesResponse](ctx, c.transport, endpoint, errorLabels{
 		action:     "search Twitch categories",
 		readAction: "read Twitch category search response",
 		endpoint:   "Search Categories",

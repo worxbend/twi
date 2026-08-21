@@ -1,10 +1,12 @@
 package helix
 
 import (
+	"bytes"
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/worxbend/twi/internal/twitch"
@@ -79,6 +81,25 @@ func (t transport) newGetRequest(ctx context.Context, endpoint, action string) (
 	if err != nil {
 		return nil, credentialSafeUserError(action, err, t.token())
 	}
+	t.setAuthHeaders(req)
+	return req, nil
+}
+
+// newJSONRequest builds an authenticated Helix request whose body is body
+// encoded as a JSON document, which is how every Helix write sends its
+// payload. labels supplies the two messages a failure before the request
+// leaves twi is reported under: one for encoding the payload, one for building
+// the request around it.
+func (t transport) newJSONRequest(ctx context.Context, method, endpoint string, body any, labels writeLabels) (*http.Request, error) {
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return nil, credentialSafeUserError(labels.encodeAction, err, t.token())
+	}
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, bytes.NewReader(encoded))
+	if err != nil {
+		return nil, credentialSafeUserError(labels.createAction, err, t.token())
+	}
+	req.Header.Set("Content-Type", "application/json")
 	t.setAuthHeaders(req)
 	return req, nil
 }
@@ -208,23 +229,118 @@ func (l errorLabels) subject() string {
 	return strings.TrimSuffix(subject, " response")
 }
 
-// credentialSafeUserError wraps err with a message safe to display.
+// writeLabels names every message one Helix write can fail under.
 //
-// A cancelled or timed-out context is returned unchanged: that is the caller's
-// own doing, and wrapping it would hide the sentinel the caller checks for.
-// Everything else is redacted, because a Helix error body echoes back the
-// request that produced it -- which is where the credentials are.
+// The read path derives its request and decode messages from a single label
+// (see errorLabels.subject); the write path cannot, because the wording does
+// not follow from one noun. Creating a stream marker, for instance, reports
+// its own failures in the singular ("Twitch stream marker") while sharing the
+// plural response labels of the marker *list* endpoint. Spelling the messages
+// out keeps each one exactly what it has always been.
+type writeLabels struct {
+	// encodeAction covers turning the payload into JSON, e.g. "encode Twitch
+	// clip request".
+	encodeAction string
+	// createAction covers building the HTTP request, e.g. "create Twitch clip
+	// request".
+	createAction string
+	// decodeAction covers reading Twitch's answer back, e.g. "decode Twitch
+	// clip response". A write with nothing to decode leaves it empty.
+	decodeAction string
+	// errorLabels covers sending the request and any non-2xx reply, exactly as
+	// it does on the read path.
+	errorLabels
+}
+
+// sendJSON performs one authenticated Helix write and decodes the response.
 //
-// This lived in users.go, and chat_assets.go carried a byte-identical second
-// copy under a different name. It belongs with the rest of the shared
-// transport code, which is what every adapter reports errors through.
-func credentialSafeUserError(action string, err error, oauthToken string) error {
-	if err == nil {
-		return nil
+// It is the write-path twin of getJSON: the adapter method supplies the URL,
+// the payload and the labels, and gets back a decoded wire type. What used to
+// sit inline in each adapter -- encode, build, send, close, check the status,
+// decode -- lives here once.
+func sendJSON[T any](ctx context.Context, t transport, method, endpoint string, body any, labels writeLabels) (T, error) {
+	var decoded T
+
+	resp, err := t.doJSON(ctx, method, endpoint, body, labels)
+	if err != nil {
+		return decoded, err
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	defer resp.Body.Close()
+
+	if !isSuccess(resp) {
+		return decoded, t.responseError(resp, labels.errorLabels)
+	}
+	if err := decodeJSONBody(resp.Body, maxResponseBodySize, &decoded); err != nil {
+		return decoded, credentialSafeUserError(labels.decodeAction, err, t.token())
+	}
+	return decoded, nil
+}
+
+// send performs one authenticated Helix write whose success carries no body to
+// read: Twitch answers Modify Channel Information with 204 No Content.
+func send(ctx context.Context, t transport, method, endpoint string, body any, labels writeLabels) error {
+	resp, err := t.doJSON(ctx, method, endpoint, body, labels)
+	if err != nil {
 		return err
 	}
-	credentials := twitch.TokenCredentials{OAuthToken: oauthToken}
-	return errors.New(action + ": " + redactCredentials(err.Error(), credentials))
+	defer resp.Body.Close()
+
+	if !isSuccess(resp) {
+		return t.responseError(resp, labels.errorLabels)
+	}
+	return nil
+}
+
+// doJSON builds one JSON Helix request and sends it. The caller owns the
+// returned response and is responsible for closing its body.
+func (t transport) doJSON(ctx context.Context, method, endpoint string, body any, labels writeLabels) (*http.Response, error) {
+	req, err := t.newJSONRequest(ctx, method, endpoint, body, labels)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := t.httpClient.Do(req)
+	if err != nil {
+		return nil, credentialSafeUserError(labels.action, err, t.token())
+	}
+	return resp, nil
+}
+
+// clampLimit forces a caller's requested page size into the range Twitch
+// accepts for one endpoint.
+//
+// A limit of zero or less means the caller expressed no preference and gets
+// fallback. Anything above maximum is lowered rather than passed on, because
+// Twitch rejects an over-large page outright. Every paged adapter applied
+// these two rules itself with its own pair of constants.
+func clampLimit(limit, fallback, maximum int) int {
+	if limit <= 0 {
+		return fallback
+	}
+	if limit > maximum {
+		return maximum
+	}
+	return limit
+}
+
+// queryURL returns endpoint carrying values as its query string, replacing any
+// parameter of the same name the endpoint already had.
+//
+// The only error it can return is a malformed endpoint, which in practice
+// means a test or config pointed an adapter at something url.Parse rejects.
+// Callers report that under their own "create Twitch ... request" message, so
+// the error is handed back unwrapped.
+func queryURL(endpoint string, values url.Values) (string, error) {
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return "", err
+	}
+	query := parsed.Query()
+	for name, list := range values {
+		query.Del(name)
+		for _, value := range list {
+			query.Add(name, value)
+		}
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
 }

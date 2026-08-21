@@ -1,9 +1,7 @@
 package helix
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -41,30 +39,16 @@ func (c *ClipsClient) CreateClip(ctx context.Context, broadcasterID string) (twi
 		return twitch.Clip{}, err
 	}
 
-	body, err := json.Marshal(helixCreateClipRequest{BroadcasterID: broadcasterID})
+	decoded, err := sendJSON[helixCreateClipResponse](ctx, c.transport, http.MethodPost, c.endpoint,
+		helixCreateClipRequest{BroadcasterID: broadcasterID},
+		writeLabels{
+			encodeAction: "encode Twitch clip request",
+			createAction: "create Twitch clip request",
+			decodeAction: "decode Twitch clip response",
+			errorLabels:  clipErrorLabels("create Twitch clip", "Create Clip"),
+		})
 	if err != nil {
-		return twitch.Clip{}, credentialSafeUserError("encode Twitch clip request", err, c.token())
-	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
-	if err != nil {
-		return twitch.Clip{}, credentialSafeUserError("create Twitch clip request", err, c.token())
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	c.setAuthHeaders(httpReq)
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return twitch.Clip{}, credentialSafeUserError("create Twitch clip", err, c.token())
-	}
-	defer resp.Body.Close()
-
-	if !isSuccess(resp) {
-		return twitch.Clip{}, c.responseError(resp, clipErrorLabels("create Twitch clip", "Create Clip"))
-	}
-
-	var decoded helixCreateClipResponse
-	if err := decodeJSONBody(resp.Body, maxResponseBodySize, &decoded); err != nil {
-		return twitch.Clip{}, credentialSafeUserError("decode Twitch clip response", err, c.token())
+		return twitch.Clip{}, err
 	}
 	if len(decoded.Data) == 0 {
 		return twitch.Clip{}, fmt.Errorf("create Twitch clip: empty response")

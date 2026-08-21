@@ -49,24 +49,18 @@ func (c *FollowersClient) GetChannelFollowers(ctx context.Context, broadcasterID
 	if err := ctx.Err(); err != nil {
 		return twitch.FollowersPage{}, err
 	}
-	if limit <= 0 {
-		limit = defaultFollowersPageLimit
-	}
-	if limit > maxFollowersPageLimit {
-		limit = maxFollowersPageLimit
-	}
+	limit = clampLimit(limit, defaultFollowersPageLimit, maxFollowersPageLimit)
 
-	parsed, err := url.Parse(c.endpoint)
+	endpoint, err := queryURL(c.endpoint, url.Values{
+		"broadcaster_id": {broadcasterID},
+		"moderator_id":   {broadcasterID},
+		"first":          {strconv.Itoa(limit)},
+	})
 	if err != nil {
 		return twitch.FollowersPage{}, credentialSafeUserError("create Twitch channel followers request", err, c.token())
 	}
-	q := parsed.Query()
-	q.Set("broadcaster_id", broadcasterID)
-	q.Set("moderator_id", broadcasterID)
-	q.Set("first", strconv.Itoa(limit))
-	parsed.RawQuery = q.Encode()
 
-	decoded, err := getJSON[helixFollowersResponse](ctx, c.transport, parsed.String(), errorLabels{
+	decoded, err := getJSON[helixFollowersResponse](ctx, c.transport, endpoint, errorLabels{
 		action:     "get Twitch channel followers",
 		readAction: "read Twitch channel followers response",
 		endpoint:   "Get Channel Followers",

@@ -48,23 +48,17 @@ func (c *SubscriptionsClient) GetBroadcasterSubscriptions(ctx context.Context, b
 	if err := ctx.Err(); err != nil {
 		return twitch.SubscriptionsPage{}, err
 	}
-	if limit <= 0 {
-		limit = defaultSubscriptionsPageLimit
-	}
-	if limit > maxSubscriptionsPageLimit {
-		limit = maxSubscriptionsPageLimit
-	}
+	limit = clampLimit(limit, defaultSubscriptionsPageLimit, maxSubscriptionsPageLimit)
 
-	parsed, err := url.Parse(c.endpoint)
+	endpoint, err := queryURL(c.endpoint, url.Values{
+		"broadcaster_id": {broadcasterID},
+		"first":          {strconv.Itoa(limit)},
+	})
 	if err != nil {
 		return twitch.SubscriptionsPage{}, credentialSafeUserError("create Twitch broadcaster subscriptions request", err, c.token())
 	}
-	q := parsed.Query()
-	q.Set("broadcaster_id", broadcasterID)
-	q.Set("first", strconv.Itoa(limit))
-	parsed.RawQuery = q.Encode()
 
-	decoded, err := getJSON[helixSubscriptionsResponse](ctx, c.transport, parsed.String(), errorLabels{
+	decoded, err := getJSON[helixSubscriptionsResponse](ctx, c.transport, endpoint, errorLabels{
 		action:     "get Twitch broadcaster subscriptions",
 		readAction: "read Twitch broadcaster subscriptions response",
 		endpoint:   "Get Broadcaster Subscriptions",
