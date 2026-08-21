@@ -7,11 +7,11 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/worxbend/twi/internal/auth"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/storage"
 	"github.com/worxbend/twi/internal/theme"
@@ -23,9 +23,11 @@ const (
 	DoctorStatusWarn DoctorStatus = "warn"
 )
 
-var oauthPattern = regexp.MustCompile(`(?i)oauth:[^\s]+`)
-var bearerPattern = regexp.MustCompile(`(?i)(bearer\s+)[^\s"'&?]+`)
-var credentialPairPattern = regexp.MustCompile(`(?i)((?:access[_-]token|oauth[_-]token|refresh[_-]token|client[_-]secret|authorization_code|code_verifier|code_challenge|state|code)(?:["']?\s*[:=]\s*["']?))[^"'\s&?]+`)
+// redactedMarker is what twi's diagnostic output prints in place of a
+// credential. internal/auth uses "<redacted>" for the same purpose; this
+// package keeps the bracket form because it is what `twi doctor` and
+// `twi config show` have always printed.
+const redactedMarker = "[redacted]"
 
 type DoctorStatus string
 
@@ -554,17 +556,20 @@ func tokenScopesCSV(scopes []twitch.TokenScope) string {
 	return strings.Join(values, ", ")
 }
 
+// redactSensitive makes a diagnostic line safe to print.
+//
+// The rules live in internal/auth, which owns this policy for the whole
+// program; this package used to carry its own copy of the patterns. The
+// placeholder stays "[redacted]" because that is what the rest of twi's
+// diagnostic output already prints, and keeping a surface's own marker is
+// exactly the reason WithPlaceholder exists -- previously it was the reason
+// this package kept its own patterns, which is how they drifted.
 func redactSensitive(detail string, cfg config.Config) string {
-	detail = oauthPattern.ReplaceAllString(detail, "[redacted]")
-	detail = bearerPattern.ReplaceAllString(detail, "${1}[redacted]")
-	detail = credentialPairPattern.ReplaceAllString(detail, "${1}[redacted]")
+	values := make([]auth.Secret, 0, 4)
 	for _, secret := range sensitiveValues(cfg) {
-		secret = strings.TrimSpace(secret)
-		if secret != "" {
-			detail = strings.ReplaceAll(detail, secret, "[redacted]")
-		}
+		values = append(values, auth.NewSecret(secret))
 	}
-	return detail
+	return auth.NewRedactor(values...).WithPlaceholder(redactedMarker).Redact(detail)
 }
 
 func sensitiveValues(cfg config.Config) []string {

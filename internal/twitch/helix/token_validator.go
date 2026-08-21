@@ -7,19 +7,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
+	"github.com/worxbend/twi/internal/auth"
 	"github.com/worxbend/twi/internal/twitch"
 )
 
 const defaultOAuthValidateURL = "https://id.twitch.tv/oauth2/validate"
-
-var (
-	credentialValuePattern = regexp.MustCompile(`(?i)(oauth:|bearer\s+)[^\s"'&?]+`)
-	credentialPairPattern  = regexp.MustCompile(`(?i)((?:client[_-]secret|refresh_token|authorization_code|code)(?:["']?\s*[:=]\s*["']?))[^"'\s&?]+`)
-)
 
 // OAuthTokenValidatorConfig configures the Twitch OAuth token validation HTTP
 // adapter. Zero values use Twitch's production validation endpoint and the
@@ -226,13 +221,20 @@ func credentialSafeError(action string, err error, credentials twitch.TokenCrede
 	return errors.New(action + ": " + redactCredentials(err.Error(), credentials))
 }
 
+// redactCredentials makes a Helix response or error safe to show and to log.
+//
+// The rules live in internal/auth, which owns this policy for the whole
+// program. This package used to carry its own copy of the patterns, and it had
+// drifted: it never matched access_token, oauth_token, code_verifier,
+// code_challenge or state, so a Helix error body echoing any of those printed
+// the value. Every Helix adapter reports errors through here.
 func redactCredentials(value string, credentials twitch.TokenCredentials) string {
-	value = credentialValuePattern.ReplaceAllString(value, "${1}<redacted>")
-	value = credentialPairPattern.ReplaceAllString(value, "${1}<redacted>")
-	for _, secret := range credentialSecrets(credentials) {
-		value = strings.ReplaceAll(value, secret, "<redacted>")
+	secrets := credentialSecrets(credentials)
+	values := make([]auth.Secret, 0, len(secrets))
+	for _, secret := range secrets {
+		values = append(values, auth.NewSecret(secret))
 	}
-	return value
+	return auth.NewRedactor(values...).Redact(value)
 }
 
 func credentialSecrets(credentials twitch.TokenCredentials) []string {

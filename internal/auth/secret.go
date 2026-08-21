@@ -14,9 +14,17 @@ const (
 )
 
 var (
-	oauthTokenPattern    = regexp.MustCompile(`(?i)oauth:[^\s"'&?]+`)
-	bearerTokenPattern   = regexp.MustCompile(`(?i)(bearer\s+)[^\s"'&?]+`)
-	credentialKeyPattern = regexp.MustCompile(`(?i)((?:access[_-]token|oauth[_-]token|refresh[_-]token|client[_-]secret|authorization_code|code_verifier|code_challenge|state|code)(?:["']?\s*[:=]\s*["']?))[^"'\s&?]+`)
+	// oauthQuotedTokenPattern catches oauth:"abc", which the unquoted pattern
+	// below deliberately cannot: it stops at a quote so that a token embedded
+	// in JSON does not swallow its own closing delimiter. Twitch's IRC errors
+	// quote the token this way, so without this the value survives redaction.
+	// It runs first, because once the quotes are gone the bare pattern would
+	// have nothing left to anchor on. The two quote styles are spelled out
+	// separately because Go's regexp engine has no backreferences.
+	oauthQuotedTokenPattern = regexp.MustCompile(`(?i)oauth:("[^"]*"|'[^']*')`)
+	oauthTokenPattern       = regexp.MustCompile(`(?i)oauth:[^\s"'&?]+`)
+	bearerTokenPattern      = regexp.MustCompile(`(?i)(bearer\s+)[^\s"'&?]+`)
+	credentialKeyPattern    = regexp.MustCompile(`(?i)((?:access[_-]token|oauth[_-]token|refresh[_-]token|client[_-]secret|authorization_code|code_verifier|code_challenge|state|code)(?:["']?\s*[:=]\s*["']?))[^"'\s&?]+`)
 )
 
 // Secret wraps a sensitive auth value. Its default string formatting is
@@ -78,6 +86,28 @@ func (s Secret) MarshalText() ([]byte, error) {
 // that may become user-facing output.
 type Redactor struct {
 	secrets []string
+	// placeholder replaces a redacted value. Empty means RedactedSecret.
+	//
+	// It exists so a surface that already prints a different marker can adopt
+	// this redactor without changing its output. The alternative -- letting
+	// that surface keep its own copy of the patterns to keep its own marker --
+	// is what allowed them to drift apart in the first place.
+	placeholder string
+}
+
+// WithPlaceholder returns a copy of r that writes marker in place of a
+// redacted value.
+func (r Redactor) WithPlaceholder(marker string) Redactor {
+	r.placeholder = marker
+	return r
+}
+
+// marker is the placeholder this redactor writes.
+func (r Redactor) marker() string {
+	if r.placeholder == "" {
+		return RedactedSecret
+	}
+	return r.placeholder
 }
 
 // NewRedactor creates a redactor for explicit secret values. OAuth-prefixed
@@ -108,12 +138,14 @@ func (r Redactor) Redact(value string) string {
 		return ""
 	}
 
+	marker := r.marker()
 	for _, secret := range r.secrets {
-		value = strings.ReplaceAll(value, secret, RedactedSecret)
+		value = strings.ReplaceAll(value, secret, marker)
 	}
-	value = oauthTokenPattern.ReplaceAllString(value, RedactedSecret)
-	value = bearerTokenPattern.ReplaceAllString(value, "${1}"+RedactedSecret)
-	value = credentialKeyPattern.ReplaceAllString(value, "${1}"+RedactedSecret)
+	value = oauthQuotedTokenPattern.ReplaceAllString(value, marker)
+	value = oauthTokenPattern.ReplaceAllString(value, marker)
+	value = bearerTokenPattern.ReplaceAllString(value, "${1}"+marker)
+	value = credentialKeyPattern.ReplaceAllString(value, "${1}"+marker)
 	return value
 }
 

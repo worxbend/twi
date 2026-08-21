@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,8 +29,6 @@ const (
 	// token cannot spin.
 	maxAuthRefreshes = 3
 )
-
-var oauthTokenPattern = regexp.MustCompile(`(?i)oauth:[^\s]+`)
 
 // Config contains the credentials and channels needed to open a Twitch IRC
 // session. OAuthToken must be an IRC token with the oauth: prefix.
@@ -588,9 +585,14 @@ func credentialSafeError(err error) error {
 	return twitch.NewSafeError("twitch IRC connection failed: "+redactError(err.Error()), err)
 }
 
+// redactError makes a transport error safe to show and to log.
+//
+// It carries no secrets of its own, so it relies entirely on the patterns in
+// internal/auth. This used to run a second, wider oauth: pattern afterwards to
+// catch the quoted form Twitch uses in its IRC errors; that case now lives in
+// internal/auth with the rest of the policy.
 func redactError(value string) string {
-	value = auth.NewRedactor().Redact(value)
-	return oauthTokenPattern.ReplaceAllString(value, "oauth:<redacted>")
+	return auth.NewRedactor().Redact(value)
 }
 
 func normalizeChannels(values []string) []string {

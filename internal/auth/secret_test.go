@@ -100,3 +100,41 @@ func TestRedactorRedactsPatternsAndExplicitSecrets(t *testing.T) {
 		t.Fatalf("redacted text = %q, want redaction markers", got)
 	}
 }
+
+// TestRedactorCoversQuotedOAuthTokens pins the quoted form, which the IRC
+// transport used to compensate for with a second pattern of its own.
+//
+// Twitch's IRC errors quote the token. The unquoted pattern deliberately stops
+// at a quote so a token embedded in JSON does not swallow its own closing
+// delimiter, which means the quoted form needs a rule of its own -- and having
+// that rule live only in the transport is how the two drifted apart.
+func TestRedactorCoversQuotedOAuthTokens(t *testing.T) {
+	const secret = "s3cr3t-token-value"
+	for name, input := range map[string]string{
+		"double quoted": `login failed for oauth:"` + secret + `"`,
+		"single quoted": `login failed for oauth:'` + secret + `'`,
+		"unquoted":      `login failed for oauth:` + secret,
+		"json embedded": `{"token":"oauth:` + secret + `"}`,
+	} {
+		if got := NewRedactor().Redact(input); strings.Contains(got, secret) {
+			t.Errorf("%s: Redact(%q) = %q, still contains the token", name, input, got)
+		}
+	}
+}
+
+// TestRedactorPlaceholderIsConfigurable covers WithPlaceholder, which exists so
+// a surface can adopt these patterns without changing the marker its output
+// already prints -- previously the reason such surfaces kept their own copy of
+// the patterns.
+func TestRedactorPlaceholderIsConfigurable(t *testing.T) {
+	got := NewRedactor().WithPlaceholder("[redacted]").Redact("token oauth:abc123 here")
+	if strings.Contains(got, "abc123") {
+		t.Fatalf("Redact leaked the token: %q", got)
+	}
+	if !strings.Contains(got, "[redacted]") {
+		t.Errorf("Redact = %q, want the configured [redacted] marker", got)
+	}
+	if strings.Contains(got, RedactedSecret) {
+		t.Errorf("Redact = %q, want the configured marker instead of the default", got)
+	}
+}

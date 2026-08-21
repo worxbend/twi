@@ -226,7 +226,7 @@ func inspectAssetRef(ref twitch.AssetRef) string {
 
 func redactDiagnosticValue(key, value string) string {
 	if sensitiveDiagnosticKey(key) {
-		return "[redacted]"
+		return redactedMarker
 	}
 	return redactDiagnosticText(value)
 }
