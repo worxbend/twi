@@ -304,6 +304,21 @@ func registerHandlers(client chatSession, emit func(twitch.Event), now func() ti
 // server that keeps rejecting freshly minted tokens cannot spin.
 func (c *Client) connectWithAuthRefresh(ctx context.Context, emit func(twitch.Event), client chatSession) error {
 	for attempt := range maxAuthRefreshes {
+		// Stop before connecting anything if the client has been closed.
+		//
+		// A refresh installs a replacement session and then loops back here
+		// to connect it. A Close landing in that window disconnects the
+		// replacement -- which is not connected yet, so it reports "not
+		// open" and is treated as success -- and then this loop would open a
+		// fresh TCP and TLS session that nothing holds a reference to and
+		// nothing can ever close. Returning nil reports a clean shutdown,
+		// which is what a Close is.
+		select {
+		case <-c.done:
+			return nil
+		default:
+		}
+
 		err := c.connectOnceWithAuthRefresh(ctx, emit, client)
 		if !errors.Is(err, errAuthRetryable) {
 			return err

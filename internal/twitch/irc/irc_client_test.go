@@ -808,3 +808,35 @@ func TestNormalizeChannelTrimsWhitespaceBeforeTheHash(t *testing.T) {
 		}
 	}
 }
+
+// TestConnectLoopStopsOnceClosed is a regression test for a leaked connection.
+//
+// The auth-refresh loop installs a replacement session and then loops back to
+// connect it. A Close landing in that window disconnects the replacement --
+// which has not connected yet, so it reports "not open" and that is treated as
+// success -- and the loop would then open a fresh TCP and TLS session that
+// nothing holds a reference to and nothing can ever close. On a long stream
+// crossing several token expiries that leaks a live connection to Twitch per
+// occurrence.
+//
+// The loop now checks c.done before connecting anything.
+func TestConnectLoopStopsOnceClosed(t *testing.T) {
+	client, err := NewClient(Config{
+		Username:   "viewer",
+		OAuthToken: "oauth:token",
+		Channels:   []string{"example"},
+	})
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+
+	session := &fakeIRCSession{}
+	close(client.done) // the client has been closed
+
+	if err := client.connectWithAuthRefresh(context.Background(), func(twitch.Event) {}, session); err != nil {
+		t.Fatalf("connectWithAuthRefresh on a closed client = %v, want nil (clean shutdown)", err)
+	}
+	if got := session.connectCalls(); got != 0 {
+		t.Errorf("Connect called %d times after Close, want 0: a connection was opened that nothing can close", got)
+	}
+}
