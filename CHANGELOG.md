@@ -11,6 +11,45 @@ constant in the source tree.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Quitting could hang forever.** Closing the chat client while a reconnect
+  was in flight deadlocked: the reconnect held a lock while waiting to report
+  its failure, and the close was waiting for that lock before releasing it.
+  This was reachable on ordinary shutdown, because that is exactly when nothing
+  is reading connection states any more.
+- **A channel opened with `/channels` stopped receiving messages after a
+  reconnect,** while still showing as connected. Reconnecting builds a fresh
+  connection from the configured default channels, and anything opened since
+  startup was not replayed onto it. Auto-reconnect made this happen with no
+  user action at all.
+- **Credentials could be printed in Twitch API errors.** The redaction rules
+  were copied into four packages and had drifted; the copy used by every Helix
+  request never matched `access_token`, `oauth_token`, `code_verifier`,
+  `code_challenge` or `state`, so an error body echoing one printed the value.
+  Redaction now has a single owner.
+- **The inspect panel could be used to write escape sequences to the
+  terminal.** It deliberately shows a message exactly as Twitch delivered it,
+  raw IRC tags included, and those were filtered for credentials but not for
+  control characters.
+- **A channel name with leading whitespace kept its `#`,** so it never matched
+  the same channel elsewhere in the program.
+- **The IRC client could leak a connection** when closed at the moment a token
+  refresh was installing a replacement session.
+
+### Removed
+
+- **The on-disk asset cache.** It was the download-and-cache stage of the
+  inline image renderer, which was removed as a product decision (see
+  [ADR 0003](docs/adr/0003-use-kitty-graphics-as-first-image-protocol.md),
+  superseded); avatars, badges, emotes and emoji have rendered as text ever
+  since, and nothing has written to the cache since then.
+
+  `twi doctor` no longer prunes it. It instead reports a leftover
+  `<cache>/assets` directory from an older version, with its size, and leaves
+  removing it to you -- `doctor` is a diagnostic command and should not delete
+  your files as a side effect of being asked for a report.
+
 ## [0.16.0] — 2026-08-18
 
 ### Added

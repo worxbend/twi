@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/worxbend/twi/internal/config"
-	"github.com/worxbend/twi/internal/storage"
 	"github.com/worxbend/twi/internal/twitch"
 )
 
@@ -38,7 +37,7 @@ func TestDoctorRunsWithoutCredentialsAndUsesWarnings(t *testing.T) {
 	if check := doctorCheck(t, report, "cache directory"); check.Status != DoctorStatusOK {
 		t.Fatalf("cache status = %q, want ok; detail=%q", check.Status, check.Detail)
 	}
-	if check := doctorCheck(t, report, "asset cache pruning"); check.Status != DoctorStatusOK {
+	if check := doctorCheck(t, report, "legacy asset cache"); check.Status != DoctorStatusOK {
 		t.Fatalf("cache pruning status = %q, want ok; detail=%q", check.Status, check.Detail)
 	}
 	entries, err := os.ReadDir(cacheDir)
@@ -302,44 +301,16 @@ func TestDoctorContinuesWhenValidationCanceled(t *testing.T) {
 	}
 }
 
-func TestDoctorReportsAssetCachePruning(t *testing.T) {
+// TestDoctorReportsLeftoverAssetCache covers the upgrade case: an
+// installation that ran a version with the image renderer can still be holding
+// a cache directory that nothing will ever read again.
+func TestDoctorReportsLeftoverAssetCache(t *testing.T) {
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	assetCache := storage.NewDiskAssetCache(filepath.Join(cacheDir, "assets"))
-	expired := storage.AssetRecord{
-		Key:       storage.AssetKey{Kind: "avatar", ID: "expired"},
-		Path:      writeDoctorAssetFixture(t, "old"),
-		FetchedAt: time.Now().Add(-2 * storage.DefaultAssetCacheMaxAge),
-	}
-	if err := assetCache.PutAsset(context.Background(), expired); err != nil {
-		t.Fatalf("PutAsset fixture returned error: %v", err)
-	}
-
-	cfg := config.Default()
-	cfg.Path = filepath.Join(t.TempDir(), "missing.toml")
-	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
-		Environ:           []string{"TERM=xterm-256color"},
-		CacheDir:          cacheDir,
-		ReachabilityProbe: func(context.Context) error { return nil },
-	})
-
-	check := doctorCheck(t, report, "asset cache pruning")
-	if check.Status != DoctorStatusOK {
-		t.Fatalf("asset cache pruning status = %q, want ok; detail=%q", check.Status, check.Detail)
-	}
-	if !strings.Contains(check.Detail, "pruned=1") || !strings.Contains(check.Detail, "expired=1") {
-		t.Fatalf("asset cache pruning detail = %q, want expired prune counts", check.Detail)
-	}
-	if _, ok, err := assetCache.GetAsset(context.Background(), expired.Key); err != nil || ok {
-		t.Fatalf("expired asset after doctor ok=%v err=%v, want miss nil", ok, err)
-	}
-}
-
-func TestDoctorReportsAssetCachePruningWarningsWithoutSecrets(t *testing.T) {
-	cacheDir := filepath.Join(t.TempDir(), "access_token=secret-token")
-	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
+	assetDir := filepath.Join(cacheDir, "assets", "avatar")
+	if err := os.MkdirAll(assetDir, 0o700); err != nil {
 		t.Fatalf("MkdirAll fixture returned error: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(cacheDir, "assets"), []byte("not a directory"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(assetDir, "leftover.png"), []byte("stale bytes"), 0o600); err != nil {
 		t.Fatalf("WriteFile fixture returned error: %v", err)
 	}
 
@@ -351,15 +322,59 @@ func TestDoctorReportsAssetCachePruningWarningsWithoutSecrets(t *testing.T) {
 		ReachabilityProbe: func(context.Context) error { return nil },
 	})
 
-	check := doctorCheck(t, report, "asset cache pruning")
+	check := doctorCheck(t, report, "legacy asset cache")
 	if check.Status != DoctorStatusWarn {
-		t.Fatalf("asset cache pruning status = %q, want warn; detail=%q", check.Status, check.Detail)
+		t.Fatalf("legacy asset cache status = %q, want warn; detail=%q", check.Status, check.Detail)
 	}
-	for _, want := range []string{"cleanup failed", "fix cache directory permissions", "[redacted]"} {
+	for _, want := range []string{"1 file(s)", "can be deleted"} {
 		if !strings.Contains(check.Detail, want) {
-			t.Fatalf("asset cache pruning detail = %q, want it to contain %q", check.Detail, want)
+			t.Errorf("legacy asset cache detail = %q, want it to contain %q", check.Detail, want)
 		}
 	}
+
+	// The check reports; it must not delete. `twi doctor` is diagnostic, and
+	// removing a user's files as a side effect of asking for a report would be
+	// a surprise.
+	if _, err := os.Stat(filepath.Join(assetDir, "leftover.png")); err != nil {
+		t.Errorf("doctor deleted the leftover cache: %v", err)
+	}
+}
+
+// TestDoctorReportsNoLeftoverAssetCacheWhenAbsent is the ordinary case for
+// anyone who never ran a version with the image renderer.
+func TestDoctorReportsNoLeftoverAssetCacheWhenAbsent(t *testing.T) {
+	cfg := config.Default()
+	cfg.Path = filepath.Join(t.TempDir(), "missing.toml")
+	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+		Environ:           []string{"TERM=xterm-256color"},
+		CacheDir:          filepath.Join(t.TempDir(), "cache"),
+		ReachabilityProbe: func(context.Context) error { return nil },
+	})
+
+	if check := doctorCheck(t, report, "legacy asset cache"); check.Status != DoctorStatusOK {
+		t.Fatalf("legacy asset cache status = %q, want ok; detail=%q", check.Status, check.Detail)
+	}
+}
+
+// TestDoctorLeftoverAssetCachePathDoesNotLeakSecrets keeps the credential
+// redaction that the previous pruning check was covered for: the cache path is
+// user-supplied and can contain anything.
+func TestDoctorLeftoverAssetCachePathDoesNotLeakSecrets(t *testing.T) {
+	cacheDir := filepath.Join(t.TempDir(), "access_token=secret-token")
+	if err := os.MkdirAll(filepath.Join(cacheDir, "assets"), 0o700); err != nil {
+		t.Fatalf("MkdirAll fixture returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheDir, "assets", "x.bin"), []byte("stale"), 0o600); err != nil {
+		t.Fatalf("WriteFile fixture returned error: %v", err)
+	}
+
+	cfg := config.Default()
+	cfg.Path = filepath.Join(t.TempDir(), "missing.toml")
+	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+		Environ:           []string{"TERM=xterm-256color"},
+		CacheDir:          cacheDir,
+		ReachabilityProbe: func(context.Context) error { return nil },
+	})
 	assertDoctorDoesNotLeak(t, report, "access_token=secret-token", "secret-token")
 }
 
@@ -434,15 +449,6 @@ func assertDoctorDoesNotLeak(t *testing.T, report DoctorReport, secrets ...strin
 			}
 		}
 	}
-}
-
-func writeDoctorAssetFixture(t *testing.T, content string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "asset.bin")
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("WriteFile fixture returned error: %v", err)
-	}
-	return path
 }
 
 func TestDoctorWarnsOnUnknownLayoutAndBadgeModes(t *testing.T) {

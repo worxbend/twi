@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -80,7 +81,7 @@ func DoctorWithOptions(ctx context.Context, cfg config.Config, opts DoctorOption
 		colorCheck(opts.Environ),
 		mouseCheck(opts.Environ),
 		cacheCheck(opts.CacheDir),
-		cachePruningCheck(ctx, opts.CacheDir),
+		legacyAssetCacheCheck(opts.CacheDir),
 		featureModesCheck(cfg.Features),
 		streamStatusCheck(cfg),
 	}
@@ -313,39 +314,71 @@ func cacheCheck(cacheDir string) DoctorCheck {
 	return okCheck("cache directory", cacheDir+" writable")
 }
 
-func cachePruningCheck(ctx context.Context, cacheDir string) DoctorCheck {
-	assetDir, err := assetCacheDir(cacheDir)
+// legacyAssetCacheCheck reports a leftover image cache from a removed feature.
+//
+// twi used to download avatars, emotes and emoji and render them as inline
+// images, caching them on disk under <cache>/assets. That pipeline was removed
+// as a product decision (ADR 0003, superseded) and everything now renders as
+// text, so nothing writes there any more -- but an installation upgraded from
+// an older version can still be holding up to a few hundred megabytes of files
+// that will never be read again.
+//
+// This only reports. `twi doctor` is a diagnostic command, and deleting a
+// user's files as a side effect of asking for a report would be a surprise;
+// the check says what to remove and leaves the choice to the reader.
+func legacyAssetCacheCheck(cacheDir string) DoctorCheck {
+	assetDir, err := legacyAssetCacheDir(cacheDir)
 	if err != nil {
-		return warnCheck("asset cache pruning", fmt.Sprintf("path unavailable: %v", err))
+		return okCheck("legacy asset cache", "no cache directory to check")
 	}
-
-	pruneCtx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
-	defer cancel()
-
-	report, err := storage.NewDiskAssetCache(assetDir).Prune(pruneCtx, storage.PruneOptions{})
+	info, err := os.Stat(assetDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return okCheck("legacy asset cache", "none present")
+	}
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return warnCheck("asset cache pruning", fmt.Sprintf("%s cleanup timed out: %v; chat can still start", assetDir, err))
-		}
-		return warnCheck("asset cache pruning", fmt.Sprintf("%s cleanup failed: %v; fix cache directory permissions or remove stale cache files", assetDir, err))
+		return warnCheck("legacy asset cache", fmt.Sprintf("%s could not be read: %v", assetDir, err))
 	}
-	return okCheck("asset cache pruning", fmt.Sprintf(
-		"%s checked; scanned=%d pruned=%d expired=%d size=%d bytes=%d/%d",
-		report.Root,
-		report.EntriesScanned,
-		report.EntriesPruned,
-		report.ExpiredPruned,
-		report.SizePruned,
-		report.BytesAfter,
-		storage.DefaultAssetCacheMaxBytes,
-	))
+	if !info.IsDir() {
+		return okCheck("legacy asset cache", "none present")
+	}
+	bytes, files := directorySize(assetDir)
+	if files == 0 {
+		return okCheck("legacy asset cache", "none present")
+	}
+	return warnCheck("legacy asset cache", fmt.Sprintf(
+		"%s holds %d file(s), %d bytes left over from the removed image renderer; "+
+			"nothing reads them and the directory can be deleted",
+		assetDir, files, bytes))
 }
 
-func assetCacheDir(cacheDir string) (string, error) {
+// directorySize totals the regular files under root. An unreadable entry is
+// skipped rather than failing the whole check: this is advisory, and a partial
+// total still tells the reader there is something there.
+func directorySize(root string) (bytes int64, files int) {
+	_ = filepath.WalkDir(root, func(_ string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return nil //nolint:nilerr // advisory: skip what cannot be read
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil
+		}
+		bytes += info.Size()
+		files++
+		return nil
+	})
+	return bytes, files
+}
+
+func legacyAssetCacheDir(cacheDir string) (string, error) {
 	if strings.TrimSpace(cacheDir) != "" {
 		return filepath.Join(cacheDir, "assets"), nil
 	}
-	return storage.DefaultAssetCacheDir()
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "twi", "assets"), nil
 }
 
 // staleUsernameDetail explains a configured username that disagrees with the
