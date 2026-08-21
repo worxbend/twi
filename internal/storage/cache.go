@@ -321,48 +321,80 @@ func (c *DiskAssetCache) Prune(ctx context.Context, opts PruneOptions) (PruneRep
 		report.BytesBefore += entry.dataBytes
 	}
 
-	prune := make(map[string]pruneReason)
-	bytesAfterExpiration := report.BytesBefore
+	return removePrunedEntries(ctx, entries, selectPruneVictims(entries, opts, report.BytesBefore), report)
+}
+
+// selectPruneVictims decides which cached entries to delete, and why.
+//
+// Expired entries go first, unconditionally. If what remains would still put
+// the cache over its size budget, the least recently fetched of those are
+// added until it fits -- oldest first, with the directory name breaking ties
+// so the choice stays deterministic for a cache written in a single burst,
+// where timestamps collide.
+//
+// It performs no I/O. Keeping the decision separate from the deletion is what
+// lets the eviction policy be exercised directly, against a list of entries,
+// rather than by building a real cache directory and inspecting what survived.
+func selectPruneVictims(entries []pruneEntry, opts PruneOptions, totalBytes int64) map[string]pruneReason {
+	victims := make(map[string]pruneReason)
+	remainingBytes := totalBytes
 	for _, entry := range entries {
 		if entry.expired(opts) {
-			prune[entry.dir] = pruneExpired
-			bytesAfterExpiration -= entry.dataBytes
+			victims[entry.dir] = pruneExpired
+			remainingBytes -= entry.dataBytes
 		}
 	}
-
-	if opts.MaxBytes >= 0 && bytesAfterExpiration > opts.MaxBytes {
-		remaining := make([]pruneEntry, 0, len(entries))
-		for _, entry := range entries {
-			if _, ok := prune[entry.dir]; !ok {
-				remaining = append(remaining, entry)
-			}
-		}
-		slices.SortFunc(remaining, func(a, b pruneEntry) int {
-			if cmp := a.fetchedAt.Compare(b.fetchedAt); cmp != 0 {
-				return cmp
-			}
-			return strings.Compare(a.dir, b.dir)
-		})
-		for _, entry := range remaining {
-			if bytesAfterExpiration <= opts.MaxBytes {
-				break
-			}
-			prune[entry.dir] = pruneSize
-			bytesAfterExpiration -= entry.dataBytes
-		}
+	// A negative MaxBytes means "no size limit", so expiry was the whole
+	// policy and there is nothing further to choose.
+	if opts.MaxBytes < 0 || remainingBytes <= opts.MaxBytes {
+		return victims
 	}
 
+	survivors := make([]pruneEntry, 0, len(entries))
 	for _, entry := range entries {
-		reason, ok := prune[entry.dir]
-		if !ok {
+		if _, alreadyChosen := victims[entry.dir]; !alreadyChosen {
+			survivors = append(survivors, entry)
+		}
+	}
+	slices.SortFunc(survivors, func(a, b pruneEntry) int {
+		if cmp := a.fetchedAt.Compare(b.fetchedAt); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(a.dir, b.dir)
+	})
+	for _, entry := range survivors {
+		if remainingBytes <= opts.MaxBytes {
+			break
+		}
+		victims[entry.dir] = pruneSize
+		remainingBytes -= entry.dataBytes
+	}
+	return victims
+}
+
+// removePrunedEntries deletes the chosen entries and finishes the report.
+//
+// It stops at the first failure, and at a cancelled context, returning what it
+// managed to remove rather than discarding the tally: a partly pruned cache is
+// still a correct cache, and the caller is better off knowing how far it got
+// than being told only that something went wrong.
+func removePrunedEntries(ctx context.Context, entries []pruneEntry, victims map[string]pruneReason, report PruneReport) (out PruneReport, err error) {
+	// BytesAfter always follows from the other two, so it is settled on the
+	// way out rather than at each of the three points this can return.
+	defer func() { out.BytesAfter = out.BytesBefore - out.BytesPruned }()
+
+	// Iterating entries rather than victims keeps the deletion order stable,
+	// which is what makes it predictable which entries survive a failure
+	// part-way through.
+	for _, entry := range entries {
+		reason, chosen := victims[entry.dir]
+		if !chosen {
 			continue
 		}
 		if err := ctx.Err(); err != nil {
-			report.BytesAfter = report.BytesBefore - report.BytesPruned
 			return report, err
 		}
 		if err := os.RemoveAll(entry.dir); err != nil {
-			report.BytesAfter = report.BytesBefore - report.BytesPruned
 			return report, fmt.Errorf("remove cached asset: %w", err)
 		}
 		report.EntriesPruned++
@@ -374,7 +406,6 @@ func (c *DiskAssetCache) Prune(ctx context.Context, opts PruneOptions) (PruneRep
 			report.SizePruned++
 		}
 	}
-	report.BytesAfter = report.BytesBefore - report.BytesPruned
 	return report, nil
 }
 

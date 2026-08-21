@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -912,5 +913,106 @@ func TestProbeWritableDir(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("probe left entries behind: %#v", entries)
+	}
+}
+
+// TestSelectPruneVictims exercises the cache eviction policy directly.
+//
+// These cases used to be reachable only by writing a real cache directory and
+// inspecting what survived, which made the size-budget cases in particular
+// awkward enough that they went untested. Splitting the decision away from the
+// deletion made them ordinary table tests.
+func TestSelectPruneVictims(t *testing.T) {
+	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	ago := func(d time.Duration) time.Time { return now.Add(-d) }
+
+	entry := func(dir string, bytes int64, fetched time.Time, expires time.Time) pruneEntry {
+		return pruneEntry{dir: dir, dataBytes: bytes, fetchedAt: fetched, expiresAt: expires, metadataValid: true}
+	}
+
+	tests := []struct {
+		name    string
+		entries []pruneEntry
+		opts    PruneOptions
+		want    map[string]pruneReason
+	}{
+		{
+			name: "nothing expired and within budget prunes nothing",
+			entries: []pruneEntry{
+				entry("a", 10, ago(time.Hour), now.Add(time.Hour)),
+				entry("b", 10, ago(time.Hour), now.Add(time.Hour)),
+			},
+			opts: PruneOptions{Now: now, MaxBytes: 100},
+			want: map[string]pruneReason{},
+		},
+		{
+			name: "an entry past its expiry is pruned regardless of budget",
+			entries: []pruneEntry{
+				entry("stale", 10, ago(time.Hour), ago(time.Minute)),
+				entry("fresh", 10, ago(time.Hour), now.Add(time.Hour)),
+			},
+			opts: PruneOptions{Now: now, MaxBytes: 1000},
+			want: map[string]pruneReason{"stale": pruneExpired},
+		},
+		{
+			name: "over budget evicts the least recently fetched first",
+			entries: []pruneEntry{
+				entry("newest", 40, ago(time.Minute), now.Add(time.Hour)),
+				entry("oldest", 40, ago(10*time.Hour), now.Add(time.Hour)),
+				entry("middle", 40, ago(time.Hour), now.Add(time.Hour)),
+			},
+			opts: PruneOptions{Now: now, MaxBytes: 80},
+			want: map[string]pruneReason{"oldest": pruneSize},
+		},
+		{
+			name: "expiry is counted before deciding the cache is over budget",
+			entries: []pruneEntry{
+				entry("stale", 60, ago(10*time.Hour), ago(time.Minute)),
+				entry("fresh", 40, ago(time.Hour), now.Add(time.Hour)),
+			},
+			// 100 bytes total, but dropping the expired entry leaves 40,
+			// which already fits, so nothing is evicted for size.
+			opts: PruneOptions{Now: now, MaxBytes: 50},
+			want: map[string]pruneReason{"stale": pruneExpired},
+		},
+		{
+			name: "a negative MaxBytes means no size limit",
+			entries: []pruneEntry{
+				entry("big", 1<<30, ago(time.Hour), now.Add(time.Hour)),
+			},
+			opts: PruneOptions{Now: now, MaxBytes: -1},
+			want: map[string]pruneReason{},
+		},
+		{
+			name: "entries fetched at the same instant break ties by name",
+			entries: []pruneEntry{
+				entry("bbb", 40, ago(time.Hour), now.Add(time.Hour)),
+				entry("aaa", 40, ago(time.Hour), now.Add(time.Hour)),
+			},
+			opts: PruneOptions{Now: now, MaxBytes: 40},
+			want: map[string]pruneReason{"aaa": pruneSize},
+		},
+		{
+			name: "MaxAge expires an entry that carries no explicit expiry",
+			entries: []pruneEntry{
+				entry("old", 10, ago(48*time.Hour), time.Time{}),
+				entry("new", 10, ago(time.Minute), time.Time{}),
+			},
+			opts: PruneOptions{Now: now, MaxAge: 24 * time.Hour, MaxBytes: 1000},
+			want: map[string]pruneReason{"old": pruneExpired},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var total int64
+			for _, e := range tt.entries {
+				total += e.dataBytes
+			}
+			got := selectPruneVictims(tt.entries, tt.opts, total)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("selectPruneVictims() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
