@@ -53,20 +53,6 @@ type ChannelManager interface {
 	ModifyChannelInformation(ctx context.Context, broadcasterID string, update ChannelInfoUpdate) error
 }
 
-// HelixChannelsClientConfig configures the Twitch Helix channel info adapter.
-// Endpoint and HTTPClient are injectable for deterministic fake HTTP tests;
-// zero values use Twitch's production endpoint and the default HTTP client.
-type HelixChannelsClientConfig struct {
-	// OAuthTokenSource, when set, is read on every request so a token
-	// refreshed mid-session takes effect. OAuthToken is the static fallback
-	// used when no source is supplied.
-	OAuthTokenSource func() string
-	Endpoint         string
-	HTTPClient       *http.Client
-	ClientID         string
-	OAuthToken       string
-}
-
 // HelixChannelsClient reads and updates channel info through Twitch Helix
 // "Get/Modify Channel Information".
 type HelixChannelsClient struct {

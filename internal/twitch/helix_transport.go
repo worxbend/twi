@@ -127,3 +127,37 @@ func (t helixTransport) responseError(resp *http.Response, labels helixErrorLabe
 func isHelixSuccess(resp *http.Response) bool {
 	return resp.StatusCode >= 200 && resp.StatusCode < 300
 }
+
+// HelixClientConfig configures a Helix adapter.
+//
+// Every adapter in this package takes exactly these settings, so there is one
+// struct and the per-adapter names below are aliases for it. The struct used
+// to be declared nine times, identically down to its doc comment, which meant
+// nine edits to add a setting.
+type HelixClientConfig struct {
+	// OAuthTokenSource, when set, is read on every request so a token
+	// refreshed mid-session takes effect. OAuthToken is the static fallback
+	// used when no source is supplied.
+	OAuthTokenSource func() string
+	// Endpoint overrides the Twitch URL the adapter calls, which is how a
+	// test points one at its own server. It defaults to the real endpoint.
+	Endpoint   string
+	HTTPClient *http.Client
+	ClientID   string
+	OAuthToken string
+}
+
+// The per-adapter configuration names. They are aliases rather than distinct
+// types: the settings are the same for every adapter, and the names exist to
+// make a construction site say which adapter it is building.
+type (
+	HelixChannelsClientConfig         = HelixClientConfig
+	HelixClipsClientConfig            = HelixClientConfig
+	HelixFollowedChannelsClientConfig = HelixClientConfig
+	HelixFollowersClientConfig        = HelixClientConfig
+	HelixGamesClientConfig            = HelixClientConfig
+	HelixMarkersClientConfig          = HelixClientConfig
+	HelixStreamsClientConfig          = HelixClientConfig
+	HelixSubscriptionsClientConfig    = HelixClientConfig
+	HelixUsersClientConfig            = HelixClientConfig
+)

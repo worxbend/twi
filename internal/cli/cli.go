@@ -131,21 +131,64 @@ var newLiveClientOptionsWithHolder = func(cfg config.Config, holder *credentialH
 	}
 }
 
+const (
+	// helixInteractiveTimeout bounds the Helix calls made while someone is
+	// waiting on them -- emote search and the LIVE indicator -- where a slow
+	// answer is worse than no answer.
+	helixInteractiveTimeout = 2 * time.Second
+	// helixBackgroundTimeout bounds the rest, which run behind the UI and
+	// can afford to wait a little longer for a slow network.
+	helixBackgroundTimeout = 5 * time.Second
+)
+
+// twitchAPIConfigured reports whether the credentials every Helix adapter
+// needs are present.
+//
+// When they are not, the adapters are left nil and the features built on them
+// stay quietly switched off, which is why every factory below checks this
+// before constructing anything: twi is usable for reading chat with no Twitch
+// API credentials at all, and it should not fill the screen with 401s to say
+// so.
+func twitchAPIConfigured(cfg config.Config) bool {
+	return strings.TrimSpace(cfg.Twitch.ClientID) != "" &&
+		strings.TrimSpace(cfg.Twitch.OAuthToken) != ""
+}
+
+// newHelixAdapter builds one Helix-backed adapter, or returns a nil T when
+// Twitch API credentials are not configured.
+//
+// The eight factories below were the same three steps each -- check the
+// credentials, fill in the same four settings, call the constructor -- so the
+// steps live here and each factory now supplies only what differs: which
+// constructor to call and how long to let its requests run.
+//
+// Returning T's zero value matters: T is always an interface here, and its
+// zero value is a nil interface. Returning a nil *HelixSomethingClient
+// instead would produce an interface that is non-nil but unusable, and every
+// `if adapter == nil` guard in the app would stop working.
+func newHelixAdapter[T any](cfg config.Config, tokenSource func() string, timeout time.Duration, build func(twitch.HelixClientConfig) T) T {
+	var unavailable T
+	if !twitchAPIConfigured(cfg) {
+		return unavailable
+	}
+	return build(twitch.HelixClientConfig{
+		HTTPClient:       &http.Client{Timeout: timeout},
+		ClientID:         cfg.Twitch.ClientID,
+		OAuthToken:       cfg.Twitch.OAuthToken,
+		OAuthTokenSource: tokenSource,
+	})
+}
+
 // newFollowedChannelLookup wires the /channels picker's autocomplete to the
 // user's real follow list, gated on Twitch API credentials
 // (user:read:follows is requested at login but Twitch still enforces it
 // per-request; tokens issued before that scope existed simply fall back to
 // already-open and configured channels).
 func newFollowedChannelLookup(cfg config.Config, tokenSource func() string) twitch.FollowedChannelLookup {
-	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
-		return nil
-	}
-	return twitch.NewHelixFollowedChannelsClient(twitch.HelixFollowedChannelsClientConfig{
-		HTTPClient:       &http.Client{Timeout: 5 * time.Second},
-		ClientID:         cfg.Twitch.ClientID,
-		OAuthToken:       cfg.Twitch.OAuthToken,
-		OAuthTokenSource: tokenSource,
-	})
+	return newHelixAdapter(cfg, tokenSource, helixBackgroundTimeout,
+		func(c twitch.HelixClientConfig) twitch.FollowedChannelLookup {
+			return twitch.NewHelixFollowedChannelsClient(c)
+		})
 }
 
 // newChannelManager wires the Stream Info tab's Get/Modify Channel
@@ -154,104 +197,57 @@ func newFollowedChannelLookup(cfg config.Config, tokenSource func() string) twit
 // still enforces it per-request, so a missing grant simply surfaces as an
 // API error on the tab rather than being pre-checked here).
 func newChannelManager(cfg config.Config, tokenSource func() string) twitch.ChannelManager {
-	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
-		return nil
-	}
-	return twitch.NewHelixChannelsClient(twitch.HelixChannelsClientConfig{
-		HTTPClient:       &http.Client{Timeout: 5 * time.Second},
-		ClientID:         cfg.Twitch.ClientID,
-		OAuthToken:       cfg.Twitch.OAuthToken,
-		OAuthTokenSource: tokenSource,
-	})
+	return newHelixAdapter(cfg, tokenSource, helixBackgroundTimeout,
+		func(c twitch.HelixClientConfig) twitch.ChannelManager { return twitch.NewHelixChannelsClient(c) })
 }
 
 // newGameLookup resolves a Stream Info category name to its Twitch game ID
 // when the user changes the category field.
 func newGameLookup(cfg config.Config, tokenSource func() string) twitch.GameLookup {
-	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
-		return nil
-	}
-	return twitch.NewHelixGamesClient(twitch.HelixGamesClientConfig{
-		HTTPClient:       &http.Client{Timeout: 5 * time.Second},
-		ClientID:         cfg.Twitch.ClientID,
-		OAuthToken:       cfg.Twitch.OAuthToken,
-		OAuthTokenSource: tokenSource,
-	})
+	return newHelixAdapter(cfg, tokenSource, helixBackgroundTimeout,
+		func(c twitch.HelixClientConfig) twitch.GameLookup { return twitch.NewHelixGamesClient(c) })
 }
 
 // newUserLookup resolves Twitch user IDs by login: the logged-in user's own
 // ID for Stream Info's Helix calls, and any active channel's broadcaster ID
 // for channel-specific emote autocomplete.
 func newUserLookup(cfg config.Config, tokenSource func() string) twitch.UserLookup {
-	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
-		return nil
-	}
-	return twitch.NewHelixUsersClient(twitch.HelixUsersClientConfig{
-		HTTPClient:       &http.Client{Timeout: 2 * time.Second},
-		ClientID:         cfg.Twitch.ClientID,
-		OAuthToken:       cfg.Twitch.OAuthToken,
-		OAuthTokenSource: tokenSource,
-	})
+	return newHelixAdapter(cfg, tokenSource, helixInteractiveTimeout,
+		func(c twitch.HelixClientConfig) twitch.UserLookup { return twitch.NewHelixUsersClient(c) })
 }
 
 // newMarkerManager wires the Misc tab's Create/Get Stream Marker calls to
 // real Twitch Helix. Uses the same channel:manage:broadcast scope already
 // requested for Stream Info, so no additional login scope is needed.
 func newMarkerManager(cfg config.Config, tokenSource func() string) twitch.MarkerManager {
-	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
-		return nil
-	}
-	return twitch.NewHelixMarkersClient(twitch.HelixMarkersClientConfig{
-		HTTPClient:       &http.Client{Timeout: 5 * time.Second},
-		ClientID:         cfg.Twitch.ClientID,
-		OAuthToken:       cfg.Twitch.OAuthToken,
-		OAuthTokenSource: tokenSource,
-	})
+	return newHelixAdapter(cfg, tokenSource, helixBackgroundTimeout,
+		func(c twitch.HelixClientConfig) twitch.MarkerManager { return twitch.NewHelixMarkersClient(c) })
 }
 
 // newClipManager wires the /clip chat command's Create Clip calls to real
 // Twitch Helix. Requires the clips:edit scope, requested at login alongside
 // the other tab scopes; Twitch still enforces it per-request.
 func newClipManager(cfg config.Config, tokenSource func() string) twitch.ClipManager {
-	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
-		return nil
-	}
-	return twitch.NewHelixClipsClient(twitch.HelixClipsClientConfig{
-		HTTPClient:       &http.Client{Timeout: 5 * time.Second},
-		ClientID:         cfg.Twitch.ClientID,
-		OAuthToken:       cfg.Twitch.OAuthToken,
-		OAuthTokenSource: tokenSource,
-	})
+	return newHelixAdapter(cfg, tokenSource, helixBackgroundTimeout,
+		func(c twitch.HelixClientConfig) twitch.ClipManager { return twitch.NewHelixClipsClient(c) })
 }
 
 // newFollowerLookup wires the status line's follower count to real Twitch
 // Helix, gated on Twitch API credentials (moderator:read:followers is
 // requested at login but Twitch still enforces it per-request).
 func newFollowerLookup(cfg config.Config, tokenSource func() string) twitch.FollowerLookup {
-	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
-		return nil
-	}
-	return twitch.NewHelixFollowersClient(twitch.HelixFollowersClientConfig{
-		HTTPClient:       &http.Client{Timeout: 5 * time.Second},
-		ClientID:         cfg.Twitch.ClientID,
-		OAuthToken:       cfg.Twitch.OAuthToken,
-		OAuthTokenSource: tokenSource,
-	})
+	return newHelixAdapter(cfg, tokenSource, helixBackgroundTimeout,
+		func(c twitch.HelixClientConfig) twitch.FollowerLookup { return twitch.NewHelixFollowersClient(c) })
 }
 
 // newSubscriptionLookup wires the status line's subscriber count to real
 // Twitch Helix, gated on Twitch API credentials (channel:read:subscriptions
 // is requested at login but Twitch still enforces it per-request).
 func newSubscriptionLookup(cfg config.Config, tokenSource func() string) twitch.SubscriptionLookup {
-	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
-		return nil
-	}
-	return twitch.NewHelixSubscriptionsClient(twitch.HelixSubscriptionsClientConfig{
-		HTTPClient:       &http.Client{Timeout: 5 * time.Second},
-		ClientID:         cfg.Twitch.ClientID,
-		OAuthToken:       cfg.Twitch.OAuthToken,
-		OAuthTokenSource: tokenSource,
-	})
+	return newHelixAdapter(cfg, tokenSource, helixBackgroundTimeout,
+		func(c twitch.HelixClientConfig) twitch.SubscriptionLookup {
+			return twitch.NewHelixSubscriptionsClient(c)
+		})
 }
 
 // newEmoteIndex wires Ctrl+E emote search to real Twitch Helix emote data. EmoteIndex is in-memory only and needs no cache,
@@ -260,11 +256,11 @@ func newEmoteIndex(cfg config.Config, tokenSource func() string) *assets.EmoteIn
 	if strings.EqualFold(strings.TrimSpace(cfg.Features.EmoteAutocompleteMode), "off") {
 		return nil
 	}
-	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
+	if !twitchAPIConfigured(cfg) {
 		return nil
 	}
 	return assets.NewEmoteIndex(twitch.NewHelixChatAssetsClient(twitch.HelixChatAssetsClientConfig{
-		HTTPClient:       &http.Client{Timeout: 2 * time.Second},
+		HTTPClient:       &http.Client{Timeout: helixInteractiveTimeout},
 		ClientID:         cfg.Twitch.ClientID,
 		OAuthToken:       cfg.Twitch.OAuthToken,
 		OAuthTokenSource: tokenSource,
@@ -277,15 +273,8 @@ func newStreamStatusResolver(cfg config.Config, tokenSource func() string) app.S
 	if strings.EqualFold(strings.TrimSpace(cfg.Features.StreamStatusMode), "off") {
 		return nil
 	}
-	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
-		return nil
-	}
-	return twitch.NewHelixStreamsClient(twitch.HelixStreamsClientConfig{
-		HTTPClient:       &http.Client{Timeout: 2 * time.Second},
-		ClientID:         cfg.Twitch.ClientID,
-		OAuthToken:       cfg.Twitch.OAuthToken,
-		OAuthTokenSource: tokenSource,
-	})
+	return newHelixAdapter(cfg, tokenSource, helixInteractiveTimeout,
+		func(c twitch.HelixClientConfig) app.StreamStatusResolver { return twitch.NewHelixStreamsClient(c) })
 }
 
 var runLiveChat = app.RunClientWithOptions

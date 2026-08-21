@@ -2352,3 +2352,69 @@ func TestRefreshCapabilityWarningKeepsSecretsOut(t *testing.T) {
 		}
 	}
 }
+
+// TestHelixFactoriesReturnNilWithoutCredentials pins the contract the app
+// relies on: with no Twitch API credentials, every Helix-backed adapter is a
+// genuinely nil interface.
+//
+// This is easy to break. Returning a typed nil pointer instead -- say
+// (*twitch.HelixClipsClient)(nil) -- produces an interface that is not equal
+// to nil, so every `if m.clipManager == nil` guard in the app would silently
+// start passing and the feature would panic instead of staying switched off.
+func TestHelixFactoriesReturnNilWithoutCredentials(t *testing.T) {
+	var empty config.Config
+	tokenSource := func() string { return "" }
+
+	if got := newFollowedChannelLookup(empty, tokenSource); got != nil {
+		t.Errorf("newFollowedChannelLookup = %#v, want a nil interface", got)
+	}
+	if got := newChannelManager(empty, tokenSource); got != nil {
+		t.Errorf("newChannelManager = %#v, want a nil interface", got)
+	}
+	if got := newGameLookup(empty, tokenSource); got != nil {
+		t.Errorf("newGameLookup = %#v, want a nil interface", got)
+	}
+	if got := newUserLookup(empty, tokenSource); got != nil {
+		t.Errorf("newUserLookup = %#v, want a nil interface", got)
+	}
+	if got := newMarkerManager(empty, tokenSource); got != nil {
+		t.Errorf("newMarkerManager = %#v, want a nil interface", got)
+	}
+	if got := newClipManager(empty, tokenSource); got != nil {
+		t.Errorf("newClipManager = %#v, want a nil interface", got)
+	}
+	if got := newFollowerLookup(empty, tokenSource); got != nil {
+		t.Errorf("newFollowerLookup = %#v, want a nil interface", got)
+	}
+	if got := newSubscriptionLookup(empty, tokenSource); got != nil {
+		t.Errorf("newSubscriptionLookup = %#v, want a nil interface", got)
+	}
+	if got := newStreamStatusResolver(empty, tokenSource); got != nil {
+		t.Errorf("newStreamStatusResolver = %#v, want a nil interface", got)
+	}
+	if got := newEmoteIndex(empty, tokenSource); got != nil {
+		t.Errorf("newEmoteIndex = %#v, want nil", got)
+	}
+}
+
+// TestHelixFactoriesBuildWithCredentials is the other half: with credentials
+// present, each factory actually returns an adapter.
+func TestHelixFactoriesBuildWithCredentials(t *testing.T) {
+	var cfg config.Config
+	cfg.Twitch.ClientID = "client-id"
+	cfg.Twitch.OAuthToken = "oauth:token"
+	tokenSource := func() string { return "oauth:token" }
+
+	if got := newChannelManager(cfg, tokenSource); got == nil {
+		t.Error("newChannelManager = nil, want an adapter")
+	}
+	if got := newClipManager(cfg, tokenSource); got == nil {
+		t.Error("newClipManager = nil, want an adapter")
+	}
+	if got := newStreamStatusResolver(cfg, tokenSource); got == nil {
+		t.Error("newStreamStatusResolver = nil, want an adapter")
+	}
+	if got := newEmoteIndex(cfg, tokenSource); got == nil {
+		t.Error("newEmoteIndex = nil, want an emote index")
+	}
+}

@@ -40,21 +40,6 @@ type MarkerManager interface {
 	GetStreamMarkers(ctx context.Context, userID string, limit int) ([]StreamMarker, error)
 }
 
-// HelixMarkersClientConfig configures the Twitch Helix stream markers
-// adapter. Endpoint and HTTPClient are injectable for deterministic fake
-// HTTP tests; zero values use Twitch's production endpoint and the default
-// HTTP client.
-type HelixMarkersClientConfig struct {
-	// OAuthTokenSource, when set, is read on every request so a token
-	// refreshed mid-session takes effect. OAuthToken is the static fallback
-	// used when no source is supplied.
-	OAuthTokenSource func() string
-	Endpoint         string
-	HTTPClient       *http.Client
-	ClientID         string
-	OAuthToken       string
-}
-
 // HelixMarkersClient creates and lists stream markers through Twitch Helix
 // "Create/Get Stream Markers".
 type HelixMarkersClient struct {

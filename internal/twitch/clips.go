@@ -27,20 +27,6 @@ type ClipManager interface {
 	CreateClip(ctx context.Context, broadcasterID string) (Clip, error)
 }
 
-// HelixClipsClientConfig configures the Twitch Helix clips adapter. Endpoint
-// and HTTPClient are injectable for deterministic fake HTTP tests; zero
-// values use Twitch's production endpoint and the default HTTP client.
-type HelixClipsClientConfig struct {
-	// OAuthTokenSource, when set, is read on every request so a token
-	// refreshed mid-session takes effect. OAuthToken is the static fallback
-	// used when no source is supplied.
-	OAuthTokenSource func() string
-	Endpoint         string
-	HTTPClient       *http.Client
-	ClientID         string
-	OAuthToken       string
-}
-
 // HelixClipsClient creates clips through Twitch Helix "Create Clip".
 type HelixClipsClient struct {
 	endpoint string

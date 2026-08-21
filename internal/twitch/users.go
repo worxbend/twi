@@ -35,20 +35,6 @@ type UserIdentity struct {
 	ProfileImageURL string
 }
 
-// HelixUsersClientConfig configures the Twitch Helix Get Users adapter.
-// Endpoint, HTTPClient, and Now are injectable for deterministic fake HTTP
-// tests; zero values use Twitch's production endpoint and default HTTP client.
-type HelixUsersClientConfig struct {
-	// OAuthTokenSource, when set, is read on every request so a token
-	// refreshed mid-session takes effect. OAuthToken is the static fallback
-	// used when no source is supplied.
-	OAuthTokenSource func() string
-	Endpoint         string
-	HTTPClient       *http.Client
-	ClientID         string
-	OAuthToken       string
-}
-
 // HelixUsersClient resolves Twitch users through Helix Get Users.
 type HelixUsersClient struct {
 	endpoint string

@@ -25,20 +25,6 @@ type StreamLookup interface {
 	GetStreams(ctx context.Context, logins []string) ([]StreamInfo, error)
 }
 
-// HelixStreamsClientConfig configures the Twitch Helix Get Streams adapter.
-// Endpoint, HTTPClient are injectable for deterministic fake HTTP tests; zero
-// values use Twitch's production endpoint and the default HTTP client.
-type HelixStreamsClientConfig struct {
-	// OAuthTokenSource, when set, is read on every request so a token
-	// refreshed mid-session takes effect. OAuthToken is the static fallback
-	// used when no source is supplied.
-	OAuthTokenSource func() string
-	Endpoint         string
-	HTTPClient       *http.Client
-	ClientID         string
-	OAuthToken       string
-}
-
 // HelixStreamsClient resolves broadcast status through Twitch Helix Get
 // Streams.
 type HelixStreamsClient struct {

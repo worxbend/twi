@@ -30,21 +30,6 @@ type SubscriptionLookup interface {
 	GetBroadcasterSubscriptions(ctx context.Context, broadcasterID string, limit int) (SubscriptionsPage, error)
 }
 
-// HelixSubscriptionsClientConfig configures the Twitch Helix broadcaster
-// subscriptions adapter. Endpoint and HTTPClient are injectable for
-// deterministic fake HTTP tests; zero values use Twitch's production
-// endpoint and the default HTTP client.
-type HelixSubscriptionsClientConfig struct {
-	// OAuthTokenSource, when set, is read on every request so a token
-	// refreshed mid-session takes effect. OAuthToken is the static fallback
-	// used when no source is supplied.
-	OAuthTokenSource func() string
-	Endpoint         string
-	HTTPClient       *http.Client
-	ClientID         string
-	OAuthToken       string
-}
-
 // HelixSubscriptionsClient resolves subscriber counts through Twitch Helix
 // "Get Broadcaster Subscriptions".
 type HelixSubscriptionsClient struct {
