@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/twitch/helix"
 )
 
 type appFakeMarkerManager struct {
@@ -170,7 +171,7 @@ func TestMiscCreateMarkerFailureIsUserFriendlyOnMissingScope(t *testing.T) {
 
 	cfg := config.Default()
 	model := newMockModel("example", cfg)
-	model.markerManager = twitch.NewHelixMarkersClient(twitch.HelixMarkersClientConfig{Endpoint: server.URL})
+	model.markerManager = helix.NewMarkersClient(helix.MarkersClientConfig{Endpoint: server.URL})
 	model.selfBroadcasterID = "123"
 
 	cmd := model.scheduleCreateMarker("")
@@ -195,7 +196,7 @@ func TestMiscLoadFailureShowsNotLiveHintOnNoVideoFound(t *testing.T) {
 	model := newMockModel("example", cfg)
 	model.width, model.height = 88, 20
 	model.activeTab = tabMisc
-	model.markerManager = twitch.NewHelixMarkersClient(twitch.HelixMarkersClientConfig{Endpoint: server.URL})
+	model.markerManager = helix.NewMarkersClient(helix.MarkersClientConfig{Endpoint: server.URL})
 	model.selfBroadcasterID = "123"
 
 	loaded := model.scheduleMiscLoad()().(miscMarkersLoadedMsg)

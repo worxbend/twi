@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -207,7 +208,8 @@ func TestFollowedChannelsMissingScopeReportsRecoveryHint(t *testing.T) {
 	model.channelPicker = channelPickerState{open: true, loading: true}
 
 	model.applyFollowedChannels(followedChannelsResolvedMsg{
-		err: &twitch.ChannelAPIError{StatusCode: 401},
+		err: twitch.NewChannelAPIError(
+			twitch.ChannelAPIMissingScope, 401, errors.New("twitch Get Followed Channels returned HTTP 401")),
 	})
 	if model.channelPicker.loading {
 		t.Fatal("loading = true after a failed lookup, want false")

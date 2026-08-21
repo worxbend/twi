@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/twitch/helix"
 )
 
 type appFakeChannelManager struct {
@@ -403,7 +404,7 @@ func TestStreamInfoMissingScopeErrorIsUserFriendly(t *testing.T) {
 	model := newMockModel("example", cfg)
 	model.width, model.height = 88, 20
 	model.activeTab = tabStreamInfo
-	model.channelManager = twitch.NewHelixChannelsClient(twitch.HelixChannelsClientConfig{Endpoint: server.URL})
+	model.channelManager = helix.NewChannelsClient(helix.ChannelsClientConfig{Endpoint: server.URL})
 	model.selfBroadcasterID = "123"
 
 	loaded := model.scheduleStreamInfoLoad()().(streamInfoLoadedMsg)

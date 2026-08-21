@@ -20,6 +20,7 @@ import (
 	"github.com/worxbend/twi/internal/debuglog"
 	"github.com/worxbend/twi/internal/storage"
 	"github.com/worxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/twitch/irc"
 )
 
 func TestMain(m *testing.M) {
@@ -1428,7 +1429,7 @@ func TestPersistRefreshedIRCCredentialsSavesThroughStoreWithEffectiveConfig(t *t
 		Store:   store,
 		Present: true,
 		Record:  base,
-	}, twitch.OAuthRefresh{
+	}, irc.OAuthRefresh{
 		AccessToken:  auth.NewSecret("oauth:new-access-token"),
 		RefreshToken: auth.NewSecret("new-refresh-token"),
 		TokenType:    "bearer",
@@ -1469,7 +1470,7 @@ func TestPersistRefreshedIRCCredentialsUnavailableAndFailureErrorsAreRedacted(t 
 	cfg.Twitch.OAuthToken = "oauth:configured-access-token"
 	cfg.Twitch.RefreshToken = "configured-refresh-token"
 	cfg.Twitch.ClientSecret = "configured-client-secret"
-	refreshed := twitch.OAuthRefresh{
+	refreshed := irc.OAuthRefresh{
 		AccessToken:  auth.NewSecret("oauth:new-access-token"),
 		RefreshToken: auth.NewSecret("new-refresh-token"),
 		RefreshedAt:  time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC),
@@ -2358,7 +2359,7 @@ func TestRefreshCapabilityWarningKeepsSecretsOut(t *testing.T) {
 // genuinely nil interface.
 //
 // This is easy to break. Returning a typed nil pointer instead -- say
-// (*twitch.HelixClipsClient)(nil) -- produces an interface that is not equal
+// (*helix.ClipsClient)(nil) -- produces an interface that is not equal
 // to nil, so every `if m.clipManager == nil` guard in the app would silently
 // start passing and the feature would panic instead of staying switched off.
 func TestHelixFactoriesReturnNilWithoutCredentials(t *testing.T) {

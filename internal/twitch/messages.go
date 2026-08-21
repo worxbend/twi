@@ -6,6 +6,11 @@ import (
 	"time"
 )
 
+// MaxChatMessageRunes is Twitch's per-message limit. Longer messages are
+// rejected by the server, so twi truncates rather than sending something it
+// knows will be dropped, and the composer counts down to it as you type.
+const MaxChatMessageRunes = 500
+
 type ChatMessage struct {
 	ID          string
 	Channel     string

@@ -7,7 +7,7 @@ import (
 	"github.com/worxbend/twi/internal/auth"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/debuglog"
-	"github.com/worxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/twitch/irc"
 )
 
 func TestCredentialHolderReturnsInitialCredentials(t *testing.T) {
@@ -30,7 +30,7 @@ func TestCredentialHolderAppliesRefresh(t *testing.T) {
 		RefreshToken: "refresh-old",
 		ClientID:     "client-id",
 	})
-	holder.applyRefresh(twitch.OAuthRefresh{
+	holder.applyRefresh(irc.OAuthRefresh{
 		AccessToken:  auth.NewSecret("oauth:new"),
 		RefreshToken: auth.NewSecret("refresh-new"),
 	})
@@ -56,7 +56,7 @@ func TestCredentialHolderKeepsRefreshTokenWhenNotRotated(t *testing.T) {
 		OAuthToken:   "oauth:old",
 		RefreshToken: "refresh-keep",
 	})
-	holder.applyRefresh(twitch.OAuthRefresh{
+	holder.applyRefresh(irc.OAuthRefresh{
 		AccessToken: auth.NewSecret("oauth:new"),
 	})
 
@@ -83,7 +83,7 @@ func TestTransportFactoryUsesRefreshedCredentials(t *testing.T) {
 	holder := newCredentialHolder(cfg.Twitch)
 
 	// A refresh lands mid-session, rotating both tokens.
-	holder.applyRefresh(twitch.OAuthRefresh{
+	holder.applyRefresh(irc.OAuthRefresh{
 		AccessToken:  auth.NewSecret("oauth:fresh"),
 		RefreshToken: auth.NewSecret("refresh-fresh"),
 	})
@@ -111,7 +111,7 @@ func TestTransportRefreshCallbackUpdatesHolder(t *testing.T) {
 	ircCfg := liveIRCConfig(cfg, holder, debuglog.Logger{}, credentialLoadStatus{})
 	// Persisting fails here (no credential store), which must not stop the
 	// in-memory update: the next reconnect reads the holder, not the disk.
-	_ = ircCfg.OnOAuthRefresh(context.Background(), twitch.OAuthRefresh{
+	_ = ircCfg.OnOAuthRefresh(context.Background(), irc.OAuthRefresh{
 		AccessToken:  auth.NewSecret("oauth:fresh"),
 		RefreshToken: auth.NewSecret("refresh-fresh"),
 	})
@@ -130,7 +130,7 @@ func TestCredentialHolderIsSafeForConcurrentUse(t *testing.T) {
 	go func() {
 		defer close(done)
 		for range 200 {
-			holder.applyRefresh(twitch.OAuthRefresh{AccessToken: auth.NewSecret("oauth:next")})
+			holder.applyRefresh(irc.OAuthRefresh{AccessToken: auth.NewSecret("oauth:next")})
 		}
 	}()
 	for range 200 {

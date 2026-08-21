@@ -9,10 +9,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
-	irc "github.com/gempir/go-twitch-irc/v4"
+	gempir "github.com/gempir/go-twitch-irc/v4"
 	"github.com/muesli/termenv"
 	"github.com/worxbend/twi/internal/theme"
 	"github.com/worxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/twitch/irc"
 )
 
 // forceColorProfile pins lipgloss's default renderer to TrueColor for the
@@ -641,10 +642,10 @@ func countKind(rows []Row, kind FragmentKind) int {
 func TestChatMessageEscapeSequencesNeverReachTheTerminal(t *testing.T) {
 	hostile := "hey \x1b[2J\x1b]0;pwned\x07 there\x1b[31m"
 
-	event := twitch.NormalizeIRCPrivateMessage(irc.PrivateMessage{
+	event := irc.NormalizePrivateMessage(gempir.PrivateMessage{
 		ID:      "abc",
 		Channel: "example",
-		User:    irc.User{Name: "chatter", DisplayName: "chat\x1b[5Bter"},
+		User:    gempir.User{Name: "chatter", DisplayName: "chat\x1b[5Bter"},
 		Message: hostile,
 		Time:    time.Date(2026, 7, 3, 9, 0, 0, 0, time.UTC),
 	})

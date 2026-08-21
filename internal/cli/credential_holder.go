@@ -4,7 +4,7 @@ import (
 	"sync"
 
 	"github.com/worxbend/twi/internal/config"
-	"github.com/worxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/twitch/irc"
 )
 
 // credentialHolder is the current Twitch credentials for the process.
@@ -43,7 +43,7 @@ func (h *credentialHolder) current() config.TwitchConfig {
 // Twitch may or may not rotate the refresh token; when it does not, the
 // response carries an empty one and the existing value stays valid, so an
 // empty field must never overwrite what is held.
-func (h *credentialHolder) applyRefresh(refreshed twitch.OAuthRefresh) {
+func (h *credentialHolder) applyRefresh(refreshed irc.OAuthRefresh) {
 	if h == nil {
 		return
 	}

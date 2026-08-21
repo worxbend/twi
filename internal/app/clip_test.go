@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/twitch/helix"
 )
 
 type appFakeClipManager struct {
@@ -152,7 +153,7 @@ func TestClipCreateFailureIsUserFriendlyOnMissingScope(t *testing.T) {
 
 	cfg := config.Default()
 	model := newMockModel("example", cfg)
-	model.clipManager = twitch.NewHelixClipsClient(twitch.HelixClipsClientConfig{Endpoint: server.URL})
+	model.clipManager = helix.NewClipsClient(helix.ClipsClientConfig{Endpoint: server.URL})
 	model.selfBroadcasterID = "123"
 	state := model.channels.ensure("example")
 	model.channels.active = "example"
@@ -177,7 +178,7 @@ func TestClipCreateFailureIsUserFriendlyOnNotLive(t *testing.T) {
 
 	cfg := config.Default()
 	model := newMockModel("example", cfg)
-	model.clipManager = twitch.NewHelixClipsClient(twitch.HelixClipsClientConfig{Endpoint: server.URL})
+	model.clipManager = helix.NewClipsClient(helix.ClipsClientConfig{Endpoint: server.URL})
 	model.selfBroadcasterID = "123"
 	state := model.channels.ensure("example")
 	model.channels.active = "example"

@@ -20,6 +20,8 @@ import (
 	"github.com/worxbend/twi/internal/storage"
 	"github.com/worxbend/twi/internal/theme"
 	"github.com/worxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/twitch/helix"
+	"github.com/worxbend/twi/internal/twitch/irc"
 )
 
 const usage = `twi is a terminal Twitch chat client.
@@ -81,15 +83,15 @@ var newLiveChatClient = func(ctx context.Context, cfg config.Config, holder *cre
 // client with credentials Twitch had already invalidated.
 func liveIRCTransportFactory(cfg config.Config, holder *credentialHolder, logger debuglog.Logger, credentialStatus credentialLoadStatus) app.LiveChatTransportFactory {
 	return func(context.Context) (twitch.ChatClient, error) {
-		return twitch.NewIRCClient(liveIRCConfig(cfg, holder, logger, credentialStatus))
+		return irc.NewClient(liveIRCConfig(cfg, holder, logger, credentialStatus))
 	}
 }
 
 // liveIRCConfig assembles the transport config from the credentials that are
 // current right now, which is the whole point of the holder.
-func liveIRCConfig(cfg config.Config, holder *credentialHolder, logger debuglog.Logger, credentialStatus credentialLoadStatus) twitch.IRCConfig {
+func liveIRCConfig(cfg config.Config, holder *credentialHolder, logger debuglog.Logger, credentialStatus credentialLoadStatus) irc.Config {
 	creds := holder.current()
-	return twitch.IRCConfig{
+	return irc.Config{
 		Username:     creds.Username,
 		OAuthToken:   creds.OAuthToken,
 		RefreshToken: creds.RefreshToken,
@@ -97,7 +99,7 @@ func liveIRCConfig(cfg config.Config, holder *credentialHolder, logger debuglog.
 		ClientSecret: creds.ClientSecret,
 		Channels:     cfg.DefaultChannels,
 		DebugLogger:  logger,
-		OnOAuthRefresh: func(ctx context.Context, refreshed twitch.OAuthRefresh) error {
+		OnOAuthRefresh: func(ctx context.Context, refreshed irc.OAuthRefresh) error {
 			// Update the holder before persisting: a failed disk write must
 			// not leave the process using dead credentials, and the in-memory
 			// value is what the next reconnect reads.
@@ -166,12 +168,12 @@ func twitchAPIConfigured(cfg config.Config) bool {
 // zero value is a nil interface. Returning a nil *HelixSomethingClient
 // instead would produce an interface that is non-nil but unusable, and every
 // `if adapter == nil` guard in the app would stop working.
-func newHelixAdapter[T any](cfg config.Config, tokenSource func() string, timeout time.Duration, build func(twitch.HelixClientConfig) T) T {
+func newHelixAdapter[T any](cfg config.Config, tokenSource func() string, timeout time.Duration, build func(helix.ClientConfig) T) T {
 	var unavailable T
 	if !twitchAPIConfigured(cfg) {
 		return unavailable
 	}
-	return build(twitch.HelixClientConfig{
+	return build(helix.ClientConfig{
 		HTTPClient:       &http.Client{Timeout: timeout},
 		ClientID:         cfg.Twitch.ClientID,
 		OAuthToken:       cfg.Twitch.OAuthToken,
@@ -186,8 +188,8 @@ func newHelixAdapter[T any](cfg config.Config, tokenSource func() string, timeou
 // already-open and configured channels).
 func newFollowedChannelLookup(cfg config.Config, tokenSource func() string) twitch.FollowedChannelLookup {
 	return newHelixAdapter(cfg, tokenSource, helixBackgroundTimeout,
-		func(c twitch.HelixClientConfig) twitch.FollowedChannelLookup {
-			return twitch.NewHelixFollowedChannelsClient(c)
+		func(c helix.ClientConfig) twitch.FollowedChannelLookup {
+			return helix.NewFollowedChannelsClient(c)
 		})
 }
 
@@ -198,14 +200,14 @@ func newFollowedChannelLookup(cfg config.Config, tokenSource func() string) twit
 // API error on the tab rather than being pre-checked here).
 func newChannelManager(cfg config.Config, tokenSource func() string) twitch.ChannelManager {
 	return newHelixAdapter(cfg, tokenSource, helixBackgroundTimeout,
-		func(c twitch.HelixClientConfig) twitch.ChannelManager { return twitch.NewHelixChannelsClient(c) })
+		func(c helix.ClientConfig) twitch.ChannelManager { return helix.NewChannelsClient(c) })
 }
 
 // newGameLookup resolves a Stream Info category name to its Twitch game ID
 // when the user changes the category field.
 func newGameLookup(cfg config.Config, tokenSource func() string) twitch.GameLookup {
 	return newHelixAdapter(cfg, tokenSource, helixBackgroundTimeout,
-		func(c twitch.HelixClientConfig) twitch.GameLookup { return twitch.NewHelixGamesClient(c) })
+		func(c helix.ClientConfig) twitch.GameLookup { return helix.NewGamesClient(c) })
 }
 
 // newUserLookup resolves Twitch user IDs by login: the logged-in user's own
@@ -213,7 +215,7 @@ func newGameLookup(cfg config.Config, tokenSource func() string) twitch.GameLook
 // for channel-specific emote autocomplete.
 func newUserLookup(cfg config.Config, tokenSource func() string) twitch.UserLookup {
 	return newHelixAdapter(cfg, tokenSource, helixInteractiveTimeout,
-		func(c twitch.HelixClientConfig) twitch.UserLookup { return twitch.NewHelixUsersClient(c) })
+		func(c helix.ClientConfig) twitch.UserLookup { return helix.NewUsersClient(c) })
 }
 
 // newMarkerManager wires the Misc tab's Create/Get Stream Marker calls to
@@ -221,7 +223,7 @@ func newUserLookup(cfg config.Config, tokenSource func() string) twitch.UserLook
 // requested for Stream Info, so no additional login scope is needed.
 func newMarkerManager(cfg config.Config, tokenSource func() string) twitch.MarkerManager {
 	return newHelixAdapter(cfg, tokenSource, helixBackgroundTimeout,
-		func(c twitch.HelixClientConfig) twitch.MarkerManager { return twitch.NewHelixMarkersClient(c) })
+		func(c helix.ClientConfig) twitch.MarkerManager { return helix.NewMarkersClient(c) })
 }
 
 // newClipManager wires the /clip chat command's Create Clip calls to real
@@ -229,7 +231,7 @@ func newMarkerManager(cfg config.Config, tokenSource func() string) twitch.Marke
 // the other tab scopes; Twitch still enforces it per-request.
 func newClipManager(cfg config.Config, tokenSource func() string) twitch.ClipManager {
 	return newHelixAdapter(cfg, tokenSource, helixBackgroundTimeout,
-		func(c twitch.HelixClientConfig) twitch.ClipManager { return twitch.NewHelixClipsClient(c) })
+		func(c helix.ClientConfig) twitch.ClipManager { return helix.NewClipsClient(c) })
 }
 
 // newFollowerLookup wires the status line's follower count to real Twitch
@@ -237,7 +239,7 @@ func newClipManager(cfg config.Config, tokenSource func() string) twitch.ClipMan
 // requested at login but Twitch still enforces it per-request).
 func newFollowerLookup(cfg config.Config, tokenSource func() string) twitch.FollowerLookup {
 	return newHelixAdapter(cfg, tokenSource, helixBackgroundTimeout,
-		func(c twitch.HelixClientConfig) twitch.FollowerLookup { return twitch.NewHelixFollowersClient(c) })
+		func(c helix.ClientConfig) twitch.FollowerLookup { return helix.NewFollowersClient(c) })
 }
 
 // newSubscriptionLookup wires the status line's subscriber count to real
@@ -245,8 +247,8 @@ func newFollowerLookup(cfg config.Config, tokenSource func() string) twitch.Foll
 // is requested at login but Twitch still enforces it per-request).
 func newSubscriptionLookup(cfg config.Config, tokenSource func() string) twitch.SubscriptionLookup {
 	return newHelixAdapter(cfg, tokenSource, helixBackgroundTimeout,
-		func(c twitch.HelixClientConfig) twitch.SubscriptionLookup {
-			return twitch.NewHelixSubscriptionsClient(c)
+		func(c helix.ClientConfig) twitch.SubscriptionLookup {
+			return helix.NewSubscriptionsClient(c)
 		})
 }
 
@@ -259,7 +261,7 @@ func newEmoteIndex(cfg config.Config, tokenSource func() string) *assets.EmoteIn
 	if !twitchAPIConfigured(cfg) {
 		return nil
 	}
-	return assets.NewEmoteIndex(twitch.NewHelixChatAssetsClient(twitch.HelixChatAssetsClientConfig{
+	return assets.NewEmoteIndex(helix.NewChatAssetsClient(helix.ChatAssetsClientConfig{
 		HTTPClient:       &http.Client{Timeout: helixInteractiveTimeout},
 		ClientID:         cfg.Twitch.ClientID,
 		OAuthToken:       cfg.Twitch.OAuthToken,
@@ -274,13 +276,13 @@ func newStreamStatusResolver(cfg config.Config, tokenSource func() string) app.S
 		return nil
 	}
 	return newHelixAdapter(cfg, tokenSource, helixInteractiveTimeout,
-		func(c twitch.HelixClientConfig) app.StreamStatusResolver { return twitch.NewHelixStreamsClient(c) })
+		func(c helix.ClientConfig) app.StreamStatusResolver { return helix.NewStreamsClient(c) })
 }
 
 var runLiveChat = app.RunClientWithOptions
 
 var newDoctorTokenValidator = func() twitch.TokenValidator {
-	return twitch.NewOAuthTokenValidator(twitch.OAuthTokenValidatorConfig{
+	return helix.NewOAuthTokenValidator(helix.OAuthTokenValidatorConfig{
 		HTTPClient: &http.Client{Timeout: 2 * time.Second},
 	})
 }
@@ -906,7 +908,7 @@ func applyCredentialRecord(cfg *config.Config, record storage.CredentialRecord) 
 	}
 }
 
-func persistRefreshedIRCCredentials(ctx context.Context, cfg config.Config, status credentialLoadStatus, refreshed twitch.OAuthRefresh) error {
+func persistRefreshedIRCCredentials(ctx context.Context, cfg config.Config, status credentialLoadStatus, refreshed irc.OAuthRefresh) error {
 	redactor := auth.NewRedactor(
 		auth.NewSecret(cfg.Twitch.OAuthToken),
 		auth.NewSecret(cfg.Twitch.RefreshToken),
@@ -930,7 +932,7 @@ func persistRefreshedIRCCredentials(ctx context.Context, cfg config.Config, stat
 	return nil
 }
 
-func refreshedCredentialRecord(cfg config.Config, base storage.CredentialRecord, refreshed twitch.OAuthRefresh) storage.CredentialRecord {
+func refreshedCredentialRecord(cfg config.Config, base storage.CredentialRecord, refreshed irc.OAuthRefresh) storage.CredentialRecord {
 	record := base.Clone()
 	if login := strings.TrimSpace(cfg.Twitch.Username); login != "" {
 		if record.Login != "" && !strings.EqualFold(record.Login, login) {
