@@ -494,241 +494,7 @@ func (m shellModel) Init() tea.Cmd {
 func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		// Any key other than a second ctrl+L abandons a pending clear, so a
-		// stray press cannot arm the confirmation and sit waiting for an
-		// unrelated keystroke to trigger it later.
-		if m.pendingClearChat && msg.Type != tea.KeyCtrlL {
-			m.pendingClearChat = false
-		}
-		if msg.Type == tea.KeyCtrlC {
-			return m, tea.Quit
-		}
-		if m.splashActive() {
-			m.splashSkipped = true
-			return m, nil
-		}
-		if msg.Type == tea.KeyRunes && msg.Alt && len(msg.Runes) == 1 {
-			if tab, ok := tabForShortcutRune(msg.Runes[0]); ok {
-				return m.switchToTab(tab)
-			}
-		}
-		if msg.Type == tea.KeyCtrlP {
-			m.toggleCommandPalette()
-			return m, nil
-		}
-		if msg.Type == tea.KeyCtrlE {
-			m.toggleEmotePicker()
-			return m, nil
-		}
-		if msg.Type == tea.KeyCtrlT {
-			m.toggleThemeSettings()
-			return m, nil
-		}
-		if m.handleDisplayToggleKey(msg) {
-			return m, nil
-		}
-		if m.palette.open {
-			return m.handleCommandPaletteKey(msg)
-		}
-		if m.emotePicker.open {
-			return m.handleEmotePickerKey(msg)
-		}
-		if m.themeSettings.open {
-			return m.handleThemeSettingsKey(msg)
-		}
-		if m.channelPicker.open {
-			return m.handleChannelPickerKey(msg)
-		}
-		if m.categoryPicker.open {
-			return m.handleCategoryPickerKey(msg)
-		}
-		if m.activeTab == tabStreamInfo {
-			return m.handleStreamInfoKey(msg)
-		}
-		if m.activeTab == tabMisc {
-			return m.handleMiscKey(msg)
-		}
-		// The @mention strip claims tab/arrows/esc only while it is actually
-		// offering completions, so every one of those keys keeps its normal
-		// meaning the rest of the time.
-		if len(m.mentionSuggestions()) > 0 {
-			switch msg.Type {
-			case tea.KeyTab:
-				if m.acceptMentionSuggestion() {
-					return m, nil
-				}
-			case tea.KeyDown:
-				m.moveMentionSelection(1)
-				return m, nil
-			case tea.KeyUp:
-				m.moveMentionSelection(-1)
-				return m, nil
-			case tea.KeyEsc:
-				if m.dismissMentionSuggestions() {
-					return m, nil
-				}
-			}
-		}
-
-		// The space leader chord is consumed before every other binding so a
-		// pending leader can never be mistaken for a normal-mode key. It is
-		// only ever armed outside the composer, where space is literal text.
-		if m.leaderPending {
-			return m.handleLeaderKey(msg)
-		}
-		if msg.Type == tea.KeySpace && m.focus != focusComposer {
-			m.leaderPending = true
-			return m, nil
-		}
-		if m.focus == focusSidebar {
-			if model, cmd, handled := m.handleSidebarKey(msg); handled {
-				return model, cmd
-			}
-		}
-
-		switch msg.Type {
-		case tea.KeyTab:
-			m.cycleFocus()
-		case tea.KeyPgUp:
-			m.scrollBy(m.layout().chatContentHeight)
-		case tea.KeyPgDown:
-			m.scrollBy(-m.layout().chatContentHeight)
-		case tea.KeyCtrlL:
-			// Clearing discards the whole retained backlog for the channel
-			// and cannot be undone. It is one keystroke, next to keys used
-			// constantly, on a tool that is often running during a live
-			// broadcast -- so it asks once. The leader chord for closing a
-			// channel and the sidebar's explicit x are already deliberate
-			// enough not to need this.
-			if m.pendingClearChat {
-				m.pendingClearChat = false
-				m.clearLocalChat()
-				break
-			}
-			m.pendingClearChat = true
-		case tea.KeyCtrlR:
-			return m, m.requestReconnect()
-		case tea.KeyBackspace:
-			if m.focus == focusComposer {
-				m.deleteComposerRune()
-				m.resetMentionSelection()
-			}
-		case tea.KeyEsc:
-			// esc is "leave insert mode" first: from the composer it always
-			// returns to the chat view, keeping the draft intact.
-			if m.focus == focusComposer {
-				m.focus = focusChat
-				return m, nil
-			}
-			if m.inspectOpen {
-				m.inspectOpen = false
-				m.clampScroll()
-				return m, nil
-			}
-			m.activeChannelState().replyTo = nil
-		case tea.KeyUp:
-			if m.focus == focusChat {
-				m.selectReplyMessage(-1)
-			}
-		case tea.KeyDown:
-			if m.focus == focusChat {
-				m.selectReplyMessage(1)
-			}
-		case tea.KeyCtrlU:
-			if m.focus == focusComposer {
-				m.activeChannelState().composerText = ""
-			}
-		case tea.KeyEnter:
-			if m.focus == focusComposer {
-				return m.queueComposerSend()
-			}
-		case tea.KeySpace:
-			if m.focus == focusComposer {
-				m.activeChannelState().composerText += " "
-			}
-		case tea.KeyRunes:
-			// "?" toggles help everywhere except in the composer, where it is
-			// an ordinary character in the message being typed. Every other
-			// rune shortcut below is likewise gated on focus.
-			if m.focus != focusComposer && len(msg.Runes) == 1 && msg.Runes[0] == '?' {
-				m.helpExpanded = !m.helpExpanded
-				m.clampScroll()
-				return m, nil
-			}
-			// Pane resizing works from the chat view and from the sidebar,
-			// because the sidebar is the one pane whose own width these keys
-			// adjust; everywhere else they act on the activity column.
-			if (m.focus == focusChat || m.focus == focusSidebar) && len(msg.Runes) == 1 {
-				switch msg.Runes[0] {
-				case '<':
-					m.resizeFocusedPane(-paneResizeStep)
-					m.clampScroll()
-					return m, nil
-				case '>':
-					m.resizeFocusedPane(paneResizeStep)
-					m.clampScroll()
-					return m, nil
-				case '=':
-					m.resetPaneWidths()
-					m.clampScroll()
-					return m, nil
-				}
-			}
-			if m.focus == focusChat && len(msg.Runes) == 1 && msg.Runes[0] == ']' {
-				if m.channels.switchBy(1) {
-					m.clampScroll()
-					return m.withAsyncAssetCommands(nil)
-				}
-				return m, nil
-			}
-			if m.focus == focusChat && len(msg.Runes) == 1 && msg.Runes[0] == '[' {
-				if m.channels.switchBy(-1) {
-					m.clampScroll()
-					return m.withAsyncAssetCommands(nil)
-				}
-				return m, nil
-			}
-			if m.focus == focusChat && len(msg.Runes) == 1 {
-				if filter, ok := messageFilterForShortcutRune(msg.Runes[0]); ok {
-					return m, m.toggleActiveMessageFilter(filter)
-				}
-				if msg.Runes[0] == '0' {
-					return m, m.resetActiveMessageFilters()
-				}
-			}
-			if m.focus == focusChat && len(msg.Runes) == 1 && msg.Runes[0] == 'q' {
-				return m, tea.Quit
-			}
-			if m.focus == focusChat && len(msg.Runes) == 1 && msg.Runes[0] == 'r' {
-				m.startReplyMode()
-				return m, nil
-			}
-			// i/o/a all enter the composer, matching vim's insert keys; the
-			// composer has no cursor to position, so they differ only in
-			// muscle memory.
-			if m.focus == focusChat && len(msg.Runes) == 1 && isInsertRune(msg.Runes[0]) {
-				m.focus = focusComposer
-				return m, nil
-			}
-			if m.focus == focusChat && len(msg.Runes) == 1 && msg.Runes[0] == 'j' {
-				m.selectReplyMessage(1)
-				return m, nil
-			}
-			if m.focus == focusChat && len(msg.Runes) == 1 && msg.Runes[0] == 'k' {
-				m.selectReplyMessage(-1)
-				return m, nil
-			}
-			// K is vim's "show me more about this", which is exactly what the
-			// inspect panel does. It replaces the old bare i, now an insert key.
-			if m.focus == focusChat && len(msg.Runes) == 1 && msg.Runes[0] == 'K' {
-				m.toggleInspect()
-				return m, nil
-			}
-			if m.focus == focusComposer {
-				m.insertComposerText(string(msg.Runes))
-				m.resetMentionSelection()
-			}
-		}
+		return m.handleKey(msg)
 	case tea.MouseMsg:
 		// The theme page and category picker own the whole screen, so a
 		// click has nothing to hit outside them.
@@ -876,6 +642,305 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if result.Changed {
 			return m.withAsyncAssetCommands(nil)
+		}
+	}
+	return m, nil
+}
+
+// handleKey routes one keypress.
+//
+// It is separated from Update because keyboard handling is by far the largest
+// part of it -- the other twenty-odd message types are a handful of lines
+// each -- and mixing the two made Update impossible to read as a whole.
+//
+// The order below is the precedence of the bindings, and it matters: keys
+// that must work everywhere (quit, tab switching, the panel toggles) are
+// consumed first, then an open overlay or a non-chat tab gets first refusal
+// on what is left, and only then do the chat-view bindings apply.
+// handleRuneShortcut handles the single-character shortcuts of the chat view.
+//
+// Each is gated on where the focus is, because inside the composer these are
+// ordinary characters in the message being typed. handled is false when the
+// rune means nothing in the current focus, leaving the caller to treat it as
+// text.
+//
+// This used to be nine consecutive `if` statements that each re-tested
+// `m.focus == focusChat && len(msg.Runes) == 1` before comparing one rune.
+// Testing the focus once and switching on the rune says the same thing, and
+// adding a shortcut is now one case rather than another copy of the guard.
+func (m *shellModel) handleRuneShortcut(r rune) (tea.Model, tea.Cmd, bool) {
+	// "?" toggles help everywhere except in the composer, where it is an
+	// ordinary character in the message being typed.
+	if r == '?' && m.focus != focusComposer {
+		m.helpExpanded = !m.helpExpanded
+		m.clampScroll()
+		return *m, nil, true
+	}
+	// Pane resizing works from the chat view and from the sidebar, because
+	// the sidebar is the one pane whose own width these keys adjust;
+	// everywhere else they act on the activity column.
+	if m.focus == focusChat || m.focus == focusSidebar {
+		switch r {
+		case '<':
+			m.resizeFocusedPane(-paneResizeStep)
+			m.clampScroll()
+			return *m, nil, true
+		case '>':
+			m.resizeFocusedPane(paneResizeStep)
+			m.clampScroll()
+			return *m, nil, true
+		case '=':
+			m.resetPaneWidths()
+			m.clampScroll()
+			return *m, nil, true
+		}
+	}
+	// Everything below belongs to the chat view alone.
+	if m.focus != focusChat {
+		return *m, nil, false
+	}
+	// The message-filter shortcuts are 1-4, and are looked up rather than
+	// listed here so the filters stay defined in one place.
+	if filter, ok := messageFilterForShortcutRune(r); ok {
+		return *m, m.toggleActiveMessageFilter(filter), true
+	}
+	// i/o/a all enter the composer, matching vim's insert keys; the composer
+	// has no cursor to position, so they differ only in muscle memory.
+	if isInsertRune(r) {
+		m.focus = focusComposer
+		return *m, nil, true
+	}
+	switch r {
+	case ']':
+		if m.channels.switchBy(1) {
+			m.clampScroll()
+			model, cmd := m.withAsyncAssetCommands(nil)
+			return model, cmd, true
+		}
+		return *m, nil, true
+	case '[':
+		if m.channels.switchBy(-1) {
+			m.clampScroll()
+			model, cmd := m.withAsyncAssetCommands(nil)
+			return model, cmd, true
+		}
+		return *m, nil, true
+	case '0':
+		return *m, m.resetActiveMessageFilters(), true
+	case 'q':
+		return *m, tea.Quit, true
+	case 'r':
+		m.startReplyMode()
+		return *m, nil, true
+	case 'j':
+		m.selectReplyMessage(1)
+		return *m, nil, true
+	case 'k':
+		m.selectReplyMessage(-1)
+		return *m, nil, true
+	case 'K':
+		// K is vim's "show me more about this", which is exactly what the
+		// inspect panel does. It replaces the old bare i, now an insert key.
+		m.toggleInspect()
+		return *m, nil, true
+	}
+	return *m, nil, false
+}
+
+// handleAlwaysOnKey consumes the keys that must work no matter what is on
+// screen: quitting, skipping the splash, switching tabs, and the three panel
+// toggles. handled is false when the key was none of those, and the caller
+// carries on with it.
+//
+// Its first few lines still run for every keypress, because disarming a
+// pending ctrl+L confirmation is something any other key does.
+func (m *shellModel) handleAlwaysOnKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+	// Any key other than a second ctrl+L abandons a pending clear, so a
+	// stray press cannot arm the confirmation and sit waiting for an
+	// unrelated keystroke to trigger it later.
+	if m.pendingClearChat && msg.Type != tea.KeyCtrlL {
+		m.pendingClearChat = false
+	}
+	switch {
+	case msg.Type == tea.KeyCtrlC:
+		return *m, tea.Quit, true
+	case m.splashActive():
+		m.splashSkipped = true
+		return *m, nil, true
+	}
+	if msg.Type == tea.KeyRunes && msg.Alt && len(msg.Runes) == 1 {
+		if tab, ok := tabForShortcutRune(msg.Runes[0]); ok {
+			model, cmd := m.switchToTab(tab)
+			return model, cmd, true
+		}
+	}
+	switch msg.Type {
+	case tea.KeyCtrlP:
+		m.toggleCommandPalette()
+		return *m, nil, true
+	case tea.KeyCtrlE:
+		m.toggleEmotePicker()
+		return *m, nil, true
+	case tea.KeyCtrlT:
+		m.toggleThemeSettings()
+		return *m, nil, true
+	}
+	if m.handleDisplayToggleKey(msg) {
+		return *m, nil, true
+	}
+	return *m, nil, false
+}
+
+// routeKeyToOpenPanel hands the key to whichever overlay or full-screen tab
+// currently owns the keyboard. At most one of them is ever active, and the
+// case order decides which wins if that were somehow not true.
+func (m shellModel) routeKeyToOpenPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+	var (
+		model tea.Model
+		cmd   tea.Cmd
+	)
+	switch {
+	case m.palette.open:
+		model, cmd = m.handleCommandPaletteKey(msg)
+	case m.emotePicker.open:
+		model, cmd = m.handleEmotePickerKey(msg)
+	case m.themeSettings.open:
+		model, cmd = m.handleThemeSettingsKey(msg)
+	case m.channelPicker.open:
+		model, cmd = m.handleChannelPickerKey(msg)
+	case m.categoryPicker.open:
+		model, cmd = m.handleCategoryPickerKey(msg)
+	case m.activeTab == tabStreamInfo:
+		model, cmd = m.handleStreamInfoKey(msg)
+	case m.activeTab == tabMisc:
+		model, cmd = m.handleMiscKey(msg)
+	default:
+		return m, nil, false
+	}
+	return model, cmd, true
+}
+
+// handleMentionKey lets the @mention strip claim tab, the arrows and esc, but
+// only while it is actually offering completions, so those keys keep their
+// normal meaning the rest of the time.
+func (m *shellModel) handleMentionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+	if len(m.mentionSuggestions()) == 0 {
+		return *m, nil, false
+	}
+	switch msg.Type {
+	case tea.KeyTab:
+		if m.acceptMentionSuggestion() {
+			return *m, nil, true
+		}
+	case tea.KeyDown:
+		m.moveMentionSelection(1)
+		return *m, nil, true
+	case tea.KeyUp:
+		m.moveMentionSelection(-1)
+		return *m, nil, true
+	case tea.KeyEsc:
+		if m.dismissMentionSuggestions() {
+			return *m, nil, true
+		}
+	}
+	return *m, nil, false
+}
+
+func (m shellModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if model, cmd, handled := m.handleAlwaysOnKey(msg); handled {
+		return model, cmd
+	}
+	if model, cmd, handled := m.routeKeyToOpenPanel(msg); handled {
+		return model, cmd
+	}
+	if model, cmd, handled := m.handleMentionKey(msg); handled {
+		return model, cmd
+	}
+	// The space leader chord is consumed before every other binding so a
+	// pending leader can never be mistaken for a normal-mode key. It is
+	// only ever armed outside the composer, where space is literal text.
+	if m.leaderPending {
+		return m.handleLeaderKey(msg)
+	}
+	if msg.Type == tea.KeySpace && m.focus != focusComposer {
+		m.leaderPending = true
+		return m, nil
+	}
+	if m.focus == focusSidebar {
+		if model, cmd, handled := m.handleSidebarKey(msg); handled {
+			return model, cmd
+		}
+	}
+
+	switch msg.Type {
+	case tea.KeyTab:
+		m.cycleFocus()
+	case tea.KeyPgUp:
+		m.scrollBy(m.layout().chatContentHeight)
+	case tea.KeyPgDown:
+		m.scrollBy(-m.layout().chatContentHeight)
+	case tea.KeyCtrlL:
+		// Clearing discards the whole retained backlog for the channel
+		// and cannot be undone. It is one keystroke, next to keys used
+		// constantly, on a tool that is often running during a live
+		// broadcast -- so it asks once. The leader chord for closing a
+		// channel and the sidebar's explicit x are already deliberate
+		// enough not to need this.
+		if m.pendingClearChat {
+			m.pendingClearChat = false
+			m.clearLocalChat()
+			break
+		}
+		m.pendingClearChat = true
+	case tea.KeyCtrlR:
+		return m, m.requestReconnect()
+	case tea.KeyBackspace:
+		if m.focus == focusComposer {
+			m.deleteComposerRune()
+			m.resetMentionSelection()
+		}
+	case tea.KeyEsc:
+		// esc is "leave insert mode" first: from the composer it always
+		// returns to the chat view, keeping the draft intact.
+		if m.focus == focusComposer {
+			m.focus = focusChat
+			return m, nil
+		}
+		if m.inspectOpen {
+			m.inspectOpen = false
+			m.clampScroll()
+			return m, nil
+		}
+		m.activeChannelState().replyTo = nil
+	case tea.KeyUp:
+		if m.focus == focusChat {
+			m.selectReplyMessage(-1)
+		}
+	case tea.KeyDown:
+		if m.focus == focusChat {
+			m.selectReplyMessage(1)
+		}
+	case tea.KeyCtrlU:
+		if m.focus == focusComposer {
+			m.activeChannelState().composerText = ""
+		}
+	case tea.KeyEnter:
+		if m.focus == focusComposer {
+			return m.queueComposerSend()
+		}
+	case tea.KeySpace:
+		if m.focus == focusComposer {
+			m.activeChannelState().composerText += " "
+		}
+	case tea.KeyRunes:
+		if len(msg.Runes) == 1 {
+			if model, cmd, handled := m.handleRuneShortcut(msg.Runes[0]); handled {
+				return model, cmd
+			}
+		}
+		if m.focus == focusComposer {
+			m.insertComposerText(string(msg.Runes))
+			m.resetMentionSelection()
 		}
 	}
 	return m, nil
