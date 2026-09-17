@@ -144,10 +144,7 @@ func (m shellModel) messageAtVisibleChatRow(layout shellLayout, contentRow int) 
 	blocks := m.visibleChatRowBlocks(layout)
 	totalRows := chatRowBlockCount(blocks)
 
-	start := totalRows - layout.chatContentHeight - active.scrollOffset
-	if start < 0 {
-		start = 0
-	}
+	start := chatWindowStart(totalRows, layout.chatContentHeight, active.scrollOffset)
 	target := start + contentRow
 	if target < 0 || target >= totalRows {
 		return twitch.ChatMessage{}, false

@@ -1272,9 +1272,21 @@ func (m shellModel) visibleChatRows(layout shellLayout) []string {
 
 	// Mirrors visibleRows: scrollOffset counts rows hidden below the
 	// viewport, so the window ends that far from the bottom.
-	scrollOffset := min(clampMin(active.scrollOffset, 0), total-height)
-	start := total - scrollOffset - height
-	return m.styleChatRowWindow(blocks, rowWidth, clampMin(start, 0), height)
+	start := chatWindowStart(total, height, active.scrollOffset)
+	return m.styleChatRowWindow(blocks, rowWidth, start, height)
+}
+
+// chatWindowStart returns the first row of the scroll window - the same
+// window visibleChatRows styles and messageAtVisibleChatRow hit-tests -
+// given the total row count, the height of the visible area, and how many
+// rows are scrolled off the bottom. Both callers share it so the renderer
+// and the mouse hit-tester cannot drift apart.
+func chatWindowStart(total, height, scrollOffset int) int {
+	if total <= height {
+		return 0
+	}
+	offset := min(clampMin(scrollOffset, 0), total-height)
+	return clampMin(total-offset-height, 0)
 }
 
 func (m shellModel) chatView(layout shellLayout) string {
