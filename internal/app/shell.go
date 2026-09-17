@@ -2762,11 +2762,18 @@ func (m shellModel) continuesActiveGroup(message twitch.ChatMessage) bool {
 }
 
 // authorMeta resolves roster context for a message's author. An author twi
-// has never recorded yields a zero AuthorMeta, which renders no claims at all.
+// has never recorded yields an AuthorMeta with no claims - Now is still set,
+// since render.timestampText needs it for every message's relative/absolute
+// timestamp decision, not just ones with roster context to show.
 func (m shellModel) authorMeta(message twitch.ChatMessage) render.AuthorMeta {
+	// Truncated to the minute because render.humanizeDuration is
+	// minute-granular at its finest: a raw clock would produce identical
+	// output while changing on every frame, which defeats row caching for
+	// every message twi renders.
+	now := m.metricsNow().Truncate(time.Minute)
 	state := m.activeChannelState()
 	if state == nil {
-		return render.AuthorMeta{}
+		return render.AuthorMeta{Now: now}
 	}
 	login := message.AuthorLogin
 	if strings.TrimSpace(login) == "" {
@@ -2774,7 +2781,7 @@ func (m shellModel) authorMeta(message twitch.ChatMessage) render.AuthorMeta {
 	}
 	entry, ok := state.roster.lookup(login)
 	if !ok {
-		return render.AuthorMeta{}
+		return render.AuthorMeta{Now: now}
 	}
 	return render.AuthorMeta{
 		Role:             entry.roleLabel(),
@@ -2782,11 +2789,7 @@ func (m shellModel) authorMeta(message twitch.ChatMessage) render.AuthorMeta {
 		FollowsSince:     entry.FollowsSince,
 		FollowKnown:      entry.FollowKnown,
 		FirstSeen:        entry.FirstSeen,
-		// Truncated to the minute because render.humanizeDuration is
-		// minute-granular at its finest: a raw clock would produce identical
-		// output while changing on every frame, which defeats row caching for
-		// every message whose author twi knows anything about.
-		Now: m.metricsNow().Truncate(time.Minute),
+		Now:              now,
 	}
 }
 

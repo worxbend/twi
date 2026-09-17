@@ -292,7 +292,7 @@ const (
 // timestampWidth is the width of a drawn clock plus the space after it. It is
 // measured from the renderer's own formatter rather than written out as a
 // number, so changing the clock format keeps the prefix budget correct.
-var timestampWidth = textWidth(timestampText(time.Time{}) + " ")
+var timestampWidth = textWidth(timestampText(time.Time{}, time.Time{}) + " ")
 
 // prefixDecorations records which of the optional parts of a message prefix
 // -- the avatar, the timestamp, the badges, the first-message mark -- are
@@ -382,7 +382,7 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 	if decorations.timestamp {
 		fragments = append(fragments, Fragment{
 			Kind: FragmentTimestamp,
-			Text: timestampText(msg.Timestamp) + " ",
+			Text: timestampText(msg.Timestamp, opts.Meta.now()) + " ",
 			Style: FragmentStyle{
 				Foreground: muted,
 			},
@@ -797,11 +797,42 @@ func initials(value string) string {
 	return takeCells(builder.String(), 2)
 }
 
-func timestampText(timestamp time.Time) string {
+// relativeTimestampWindow is how recent a message has to be for
+// timestampText to show its age ("2m") instead of a clock time. Kept short
+// deliberately: a relative label is only useful while it still means
+// "just now" at a glance, and past this window a clock time is the more
+// useful, and more stable, thing to have scrolled past.
+const relativeTimestampWindow = 5 * time.Minute
+
+// timestampText renders when a message arrived: how long ago, for a message
+// less than relativeTimestampWindow old, or the clock time it was sent at
+// otherwise. now is the caller's already-quantized clock (see
+// AuthorMeta.Now) - a zero now (no caller context) always falls back to the
+// clock time, both because that is the useful answer for a timestamp nobody
+// can date relative to anything, and to keep width-budget measurements like
+// timestampWidth deterministic.
+func timestampText(timestamp, now time.Time) string {
 	if timestamp.IsZero() {
 		return "--:--"
 	}
+	if !now.IsZero() {
+		if age := now.Sub(timestamp); age >= 0 && age < relativeTimestampWindow {
+			return relativeMessageAge(age)
+		}
+	}
 	return timestamp.Local().Format("15:04")
+}
+
+// relativeMessageAge renders an age under relativeTimestampWindow as "now"
+// for the first minute, then "Nm" - humanizeDuration's format for its own
+// under-an-hour case, kept separate because that function only fires past a
+// courtesy no-claims floor this one does not need.
+func relativeMessageAge(age time.Duration) string {
+	minutes := int(age.Minutes())
+	if minutes <= 0 {
+		return "now"
+	}
+	return fmt.Sprintf("%dm", minutes)
 }
 
 func emoteAssetRef(emote twitch.Emote) twitch.AssetRef {

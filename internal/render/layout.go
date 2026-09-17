@@ -134,7 +134,7 @@ func groupedHeaderFragments(msg twitch.ChatMessage, opts Options) []Fragment {
 	if opts.Width >= groupedMinWidthForTimestamp {
 		fragments = append(fragments, Fragment{
 			Kind:  FragmentTimestamp,
-			Text:  " " + timestampText(msg.Timestamp),
+			Text:  " " + timestampText(msg.Timestamp, opts.Meta.now()),
 			Style: FragmentStyle{Foreground: opts.Palette.Muted},
 		})
 	}

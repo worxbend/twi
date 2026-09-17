@@ -606,6 +606,106 @@ func rowsToPlain(rows []Row) []string {
 	return plain
 }
 
+func TestTimestampTextUsesRelativeAgeWithinFiveMinutes(t *testing.T) {
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		name string
+		age  time.Duration
+		want string
+	}{
+		{"just sent", 0, "now"},
+		{"thirty seconds", 30 * time.Second, "now"},
+		{"two minutes", 2 * time.Minute, "2m"},
+		{"just under the window", 4*time.Minute + 59*time.Second, "4m"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := timestampText(now.Add(-test.age), now)
+			if got != test.want {
+				t.Fatalf("timestampText(age=%s) = %q, want %q", test.age, got, test.want)
+			}
+		})
+	}
+}
+
+func TestTimestampTextFallsBackToClockTimeAtAndPastTheWindow(t *testing.T) {
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.Local)
+	for _, test := range []struct {
+		name string
+		age  time.Duration
+	}{
+		{"exactly five minutes", 5 * time.Minute},
+		{"an hour", time.Hour},
+		{"a day", 24 * time.Hour},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			timestamp := now.Add(-test.age)
+			got := timestampText(timestamp, now)
+			want := timestamp.Local().Format("15:04")
+			if got != want {
+				t.Fatalf("timestampText(age=%s) = %q, want clock time %q", test.age, got, want)
+			}
+		})
+	}
+}
+
+func TestTimestampTextIgnoresFutureAndMissingNow(t *testing.T) {
+	timestamp := time.Date(2026, 8, 1, 12, 0, 0, 0, time.Local)
+
+	// A timestamp after "now" (clock skew, or a caller with no real "now")
+	// is not a sensible age to render relatively.
+	if got, want := timestampText(timestamp, timestamp.Add(-time.Minute)), timestamp.Local().Format("15:04"); got != want {
+		t.Fatalf("timestampText(future now) = %q, want clock time %q", got, want)
+	}
+	// A zero "now" means the caller had no clock context at all (e.g. the
+	// timestampWidth budget measurement) - always the clock time, never "now".
+	if got, want := timestampText(timestamp, time.Time{}), timestamp.Local().Format("15:04"); got != want {
+		t.Fatalf("timestampText(zero now) = %q, want clock time %q", got, want)
+	}
+	if got := timestampText(time.Time{}, timestamp); got != "--:--" {
+		t.Fatalf("timestampText(zero timestamp) = %q, want \"--:--\"", got)
+	}
+}
+
+func TestRowsShowRelativeTimestampForARecentMessage(t *testing.T) {
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	msg := twitch.ChatMessage{
+		Timestamp:   now.Add(-90 * time.Second),
+		AuthorLogin: "alice",
+		DisplayName: "Alice",
+		Type:        twitch.MessageTypeChat,
+		Text:        "hello",
+	}
+	opts := DefaultOptions(80)
+	opts.Meta = AuthorMeta{Now: now}
+
+	row := rowsToPlain(Rows(msg, opts))[0]
+	if !strings.Contains(row, "1m ") {
+		t.Fatalf("row = %q, want the relative age \"1m\"", row)
+	}
+	if strings.Contains(row, now.Add(-90*time.Second).Local().Format("15:04")) {
+		t.Fatalf("row = %q, want no clock time for a recent message", row)
+	}
+}
+
+func TestRowsShowClockTimestampForAnOldMessage(t *testing.T) {
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	sentAt := now.Add(-90 * time.Minute)
+	msg := twitch.ChatMessage{
+		Timestamp:   sentAt,
+		AuthorLogin: "alice",
+		DisplayName: "Alice",
+		Type:        twitch.MessageTypeChat,
+		Text:        "hello",
+	}
+	opts := DefaultOptions(80)
+	opts.Meta = AuthorMeta{Now: now}
+
+	row := rowsToPlain(Rows(msg, opts))[0]
+	if want := sentAt.Local().Format("15:04"); !strings.Contains(row, want) {
+		t.Fatalf("row = %q, want the clock time %q", row, want)
+	}
+}
+
 func hasKind(rows []Row, kind FragmentKind) bool {
 	_, ok := firstKind(rows, kind)
 	return ok
