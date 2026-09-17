@@ -186,6 +186,14 @@ func Rows(msg twitch.ChatMessage, opts Options) []Row {
 // recapitalization of it - Twitch allows CJK and stylized display names that
 // are otherwise impossible to tie back to an account you can mention.
 func usernameFragment(msg twitch.ChatMessage, opts Options) Fragment {
+	return usernameFragmentWithColor(msg, opts, usernameColor(msg, opts.Palette))
+}
+
+// usernameFragmentWithColor renders the author name using an already-computed
+// identity color. It lets callers that also need the color for something else
+// (messagePrefix's avatar chip) compute it once and share it instead of each
+// fragment hashing the identity independently.
+func usernameFragmentWithColor(msg twitch.ChatMessage, opts Options, color string) Fragment {
 	author := displayAuthor(msg)
 	if opts.FullUsername {
 		login := strings.TrimSpace(msg.AuthorLogin)
@@ -197,7 +205,7 @@ func usernameFragment(msg twitch.ChatMessage, opts Options) Fragment {
 		Kind: FragmentUsername,
 		Text: author,
 		Style: FragmentStyle{
-			Foreground: usernameColor(msg, opts.Palette),
+			Foreground: color,
 			Bold:       true,
 		},
 	}
@@ -362,10 +370,14 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 
 	author := displayAuthor(msg)
 	decorations := chooseDecorations(msg, opts, author)
+	// The avatar chip and the username fragment both color themselves by the
+	// author's identity, so the hash-and-contrast-search in usernameColor is
+	// computed once here and shared instead of running it twice per message.
+	identityColor := usernameColor(msg, opts.Palette)
 
 	var fragments []Fragment
 	if decorations.avatar {
-		fragments = append(fragments, avatarFallbackFragment(msg, opts, author))
+		fragments = append(fragments, avatarFallbackFragmentWithColor(msg, opts, author, identityColor))
 	}
 	if decorations.timestamp {
 		fragments = append(fragments, Fragment{
@@ -405,7 +417,7 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 		})
 	}
 
-	fragments = append(fragments, usernameFragment(msg, opts))
+	fragments = append(fragments, usernameFragmentWithColor(msg, opts, identityColor))
 
 	separator := messageSeparator
 	if msg.Type == twitch.MessageTypeAction {
@@ -716,6 +728,12 @@ func displayAuthor(msg twitch.ChatMessage) string {
 }
 
 func avatarFallbackFragment(msg twitch.ChatMessage, opts Options, author string) Fragment {
+	return avatarFallbackFragmentWithColor(msg, opts, author, usernameColor(msg, opts.Palette))
+}
+
+// avatarFallbackFragmentWithColor renders the avatar chip using an
+// already-computed identity color. See usernameFragmentWithColor.
+func avatarFallbackFragmentWithColor(msg twitch.ChatMessage, opts Options, author string, color string) Fragment {
 	ref := twitch.AssetRef{
 		Kind: "avatar",
 		ID:   msg.AuthorID,
@@ -733,7 +751,7 @@ func avatarFallbackFragment(msg twitch.ChatMessage, opts Options, author string)
 		WidthCells: opts.Assets.AvatarWidthCells,
 		Style: FragmentStyle{
 			Foreground: opts.Palette.Background,
-			Background: usernameColor(msg, opts.Palette),
+			Background: color,
 			Bold:       true,
 		},
 		Ref: ref,
