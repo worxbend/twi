@@ -243,9 +243,8 @@ func sendResultDetail(result SendResult) string {
 		}
 		return "Twitch is slowing message sends"
 	}
-	if !result.AcceptedAt.IsZero() {
-		return "accepted"
-	}
+	// AcceptedAt only records when the send was confirmed; it doesn't change
+	// the message reported here.
 	return "accepted"
 }
 
