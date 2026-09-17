@@ -129,11 +129,11 @@ func (c *Client) DroppedEvents() uint64 {
 // NewClient creates a Twitch IRC client without opening the network
 // connection. Call Connect to start the read loop.
 func NewClient(cfg Config) (*Client, error) {
-	username := strings.TrimSpace(cfg.Username)
+	username := strings.TrimSpace(stripControlChars(cfg.Username))
 	if username == "" {
 		return nil, errors.New("missing Twitch username")
 	}
-	token := strings.TrimSpace(cfg.OAuthToken)
+	token := strings.TrimSpace(stripControlChars(cfg.OAuthToken))
 	if token == "" {
 		return nil, errors.New("missing Twitch OAuth token")
 	}
@@ -359,7 +359,7 @@ func (c *Client) connectOnceWithAuthRefresh(ctx context.Context, emit func(twitc
 
 	oldToken := c.token
 	oldRefreshToken := c.refresh.RefreshToken
-	token := refreshed.AccessToken.Reveal()
+	token := strings.TrimSpace(stripControlChars(refreshed.AccessToken.Reveal()))
 	refreshToken := refreshed.RefreshToken.Reveal()
 	c.mu.Lock()
 	c.token = token
@@ -608,9 +608,30 @@ func normalizeChannels(values []string) []string {
 // normalizeChannel turns a channel name into the form Twitch IRC expects.
 // The rule itself lives in internal/twitch, shared with the config loader and
 // the UI; see twitch.ChannelKey for why the lower-casing is a wire requirement
-// rather than a formatting choice.
+// rather than a formatting choice. Control characters are stripped here,
+// rather than in the shared rule, because they are a wire-safety concern
+// specific to this transport -- the same reason Send sanitizes chat text
+// before it reaches gempir.
 func normalizeChannel(value string) string {
-	return twitch.ChannelKey(value)
+	return twitch.ChannelKey(stripControlChars(value))
+}
+
+// stripControlChars removes CR, LF, and other C0 controls from a value before
+// it reaches gempir's raw PASS/NICK/JOIN/PART wire writes, mirroring the
+// stripping sanitizeText applies to outbound chat text. Unlike sanitizeText,
+// controls are dropped outright rather than turned into spaces: a username,
+// OAuth token, or channel name has no visible text to preserve, only wire
+// syntax to protect from an embedded CRLF smuggling a second IRC command.
+func stripControlChars(value string) string {
+	var b strings.Builder
+	b.Grow(len(value))
+	for _, r := range value {
+		if r == '\r' || r == '\n' || r < 0x20 || r == 0x7f {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 type oauthRefreshConfig struct {

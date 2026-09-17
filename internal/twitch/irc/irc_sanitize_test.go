@@ -79,3 +79,66 @@ func TestSanitizeIRCTextLeavesShortMessagesAlone(t *testing.T) {
 		t.Fatalf("sanitizeText(%q) = %q, want it unchanged", text, got)
 	}
 }
+
+// TestStripControlCharsNeutralizesCommandInjection guards the wire values
+// (username, OAuth token, channel name) that reach gempir's raw PASS/NICK/JOIN
+// writes: unlike chat text, an embedded CRLF there would let an attacker who
+// controls one of these fields smuggle a second IRC command past our own
+// framing, not just the user's own message.
+func TestStripControlCharsNeutralizesCommandInjection(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+	}{
+		{"crlf", "user\r\nPART #victim"},
+		{"lf", "user\nQUIT"},
+		{"cr", "user\rNICK evil"},
+		{"tab", "user\tname"},
+		{"del", "user\x7fname"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := stripControlChars(tc.in)
+			if strings.ContainsAny(got, "\r\n\t") || strings.ContainsRune(got, 0x7f) {
+				t.Fatalf("stripControlChars(%q) = %q, still contains a control character", tc.in, got)
+			}
+		})
+	}
+}
+
+func TestStripControlCharsPreservesUnicode(t *testing.T) {
+	const text = "naïve_こんにちは_user"
+	if got := stripControlChars(text); got != text {
+		t.Fatalf("stripControlChars(%q) = %q, want it unchanged", text, got)
+	}
+}
+
+// TestNormalizeChannelStripsEmbeddedControlChars is a regression test for the
+// same CRLF-smuggling class TestStripControlCharsNeutralizesCommandInjection
+// covers, through the actual entry point channel names take before they
+// reach the wire.
+func TestNormalizeChannelStripsEmbeddedControlChars(t *testing.T) {
+	got := normalizeChannel("foo\r\nJOIN #attacker")
+	if strings.ContainsAny(got, "\r\n") {
+		t.Fatalf("normalizeChannel with embedded CRLF = %q, still contains a line break", got)
+	}
+}
+
+// TestNewClientStripsControlCharsFromCredentials is a regression test for the
+// same CRLF-smuggling class, through NewClient's username/token entry point.
+func TestNewClientStripsControlCharsFromCredentials(t *testing.T) {
+	client, err := NewClient(Config{
+		Username:   "user\r\nQUIT",
+		Channels:   []string{"demo"},
+		OAuthToken: "oauth:abc\r\nPRIVMSG #victim :spam",
+	})
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+	if strings.ContainsAny(client.username, "\r\n") {
+		t.Fatalf("client.username = %q, still contains a line break", client.username)
+	}
+	if strings.ContainsAny(client.token, "\r\n") {
+		t.Fatalf("client.token = %q, still contains a line break", client.token)
+	}
+}
