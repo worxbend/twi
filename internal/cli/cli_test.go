@@ -849,7 +849,7 @@ func TestLoginUnsupportedCallbackFailsClearly(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("Run returned %d, want 2; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	for _, want := range []string{"login callback unavailable", "localhost", "127.0.0.1"} {
+	for _, want := range []string{"prepare login callback", "localhost", "127.0.0.1"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr missing %q: %q", want, stderr.String())
 		}

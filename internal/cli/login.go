@@ -219,7 +219,7 @@ func loginAndSaveCredentials(cfg config.Config, opts loginOptions, redirectURI s
 	)
 	if err := validateLoginConfig(request); err != nil {
 		logger.Log(context.Background(), "cli.login.config_invalid", slog.String("error", redactor.Redact(err.Error())))
-		fmt.Fprintln(stderr, redactor.Redact(err.Error()))
+		printLoginError(stderr, "validate login config", err, redactor)
 		return 2
 	}
 
@@ -239,7 +239,7 @@ func loginAndSaveCredentials(cfg config.Config, opts loginOptions, redirectURI s
 	waiter, err := newLoginCallbackWaiter(request.RedirectURI)
 	if err != nil {
 		logger.Log(context.Background(), "cli.login.callback_unavailable", slog.String("error", redactor.Redact(err.Error())))
-		fmt.Fprintf(stderr, "login callback unavailable: %s\n", redactor.Redact(err.Error()))
+		printLoginError(stderr, "prepare login callback", err, redactor)
 		return 2
 	}
 	defer waiter.Close()
