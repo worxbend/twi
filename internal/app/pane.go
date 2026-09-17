@@ -46,7 +46,16 @@ func (m shellModel) renderPane(spec paneSpec) string {
 			railColor = colors[m.gradientPhase(len(colors))%len(colors)]
 		}
 	}
-	title := m.paneTitleLine(spec.width, spec.icon, spec.title, spec.accent, railColor, spec.focused)
+	// The left rail always carries the pane's own identity color, focused or
+	// not, so panes stay recognizable at a glance. The rest of the frame only
+	// picks that color up while focused - a fully lit outline is what actually
+	// answers "where does my next keystroke go", since a shimmering rail alone
+	// is easy to miss against a same-colored static rail on every other pane.
+	frameColor := m.theme.Border
+	if spec.focused {
+		frameColor = railColor
+	}
+	title := m.paneTitleLine(spec.width, spec.icon, spec.title, spec.accent, railColor, frameColor, spec.focused)
 	body := lipgloss.NewStyle().
 		Width(clampMin(spec.width-2, 0)).
 		Height(spec.contentHeight).
@@ -58,9 +67,9 @@ func (m shellModel) renderPane(spec paneSpec) string {
 		BorderBottom(true).
 		BorderLeft(true).
 		BorderForeground(
-			lipgloss.Color(m.theme.Border),
-			lipgloss.Color(m.theme.Border),
-			lipgloss.Color(m.theme.Border),
+			lipgloss.Color(frameColor),
+			lipgloss.Color(frameColor),
+			lipgloss.Color(frameColor),
 			lipgloss.Color(railColor),
 		).
 		BorderBackground(lipgloss.Color(m.canvasBackground())).
@@ -69,7 +78,7 @@ func (m shellModel) renderPane(spec paneSpec) string {
 	return title + "\n" + body
 }
 
-func (m shellModel) paneTitleLine(width int, icon, title, accent, railColor string, focused bool) string {
+func (m shellModel) paneTitleLine(width int, icon, title, accent, railColor, frameColor string, focused bool) string {
 	if width <= 0 {
 		return ""
 	}
@@ -102,7 +111,7 @@ func (m shellModel) paneTitleLine(width int, icon, title, accent, railColor stri
 	} else {
 		styledLabel = paneStyledText(labelText, accent, m.canvasBackground(), true)
 	}
-	border := paneStyledText(remainder+"┐", m.theme.Border, m.canvasBackground(), false)
+	border := paneStyledText(remainder+"┐", frameColor, m.canvasBackground(), false)
 	return left + styledLabel + border
 }
 

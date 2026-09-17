@@ -56,12 +56,13 @@ func TestFocusedPaneChromeAnimatesFromSharedFrame(t *testing.T) {
 	}
 }
 
-func TestChatPaneChromeIsStaticAcrossSharedFrames(t *testing.T) {
+func TestChatPaneChromeIsStaticWhenNotFocused(t *testing.T) {
 	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "fast"
 	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 22
+	model.focus = focusSidebar
 	layout := model.layout()
 
 	model.frames.lastFrameAt = time.UnixMilli(1600)
@@ -69,7 +70,30 @@ func TestChatPaneChromeIsStaticAcrossSharedFrames(t *testing.T) {
 	model.frames.lastFrameAt = time.UnixMilli(1800)
 	second := model.chatView(layout)
 	if first != second {
-		t.Fatal("chat pane chrome changed with the shared frame clock; want a static border and title")
+		t.Fatal("unfocused chat pane chrome changed with the shared frame clock; want a static border and title")
+	}
+}
+
+// TestChatPaneChromeAnimatesWhenFocused guards the chat pane's own
+// paneSpec.focused wiring specifically: chatView used to omit that field
+// entirely, so the chat pane's border and title never lit up or shimmered
+// on focus at all, unlike every other pane (see
+// TestFocusedPaneChromeAnimatesFromSharedFrame).
+func TestChatPaneChromeAnimatesWhenFocused(t *testing.T) {
+	forceColorProfile(t)
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "fast"
+	model := newMockModel("alpha", cfg)
+	model.width, model.height = 88, 22
+	model.focus = focusChat
+	layout := model.layout()
+
+	model.frames.lastFrameAt = time.UnixMilli(1600)
+	first := model.chatView(layout)
+	model.frames.lastFrameAt = time.UnixMilli(1800)
+	second := model.chatView(layout)
+	if first == second {
+		t.Fatal("focused chat pane chrome did not animate with the shared frame clock")
 	}
 }
 
@@ -85,7 +109,7 @@ func TestPaneTitleLinePreservesResponsiveWidth(t *testing.T) {
 	model := newMockModel("alpha", config.Default())
 	for width := 1; width <= 60; width++ {
 		for _, focused := range []bool{false, true} {
-			line := model.paneTitleLine(width, "🎮", "A deliberately long Unicode title · #δοκιμή", model.theme.Accent, model.theme.Success, focused)
+			line := model.paneTitleLine(width, "🎮", "A deliberately long Unicode title · #δοκιμή", model.theme.Accent, model.theme.Success, model.theme.Border, focused)
 			if got := lipgloss.Width(line); got != width {
 				t.Fatalf("title width at width=%d focused=%v = %d, want %d: %q", width, focused, got, width, ansi.Strip(line))
 			}

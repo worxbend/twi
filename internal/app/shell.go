@@ -1315,6 +1315,7 @@ func (m shellModel) chatView(layout shellLayout) string {
 		contentHeight: layout.chatContentHeight,
 		padding:       1,
 		accent:        m.theme.Accent,
+		focused:       m.focus == focusChat && !m.anyOverlayOpen(),
 	})
 }
 
