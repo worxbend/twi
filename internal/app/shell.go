@@ -362,7 +362,10 @@ type chatRowBlock struct {
 	// continuesGroup marks a message that follows another from the same
 	// author, so LayoutGrouped can omit the repeated author header.
 	continuesGroup bool
-	animating      bool
+	// groupEnd marks the last block of a group, so its last rendered row
+	// draws the rail's closing corner instead of a plain bar.
+	groupEnd  bool
+	animating bool
 	// revealed marks a block whose rows are an in-progress animation frame
 	// and must not be re-rendered from the message.
 	revealed bool
@@ -1654,7 +1657,7 @@ func (m shellModel) styleChatRowWindow(blocks []chatRowBlock, rowWidth, start, c
 				return rows
 			}
 			if keep {
-				rows = append(rows, m.messageGroupSeparatorString(rowWidth))
+				rows = append(rows, m.messageGroupSeparatorString(block, block.groupIndex, rowWidth))
 			}
 			index++
 		}
@@ -1777,20 +1780,60 @@ func (m shellModel) chatRenderParams(width int) chatRenderParams {
 // assignChatAuthorGroups joins adjacent visible messages from the same author
 // into one visual group. Filters are applied before this pass, so grouping
 // reflects exactly what the user can see rather than hidden history.
+//
+// This walks the whole visible backlog on every call, so it compares
+// identities directly with chatGroupIdentityEqual rather than going through
+// chatAuthorGroupKey: building that key allocates a lowercased, prefixed
+// string per message, which added up across a large scrollback.
 func assignChatAuthorGroups(blocks []chatRowBlock) {
-	previousKey := ""
+	var previous chatGroupIdentity
 	groupIndex := -1
 	for index := range blocks {
-		key := chatAuthorGroupKey(blocks[index].message, index)
-		if index == 0 || key != previousKey {
+		identity := chatGroupIdentityOf(blocks[index].message)
+		if index == 0 || !chatGroupIdentityEqual(identity, previous) {
 			groupIndex++
 			blocks[index].separatorBefore = index > 0
+			if index > 0 {
+				blocks[index-1].groupEnd = true
+			}
 		} else {
 			blocks[index].continuesGroup = true
 		}
 		blocks[index].groupIndex = groupIndex
-		previousKey = key
+		previous = identity
 	}
+	if len(blocks) > 0 {
+		blocks[len(blocks)-1].groupEnd = true
+	}
+}
+
+// chatGroupIdentity is the allocation-free counterpart of chatAuthorGroupKey:
+// same precedence and grouping semantics, but comparable with
+// chatGroupIdentityEqual instead of string equality, so assignChatAuthorGroups
+// does not have to build a key string for every message it walks.
+type chatGroupIdentity struct {
+	kind  byte // 'a' = author identity, 'm' = message ID, 0 = anonymous
+	value string
+}
+
+func chatGroupIdentityOf(message twitch.ChatMessage) chatGroupIdentity {
+	for _, identity := range []string{message.AuthorLogin, message.AuthorID, message.DisplayName} {
+		if identity = strings.TrimSpace(identity); identity != "" {
+			return chatGroupIdentity{kind: 'a', value: identity}
+		}
+	}
+	if messageID := strings.TrimSpace(message.ID); messageID != "" {
+		return chatGroupIdentity{kind: 'm', value: messageID}
+	}
+	return chatGroupIdentity{}
+}
+
+// chatGroupIdentityEqual mirrors chatAuthorGroupKey equality: anonymous
+// identities (blockIndex-qualified in the key form) never match, and the kind
+// byte keeps the author and message-ID spaces from colliding the way the
+// key's "author:"/"message:" prefixes did.
+func chatGroupIdentityEqual(a, b chatGroupIdentity) bool {
+	return a.kind != 0 && a.kind == b.kind && strings.EqualFold(a.value, b.value)
 }
 
 func chatAuthorGroupKey(message twitch.ChatMessage, blockIndex int) string {
@@ -1951,11 +1994,12 @@ func (m shellModel) messageRowString(block chatRowBlock, blockIndex, rowIndex in
 	}
 
 	railColor := m.messageRailColor(block, blockIndex)
+	glyph := railGlyph(block, rowIndex, chatRowBlockRowCount(block))
 	rail := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(railColor)).
 		Background(lipgloss.Color(background)).
 		Bold(block.animating).
-		Render("│ ")
+		Render(glyph + " ")
 	if gutterWidth == 2 {
 		return rail + content
 	}
@@ -2036,10 +2080,60 @@ func (m shellModel) messageAuthorColor(message twitch.ChatMessage) string {
 	return theme.IdentityColor(identity, []string{m.theme.Background, m.theme.Surface}, m.theme.Foreground)
 }
 
-func (m shellModel) messageGroupSeparatorString(rowWidth int) string {
+// railGlyph picks the left-rail glyph for one content row of a message
+// group: a rounded corner where the group's box opens or closes, a plain
+// bar everywhere else.
+//
+// The opening corner is normally drawn on the header row instead (see
+// messageGroupHeaderString), so a group's own first content row only draws
+// its own "╭" when there is no header above it to draw one -- true only for
+// the very first group in the backlog, which predates any separator.
+func railGlyph(block chatRowBlock, rowIndex, rowCount int) string {
+	if block.groupEnd && rowIndex == rowCount-1 {
+		return "╰"
+	}
+	if !block.continuesGroup && rowIndex == 0 && !block.separatorBefore {
+		return "╭"
+	}
+	return "│"
+}
+
+// messageGroupAuthorLabel is the name a group header names its box after, or
+// "" for messages with no real author (notices, twi's own status lines) --
+// messageGroupSeparatorString falls back to a plain rule for those rather
+// than titling a box with nobody's name.
+func messageGroupAuthorLabel(message twitch.ChatMessage) string {
+	if name := strings.TrimSpace(message.DisplayName); name != "" {
+		return name
+	}
+	return strings.TrimSpace(message.AuthorLogin)
+}
+
+// messageGroupSeparatorString draws the rule that opens a message group:
+// a titled header naming the author when there is one to name and the pane
+// is wide enough, or the bare horizontal rule it has always been otherwise.
+//
+// LayoutGrouped already gives the author their own header row inside the
+// group (see groupedHeaderFragments), so titling the box here too would name
+// them twice in a row; that layout gets the plain rule instead.
+func (m shellModel) messageGroupSeparatorString(block chatRowBlock, blockIndex, rowWidth int) string {
 	if rowWidth <= 0 {
 		return ""
 	}
+	if m.display.messageLayout == render.LayoutGrouped {
+		return m.messageGroupPlainRuleString(rowWidth)
+	}
+	label := messageGroupAuthorLabel(block.message)
+	color := m.messageAuthorColor(block.message)
+	if label == "" || color == "" {
+		return m.messageGroupPlainRuleString(rowWidth)
+	}
+	return m.messageGroupHeaderString(label, color, block, blockIndex, rowWidth)
+}
+
+// messageGroupPlainRuleString is the bare horizontal rule drawn when a group
+// has no real author to name, or the pane is too narrow for a titled header.
+func (m shellModel) messageGroupPlainRuleString(rowWidth int) string {
 	line := strings.Repeat("─", rowWidth)
 	if rowWidth >= 5 {
 		line = "  " + strings.Repeat("─", rowWidth-4) + "  "
@@ -2048,6 +2142,48 @@ func (m shellModel) messageGroupSeparatorString(rowWidth int) string {
 		Foreground(lipgloss.Color(m.theme.Border)).
 		Background(lipgloss.Color(m.theme.Surface)).
 		Render(line)
+}
+
+// messageGroupHeaderString draws the rounded top border that opens a message
+// group: a corner cap aligned with railGlyph's rail below it, the author's
+// name in their identity color, and a rule filling the rest of the width.
+//
+// leftWidth mirrors messageGutterWidth exactly, so the corner cap lands on
+// the same column the rail draws its own glyph in; below messageGutterWidth's
+// narrowest breakpoint there is no rail to cap, so this falls back to the
+// plain rule instead of drawing a corner that floats over nothing.
+func (m shellModel) messageGroupHeaderString(label, color string, block chatRowBlock, blockIndex, rowWidth int) string {
+	leftWidth := messageGutterWidth(rowWidth)
+	if leftWidth < 2 {
+		return m.messageGroupPlainRuleString(rowWidth)
+	}
+	left := "╭" + strings.Repeat("─", leftWidth-1)
+	const rightCap = "╮"
+	// Fixed cost of everything but the name and the fill: the left cap, a
+	// space before the name, a space before the right cap, and the right
+	// cap itself.
+	fixed := leftWidth + 3
+	if rowWidth < fixed {
+		return m.messageGroupPlainRuleString(rowWidth)
+	}
+
+	background := m.messageGroupBackground(block, blockIndex)
+	name := fitLine(label, rowWidth-fixed)
+	fillWidth := rowWidth - fixed - uniseg.StringWidth(name)
+
+	rule := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Border)).Background(lipgloss.Color(background))
+	title := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Background(lipgloss.Color(background)).Bold(true)
+
+	var b strings.Builder
+	b.WriteString(rule.Render(left))
+	b.WriteString(rule.Render(" "))
+	b.WriteString(title.Render(name))
+	if fillWidth > 0 {
+		b.WriteString(rule.Render(strings.Repeat("─", fillWidth)))
+	}
+	b.WriteString(rule.Render(" "))
+	b.WriteString(rule.Render(rightCap))
+	return b.String()
 }
 
 func (m *shellModel) cycleFocus() {

@@ -19,6 +19,7 @@ func TestChatRowsGroupConsecutiveAuthorsAndSeparateChanges(t *testing.T) {
 
 	wantGroups := []int{0, 0, 1, 1, 2}
 	wantSeparators := []bool{false, false, true, false, true}
+	wantGroupEnd := []bool{false, true, false, true, true}
 	if len(blocks) != len(wantGroups) {
 		t.Fatalf("visible block count = %d, want %d", len(blocks), len(wantGroups))
 	}
@@ -33,6 +34,9 @@ func TestChatRowsGroupConsecutiveAuthorsAndSeparateChanges(t *testing.T) {
 				wantSeparators[index],
 			)
 		}
+		if block.groupEnd != wantGroupEnd[index] {
+			t.Errorf("block %d groupEnd = %v, want %v", index, block.groupEnd, wantGroupEnd[index])
+		}
 		if got := chatRowBlockRowCount(block); got != 1 {
 			t.Fatalf("test message block %d row count = %d, want 1", index, got)
 		}
@@ -42,12 +46,16 @@ func TestChatRowsGroupConsecutiveAuthorsAndSeparateChanges(t *testing.T) {
 	if got, want := len(rows), 7; got != want {
 		t.Fatalf("rendered row count = %d, want %d (5 messages + 2 author separators)", got, want)
 	}
-	separator := strings.TrimSpace(ansi.Strip(rows[2]))
-	if separator == "" || strings.Trim(separator, "─") != "" {
-		t.Fatalf("first author separator = %q, want a visible horizontal rule", separator)
+	bobHeader := strings.TrimSpace(ansi.Strip(rows[2]))
+	if !strings.Contains(bobHeader, "Bob") || !strings.Contains(bobHeader, "╭") {
+		t.Fatalf("Bob's group header = %q, want it to name Bob under an opening corner", bobHeader)
 	}
-	if got := strings.TrimSpace(ansi.Strip(rows[5])); got != separator {
-		t.Fatalf("second author separator = %q, want %q", got, separator)
+	aliceHeader := strings.TrimSpace(ansi.Strip(rows[5]))
+	if !strings.Contains(aliceHeader, "Alice") || !strings.Contains(aliceHeader, "╭") {
+		t.Fatalf("Alice's group header = %q, want it to name Alice under an opening corner", aliceHeader)
+	}
+	if bobHeader == aliceHeader {
+		t.Fatalf("Bob's and Alice's group headers are identical: %q", bobHeader)
 	}
 }
 
@@ -186,13 +194,23 @@ func visibleChatPage(model shellModel) string {
 func TestMessageGroupSeparatorPreservesResponsiveWidth(t *testing.T) {
 	forceColorProfile(t)
 	model := newMockModel("alpha", config.Default())
+	notice := chatRowBlock{message: twitch.ChatMessage{Type: twitch.MessageTypeNotice}}
+	named := chatRowBlock{message: twitch.ChatMessage{AuthorLogin: "alice", DisplayName: "Alice", Type: twitch.MessageTypeChat}}
 	for width := 1; width <= 60; width++ {
-		line := model.messageGroupSeparatorString(width)
+		plain := model.messageGroupSeparatorString(notice, 0, width)
+		if got := lipgloss.Width(plain); got != width {
+			t.Fatalf("plain separator width at %d cells = %d: %q", width, got, ansi.Strip(plain))
+		}
+		if !strings.Contains(ansi.Strip(plain), "─") {
+			t.Fatalf("plain separator at %d cells has no visible rule: %q", width, ansi.Strip(plain))
+		}
+
+		line := model.messageGroupSeparatorString(named, 0, width)
 		if got := lipgloss.Width(line); got != width {
-			t.Fatalf("separator width at %d cells = %d: %q", width, got, ansi.Strip(line))
+			t.Fatalf("named header width at %d cells = %d: %q", width, got, ansi.Strip(line))
 		}
 		if !strings.Contains(ansi.Strip(line), "─") {
-			t.Fatalf("separator at %d cells has no visible rule: %q", width, ansi.Strip(line))
+			t.Fatalf("named header at %d cells has no visible rule: %q", width, ansi.Strip(line))
 		}
 	}
 }
