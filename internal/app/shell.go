@@ -2113,15 +2113,16 @@ func messageGroupAuthorLabel(message twitch.ChatMessage) string {
 // a titled header naming the author when there is one to name and the pane
 // is wide enough, or the bare horizontal rule it has always been otherwise.
 //
-// LayoutGrouped already gives the author their own header row inside the
-// group (see groupedHeaderFragments), so titling the box here too would name
-// them twice in a row; that layout gets the plain rule instead.
+// LayoutGrouped also gives the author their own header row inside the group
+// (see groupedHeaderFragments), so the name appears twice for that layout -
+// once on the box's own title, once on the per-message header beneath it,
+// which additionally carries role/sub/follow/seen context the box title
+// does not. That is the intended box-preview look, not a bug to dodge: the
+// box names whose conversation this is at a glance while scrolling past it,
+// and the row beneath answers "who are they" once you stop on it.
 func (m shellModel) messageGroupSeparatorString(block chatRowBlock, blockIndex, rowWidth int) string {
 	if rowWidth <= 0 {
 		return ""
-	}
-	if m.display.messageLayout == render.LayoutGrouped {
-		return m.messageGroupPlainRuleString(rowWidth)
 	}
 	label := messageGroupAuthorLabel(block.message)
 	color := m.messageAuthorColor(block.message)
