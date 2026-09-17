@@ -1416,27 +1416,11 @@ func (m shellModel) sidebarView(layout shellLayout) string {
 		if state == nil {
 			continue
 		}
-		marker := " "
-		if key == m.channels.active {
-			marker = ">"
-		}
-		status := channelStatusIndicator(state.status.Status)
-		name := "#" + state.name
-		line := fmt.Sprintf("%s %s %s", marker, status, name)
-		if state.unread > 0 {
-			line += fmt.Sprintf(" %d", state.unread)
-		}
-		if state.messageFilters.active() {
-			line += " f"
-		}
 		// The close affordance is only drawn on the highlighted row while
 		// the sidebar has focus, so it reads as "x closes this" rather than
 		// as decoration on every channel.
-		if focused && index == selected {
-			line = fitLine(line, clampMin(contentWidth-2, 1))
-			line += sidebarCloseAffordance
-		}
-		lines = append(lines, fitLine(line, contentWidth))
+		showClose := focused && index == selected
+		lines = append(lines, m.sidebarChannelLine(state, key == m.channels.active, contentWidth, showClose))
 	}
 	if len(m.channels.order) == 0 {
 		lines = append(lines, fitLine(" (none open)", contentWidth))
@@ -1566,6 +1550,74 @@ func channelStatusIndicator(status ConnectionStatus) string {
 	default:
 		return "-"
 	}
+}
+
+// channelStatusColor pairs channelStatusIndicator's glyph with the color that
+// makes a channel's connection state readable at a glance in the sidebar:
+// green once connected, amber while that is still being negotiated, red once
+// it has failed outright.
+func channelStatusColor(status ConnectionStatus, palette theme.Palette) string {
+	switch status {
+	case ConnectionConnected:
+		return palette.Success
+	case ConnectionConnecting, ConnectionReconnecting:
+		return palette.Warning
+	case ConnectionFailed, ConnectionDisconnected, ConnectionClosed:
+		return palette.Error
+	default:
+		return palette.Muted
+	}
+}
+
+// sidebarChannelLine renders one channel row: a marker for the active
+// channel, a status glyph colored by connection state, the channel name, and
+// trailing unread/filter flags - then, on the highlighted row while the
+// sidebar has focus, the close affordance. Segments are styled individually
+// with an explicit Surface background (matching activityLogLine's own
+// reasoning): renderPane wraps the joined content in one outer Background()
+// call, which in lipgloss v1.1.0 only colors text up to its first embedded
+// reset, so every segment after the glyph would otherwise fall through to
+// the terminal's own default background.
+func (m shellModel) sidebarChannelLine(state *channelState, active bool, contentWidth int, showClose bool) string {
+	marker := " "
+	if active {
+		marker = ">"
+	}
+	status := channelStatusIndicator(state.status.Status)
+	statusColor := channelStatusColor(state.status.Status, m.theme)
+	suffix := ""
+	if state.unread > 0 {
+		suffix += fmt.Sprintf(" %d", state.unread)
+	}
+	if state.messageFilters.active() {
+		suffix += " f"
+	}
+
+	budget := contentWidth
+	if showClose {
+		budget = clampMin(contentWidth-uniseg.StringWidth(sidebarCloseAffordance), 0)
+	}
+
+	var b strings.Builder
+	used := 0
+	write := func(value, foreground string, bold bool) {
+		value = fitLine(value, min(uniseg.StringWidth(value), clampMin(budget-used, 0)))
+		if value == "" {
+			return
+		}
+		b.WriteString(paneStyledText(value, foreground, m.theme.Surface, bold))
+		used += uniseg.StringWidth(value)
+	}
+
+	write(marker, m.theme.Foreground, false)
+	write(" "+status, statusColor, true)
+	write(" #"+state.name, m.theme.Foreground, false)
+	write(suffix, m.theme.Muted, false)
+
+	if showClose {
+		b.WriteString(paneStyledText(sidebarCloseAffordance, m.theme.Muted, m.theme.Surface, false))
+	}
+	return b.String()
 }
 
 // styleChatRowWindow converts blocks into styled terminal rows, producing
