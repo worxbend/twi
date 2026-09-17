@@ -14,6 +14,7 @@ import (
 const (
 	streamStatusPollInterval = 60 * time.Second
 	chatBitrateWindow        = 5 * time.Second
+	memSampleInterval        = 1 * time.Second
 )
 
 type chatByteSample struct {
@@ -105,11 +106,14 @@ func (m *shellModel) recordChatBytes(message twitch.ChatMessage) {
 	})
 }
 
-// sampleResourceUsage records a CPU-time delta and the current Go heap
-// allocation once per animation tick. These are sampled here (not read fresh
-// inside View()) so View() stays a pure function of already-ticked model
-// state instead of reading live, ever-changing runtime stats mid-render.
-// Unavailable on platforms without sampleProcessCPUTime support (see
+// sampleResourceUsage records a CPU-time delta on every animation tick and
+// the current Go heap allocation at most once per memSampleInterval. These
+// are sampled here (not read fresh inside View()) so View() stays a pure
+// function of already-ticked model state instead of reading live,
+// ever-changing runtime stats mid-render. CPU time is cheap to sample every
+// tick, but runtime.ReadMemStats synchronizes with the garbage collector, so
+// it's throttled to a cadence the status bar's mem=NNMB figure actually
+// needs. Unavailable on platforms without sampleProcessCPUTime support (see
 // status_metrics_unix.go / status_metrics_other.go).
 func (m *shellModel) sampleResourceUsage(now time.Time) {
 	cpuTime, ok := sampleProcessCPUTime()
@@ -127,9 +131,12 @@ func (m *shellModel) sampleResourceUsage(now time.Time) {
 		m.runtime.cpuSampleTime = cpuTime
 	}
 
-	var stats runtime.MemStats
-	runtime.ReadMemStats(&stats)
-	m.runtime.memoryMB = float64(stats.Alloc) / (1024 * 1024)
+	if m.runtime.memSampleAt.IsZero() || now.Sub(m.runtime.memSampleAt) >= memSampleInterval {
+		var stats runtime.MemStats
+		runtime.ReadMemStats(&stats)
+		m.runtime.memoryMB = float64(stats.Alloc) / (1024 * 1024)
+		m.runtime.memSampleAt = now
+	}
 }
 
 // trimChatByteSamples drops samples outside the rolling bitrate window.

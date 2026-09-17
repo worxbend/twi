@@ -253,11 +253,19 @@ func (s *channelStateSet) applyMessage(message twitch.ChatMessage) (*channelStat
 	return state, true
 }
 
-// trimScrollback drops the oldest messages once the channel exceeds limit.
+// trimScrollback drops the oldest messages once the channel exceeds limit by
+// more than a small margin.
 //
 // Retained messages are re-rendered on every repaint, so an untrimmed buffer
 // makes frame time grow without bound over a long session. Trimming from the
 // head keeps the newest history, which is the part anyone is reading.
+//
+// It is called after every appended message, so once a channel is at
+// capacity a hard `> limit` threshold would reallocate and copy the whole
+// buffer for every single incoming message. Waiting for the buffer to
+// overshoot by scrollbackTrimMargin first turns that into an amortized cost:
+// still bounded (the buffer never grows past limit+margin), but paid roughly
+// once every margin messages instead of on every one.
 //
 // A non-zero scrollOffset is measured from the bottom of the buffer, so
 // dropping from the head does not shift what the viewer is looking at and the
@@ -265,7 +273,7 @@ func (s *channelStateSet) applyMessage(message twitch.ChatMessage) (*channelStat
 // clampScroll, once the buffer is short enough that the old offset would
 // scroll past the top.
 func (s *channelState) trimScrollback(limit int) {
-	if s == nil || limit <= 0 || len(s.messages) <= limit {
+	if s == nil || limit <= 0 || len(s.messages) <= limit+scrollbackTrimMargin(limit) {
 		return
 	}
 	drop := len(s.messages) - limit
@@ -275,6 +283,19 @@ func (s *channelState) trimScrollback(limit int) {
 	kept := make([]twitch.ChatMessage, limit)
 	copy(kept, s.messages[drop:])
 	s.messages = kept
+}
+
+// scrollbackTrimMargin caps how far a channel's buffer may overshoot limit
+// before trimScrollback pays to reallocate. It scales with limit so trimming
+// still lands on an exact, small buffer for the small limits tests use, while
+// giving a real-sized scrollback (thousands of messages) room to batch.
+func scrollbackTrimMargin(limit int) int {
+	const maxMargin = 128
+	margin := limit / 10
+	if margin > maxMargin {
+		margin = maxMargin
+	}
+	return margin
 }
 
 // applyMembership folds a JOIN/PART into the target channel's roster and

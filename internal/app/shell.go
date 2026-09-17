@@ -206,6 +206,7 @@ type runtimeMetricsState struct {
 	cpuSampleTime   time.Duration
 	cpuPercent      float64
 	cpuAvailable    bool
+	memSampleAt     time.Time
 	memoryMB        float64
 	chatByteSamples []chatByteSample
 }
