@@ -526,10 +526,10 @@ func coalesceMessageFragments(in []twitch.MessageFragment) []twitch.MessageFragm
 }
 
 func parseBadgeInfo(raw string) map[string]string {
-	info := make(map[string]string)
 	if raw == "" {
-		return info
+		return nil
 	}
+	info := make(map[string]string)
 	for _, badge := range strings.Split(raw, ",") {
 		key, value, ok := strings.Cut(badge, "/")
 		if !ok || key == "" {
