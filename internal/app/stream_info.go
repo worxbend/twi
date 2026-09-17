@@ -94,13 +94,9 @@ func (m *shellModel) scheduleStreamInfoLoad() tea.Cmd {
 		ctx, cancel := context.WithTimeout(lifetime, streamInfoRequestTimeout)
 		defer cancel()
 
-		id := knownID
-		if id == "" {
-			resolved, err := resolveSelfBroadcasterID(ctx, userLookup, username)
-			if err != nil {
-				return streamInfoLoadedMsg{err: err}
-			}
-			id = resolved
+		id, err := resolveBroadcasterID(ctx, userLookup, username, knownID)
+		if err != nil {
+			return streamInfoLoadedMsg{err: err}
 		}
 
 		info, err := channelManager.GetChannelInformation(ctx, id)

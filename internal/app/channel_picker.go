@@ -82,13 +82,9 @@ func (m *shellModel) scheduleFollowedChannelsLookup() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(lifetime, channelPickerRequestTimeout)
 		defer cancel()
-		id := knownID
-		if id == "" {
-			resolved, err := resolveSelfBroadcasterID(ctx, userLookup, username)
-			if err != nil {
-				return followedChannelsResolvedMsg{err: err}
-			}
-			id = resolved
+		id, err := resolveBroadcasterID(ctx, userLookup, username, knownID)
+		if err != nil {
+			return followedChannelsResolvedMsg{err: err}
 		}
 		channels, err := lookup.GetFollowedChannels(ctx, id)
 		return followedChannelsResolvedMsg{channels: channels, err: err}

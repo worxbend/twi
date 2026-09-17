@@ -28,3 +28,14 @@ func resolveSelfBroadcasterID(ctx context.Context, userLookup twitch.UserLookup,
 	}
 	return "", fmt.Errorf("could not resolve a Twitch user ID for %q", username)
 }
+
+// resolveBroadcasterID returns knownID as-is when it's already set, and
+// otherwise resolves it via resolveSelfBroadcasterID. Callers use this to
+// avoid repeating the "use the cached ID or look it up" check at every Helix
+// call site.
+func resolveBroadcasterID(ctx context.Context, userLookup twitch.UserLookup, username, knownID string) (string, error) {
+	if knownID != "" {
+		return knownID, nil
+	}
+	return resolveSelfBroadcasterID(ctx, userLookup, username)
+}

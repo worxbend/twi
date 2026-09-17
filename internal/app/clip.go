@@ -146,13 +146,9 @@ func (m *shellModel) scheduleClipCreate(state *channelState, offsets clipOffsets
 		ctx, cancel := context.WithTimeout(lifetime, clipRequestTimeout)
 		defer cancel()
 
-		id := knownID
-		if id == "" {
-			resolved, err := resolveSelfBroadcasterID(ctx, userLookup, username)
-			if err != nil {
-				return clipCreatedMsg{channel: channel, offsets: offsets, err: err}
-			}
-			id = resolved
+		id, err := resolveBroadcasterID(ctx, userLookup, username, knownID)
+		if err != nil {
+			return clipCreatedMsg{channel: channel, offsets: offsets, err: err}
 		}
 		clip, err := clipManager.CreateClip(ctx, id)
 		if err != nil {

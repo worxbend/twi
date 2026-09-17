@@ -68,13 +68,9 @@ func (m *shellModel) scheduleMiscLoad() tea.Cmd {
 		ctx, cancel := context.WithTimeout(lifetime, miscRequestTimeout)
 		defer cancel()
 
-		id := knownID
-		if id == "" {
-			resolved, err := resolveSelfBroadcasterID(ctx, userLookup, username)
-			if err != nil {
-				return miscMarkersLoadedMsg{err: err}
-			}
-			id = resolved
+		id, err := resolveBroadcasterID(ctx, userLookup, username, knownID)
+		if err != nil {
+			return miscMarkersLoadedMsg{err: err}
 		}
 
 		markers, err := markerManager.GetStreamMarkers(ctx, id, 0)
@@ -124,13 +120,9 @@ func (m *shellModel) scheduleCreateMarker(description string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(lifetime, miscRequestTimeout)
 		defer cancel()
 
-		id := knownID
-		if id == "" {
-			resolved, err := resolveSelfBroadcasterID(ctx, userLookup, username)
-			if err != nil {
-				return miscMarkerCreatedMsg{err: err}
-			}
-			id = resolved
+		id, err := resolveBroadcasterID(ctx, userLookup, username, knownID)
+		if err != nil {
+			return miscMarkerCreatedMsg{err: err}
 		}
 		marker, err := markerManager.CreateStreamMarker(ctx, id, description)
 		if err != nil {
