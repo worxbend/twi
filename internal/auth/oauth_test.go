@@ -485,13 +485,13 @@ func TestTwitchOAuthLoginFlowRedactsBodyReadCancellation(t *testing.T) {
 	})
 }
 
-func TestTwitchOAuthLoginFlowRejectsMissingScopes(t *testing.T) {
+func TestTwitchOAuthLoginFlowAllowsTokenResponseWithoutScopes(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/token":
-			fmt.Fprint(w, `{"access_token":"access-token","refresh_token":"refresh-token","expires_in":3600,"scope":["chat:read"],"token_type":"bearer"}`)
+			fmt.Fprint(w, `{"access_token":"access-token","refresh_token":"refresh-token","expires_in":3600,"token_type":"bearer"}`)
 		case "/validate":
-			t.Fatal("validation endpoint should not be called when token response lacks required scopes")
+			fmt.Fprint(w, `{"client_id":"client-id","login":"viewer","scopes":["chat:read","chat:edit"],"user_id":"42","expires_in":3590}`)
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
@@ -513,18 +513,17 @@ func TestTwitchOAuthLoginFlowRejectsMissingScopes(t *testing.T) {
 		t.Fatalf("BeginLogin error = %v", err)
 	}
 
-	_, err = flow.CompleteLogin(context.Background(), LoginCallback{
+	result, err := flow.CompleteLogin(context.Background(), LoginCallback{
 		Code:          NewSecret("callback-code"),
 		State:         NewSecret("state-secret"),
 		ExpectedState: challenge.State,
 	})
-	if err == nil {
-		t.Fatal("CompleteLogin error = nil, want missing scope error")
+	if err != nil {
+		t.Fatalf("CompleteLogin error = %v, want validated scope fallback", err)
 	}
-	if !strings.Contains(err.Error(), "chat:edit") || !strings.Contains(err.Error(), "approve") {
-		t.Fatalf("error = %q, want missing scope guidance", err.Error())
+	if !reflect.DeepEqual(result.Scopes, []Scope{ScopeChatRead, ScopeChatEdit}) {
+		t.Fatalf("result scopes = %#v, want validated scopes", result.Scopes)
 	}
-	assertTextDoesNotLeak(t, err.Error(), "access-token", "refresh-token", "callback-code", "client-secret", "state-secret")
 }
 
 func TestTwitchOAuthLoginFlowRejectsValidationMissingScopes(t *testing.T) {

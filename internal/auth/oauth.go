@@ -341,14 +341,23 @@ func (f *TwitchOAuthLoginFlow) storeAttempt(attempt oauthLoginAttempt) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	f.sweepExpiredAttempts(now)
 	if existing, ok := f.pending[state]; ok {
-		if now.Before(existing.ExpiresAt) || now.Equal(existing.ExpiresAt) {
+		if !now.After(existing.ExpiresAt) {
 			return errors.New("start Twitch OAuth login: OAuth state is already pending; restart login")
 		}
 		delete(f.pending, state)
 	}
 	f.pending[state] = attempt
 	return nil
+}
+
+func (f *TwitchOAuthLoginFlow) sweepExpiredAttempts(now time.Time) {
+	for state, attempt := range f.pending {
+		if now.After(attempt.ExpiresAt) {
+			delete(f.pending, state)
+		}
+	}
 }
 
 func validateOAuthCallbackState(callback LoginCallback) (string, error) {
@@ -368,15 +377,18 @@ func (f *TwitchOAuthLoginFlow) consumeAttempt(state string) (oauthLoginAttempt, 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	now := f.now()
 	attempt, ok := f.pending[state]
 	if !ok {
+		f.sweepExpiredAttempts(now)
 		return oauthLoginAttempt{}, errors.New("complete Twitch OAuth login: OAuth state is unknown or expired; restart login")
 	}
-	if f.now().After(attempt.ExpiresAt) {
+	if now.After(attempt.ExpiresAt) {
 		delete(f.pending, state)
 		return oauthLoginAttempt{}, errors.New("complete Twitch OAuth login: OAuth state expired; restart login")
 	}
 	delete(f.pending, state)
+	f.sweepExpiredAttempts(now)
 	return attempt, nil
 }
 
@@ -427,9 +439,6 @@ func (f *TwitchOAuthLoginFlow) exchangeCode(ctx context.Context, attempt oauthLo
 	}
 
 	scopes := Scopes(decoded.Scope...)
-	if missing := MissingScopes(scopes, attempt.Scopes); len(missing) > 0 {
-		return oauthExchangedToken{}, missingScopesError("Twitch OAuth token response", missing, attempt.Scopes)
-	}
 
 	tokens := oauthExchangedToken{
 		AccessToken:  NewSecret(accessToken),

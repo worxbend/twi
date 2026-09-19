@@ -18,13 +18,11 @@ type LoginFlow interface {
 // LoginRequest describes the start of an OAuth login attempt. Sensitive fields
 // use Secret so accidental formatting does not print raw values.
 type LoginRequest struct {
-	ClientID      string
-	ClientSecret  Secret
-	RedirectURI   string
-	Scopes        []Scope
-	State         Secret
-	CodeChallenge string
-	LoginHint     string
+	ClientID     string
+	ClientSecret Secret
+	RedirectURI  string
+	Scopes       []Scope
+	State        Secret
 }
 
 // RequiredScopes returns the request scopes, or the default chat read/send
