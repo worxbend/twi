@@ -438,7 +438,7 @@ func runMockChat(cfg config.Config, stdout, stderr io.Writer) int {
 func runLiveChatSession(cfg config.Config, stdout, stderr io.Writer) int {
 	status, err := applyStoredCredentials(context.Background(), &cfg)
 	if err != nil {
-		fmt.Fprintf(stderr, "load credentials: %s\n", config.RedactDisplayValue(status.Err.Error()))
+		fmt.Fprintf(stderr, "load credentials: %s\n", config.RedactDisplayValue(err.Error()))
 		return 1
 	}
 	logger, closeLog, ok := openDebugLoggerOrReport(cfg, stderr)
@@ -742,22 +742,41 @@ func runProfileSet(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	cfg, err := config.Load(os.Environ(), config.Overrides{ConfigPath: cfgPath})
+	// profile set edits the config file, so it loads the file alone: loading
+	// the env-merged config and writing it back would snapshot unrelated
+	// env-only values into config.toml.
+	cfg, err := config.Load(nil, config.Overrides{ConfigPath: cfgPath})
 	if err != nil {
 		fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
 		return 1
 	}
 	cfg.Features.ThemeName = name
 	if name == "custom" {
-		setIfNonEmpty(&cfg.Features.ThemeCustom.Background, background)
-		setIfNonEmpty(&cfg.Features.ThemeCustom.Foreground, foreground)
-		setIfNonEmpty(&cfg.Features.ThemeCustom.Accent, accent)
-		setIfNonEmpty(&cfg.Features.ThemeCustom.Muted, muted)
-		setIfNonEmpty(&cfg.Features.ThemeCustom.Border, border)
-		setIfNonEmpty(&cfg.Features.ThemeCustom.Surface, surface)
-		setIfNonEmpty(&cfg.Features.ThemeCustom.Warning, warning)
-		setIfNonEmpty(&cfg.Features.ThemeCustom.Error, errorColor)
-		setIfNonEmpty(&cfg.Features.ThemeCustom.Success, success)
+		colors := []struct {
+			flag  string
+			dst   *string
+			value string
+		}{
+			{"background", &cfg.Features.ThemeCustom.Background, background},
+			{"foreground", &cfg.Features.ThemeCustom.Foreground, foreground},
+			{"accent", &cfg.Features.ThemeCustom.Accent, accent},
+			{"muted", &cfg.Features.ThemeCustom.Muted, muted},
+			{"border", &cfg.Features.ThemeCustom.Border, border},
+			{"surface", &cfg.Features.ThemeCustom.Surface, surface},
+			{"warning", &cfg.Features.ThemeCustom.Warning, warning},
+			{"error", &cfg.Features.ThemeCustom.Error, errorColor},
+			{"success", &cfg.Features.ThemeCustom.Success, success},
+		}
+		for _, color := range colors {
+			if strings.TrimSpace(color.value) == "" {
+				continue
+			}
+			if !validHexColor(color.value) {
+				fmt.Fprintf(stderr, "--%s must be a #rrggbb color, got %q\n", color.flag, color.value)
+				return 2
+			}
+			*color.dst = color.value
+		}
 	}
 
 	if err := config.WriteNonSecretFile(cfg.Path, cfg); err != nil {
@@ -768,10 +787,19 @@ func runProfileSet(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func setIfNonEmpty(dst *string, value string) {
-	if strings.TrimSpace(value) != "" {
-		*dst = value
+// validHexColor reports whether value is a #rrggbb color, the only form
+// `twi profile set` accepts: anything else would be written to config.toml
+// and then silently ignored by the theme package's parser.
+func validHexColor(value string) bool {
+	if len(value) != 7 || value[0] != '#' {
+		return false
 	}
+	for _, c := range value[1:] {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", c) {
+			return false
+		}
+	}
+	return true
 }
 
 func runDoctor(args []string, stdout, stderr io.Writer) int {
@@ -797,10 +825,9 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 		}
 		cfg = fallback
 	}
-	credentialStatus, credentialErr := applyStoredCredentials(context.Background(), &cfg)
-	if credentialErr != nil {
-		credentialStatus.Err = credentialErr
-	}
+	// applyStoredCredentials already records any load error on the status it
+	// returns, so the error result itself is only a signal to skip ahead.
+	credentialStatus, _ := applyStoredCredentials(context.Background(), &cfg)
 	logger, closeLog, ok := openDebugLoggerOrReport(cfg, stderr)
 	if !ok {
 		return 1

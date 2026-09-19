@@ -332,9 +332,12 @@ func writeDefaultConfigIfMissing(cfg config.Config) (wrote bool, err error) {
 	return true, nil
 }
 
+// hasHelpArg reports whether args ask for help: a -h/--help flag anywhere,
+// or a leading bare "help". A "help" appearing later is a flag value (for
+// example --username help), not a help request.
 func hasHelpArg(args []string) bool {
-	for _, arg := range args {
-		if arg == "-h" || arg == "--help" || arg == "help" {
+	for i, arg := range args {
+		if arg == "-h" || arg == "--help" || (i == 0 && arg == "help") {
 			return true
 		}
 	}

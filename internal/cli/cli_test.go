@@ -160,6 +160,7 @@ func TestSetupHelp(t *testing.T) {
 
 func TestSetupNonInteractiveWritesConfigAndRunsLoginDryRunWithoutSecrets(t *testing.T) {
 	clearTwitchCredentialEnv(t)
+	clearTWIEnv(t)
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:setup-access-secret")
 	t.Setenv("TWI_TWITCH_REFRESH_TOKEN", "setup-refresh-secret")
@@ -234,6 +235,7 @@ func TestSetupRejectsUnsupportedAnimationMode(t *testing.T) {
 
 func TestSetupNonInteractiveRejectsUnsupportedExistingMode(t *testing.T) {
 	clearTwitchCredentialEnv(t)
+	clearTWIEnv(t)
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(path, []byte(strings.Join([]string{
 		`twitch_username = "viewer"`,
@@ -268,6 +270,7 @@ func TestSetupNonInteractiveRejectsUnsupportedExistingMode(t *testing.T) {
 
 func TestSetupWizardPromptsAndRunsFakeLoginHandoff(t *testing.T) {
 	clearTwitchCredentialEnv(t)
+	clearTWIEnv(t)
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
 	path := filepath.Join(t.TempDir(), "config.toml")
 
@@ -409,6 +412,7 @@ func TestLoginDryRunExplainsFlowAndRedactsSecrets(t *testing.T) {
 
 func TestLoginUsesConfiguredRedirectURLWhenFlagNotExplicit(t *testing.T) {
 	clearTwitchCredentialEnv(t)
+	clearTWIEnv(t)
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(cfgPath, []byte(`twitch_redirect_url = "http://127.0.0.1:9999/custom/callback"`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -426,6 +430,7 @@ func TestLoginUsesConfiguredRedirectURLWhenFlagNotExplicit(t *testing.T) {
 
 func TestLoginExplicitRedirectURIFlagOverridesConfig(t *testing.T) {
 	clearTwitchCredentialEnv(t)
+	clearTWIEnv(t)
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(cfgPath, []byte(`twitch_redirect_url = "http://127.0.0.1:9999/custom/callback"`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -446,6 +451,7 @@ func TestLoginExplicitRedirectURIFlagOverridesConfig(t *testing.T) {
 
 func TestLoginWriteDefaultConfigCreatesFileOnlyWhenMissing(t *testing.T) {
 	clearTwitchCredentialEnv(t)
+	clearTWIEnv(t)
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
 
 	var stdout, stderr bytes.Buffer
@@ -1565,6 +1571,7 @@ func TestLiveChatConfiguredStartsClientWithMultipleChannels(t *testing.T) {
 }
 
 func TestProfileListMarksActiveTheme(t *testing.T) {
+	clearTWIEnv(t)
 	var stdout, stderr bytes.Buffer
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
 	code := Run([]string{"profile", "list", "--config", cfgPath}, &stdout, &stderr)
@@ -1580,6 +1587,7 @@ func TestProfileListMarksActiveTheme(t *testing.T) {
 }
 
 func TestProfileShowPrintsResolvedPalette(t *testing.T) {
+	clearTWIEnv(t)
 	var stdout, stderr bytes.Buffer
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
 	code := Run([]string{"profile", "show", "--config", cfgPath}, &stdout, &stderr)
@@ -1594,6 +1602,7 @@ func TestProfileShowPrintsResolvedPalette(t *testing.T) {
 }
 
 func TestProfileSetPersistsThemeAndPreservesOtherSettings(t *testing.T) {
+	clearTWIEnv(t)
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(cfgPath, []byte("animation_mode = \"reduced\"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -1621,6 +1630,7 @@ func TestProfileSetPersistsThemeAndPreservesOtherSettings(t *testing.T) {
 }
 
 func TestProfileSetCustomAppliesHexFlags(t *testing.T) {
+	clearTWIEnv(t)
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{
@@ -1655,6 +1665,46 @@ func TestProfileSetUnknownThemeRejected(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "unknown theme") {
 		t.Fatalf("stderr = %q, want unknown theme message", stderr.String())
+	}
+}
+
+func TestProfileSetRejectsMalformedHexColor(t *testing.T) {
+	clearTWIEnv(t)
+	var stdout, stderr bytes.Buffer
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	code := Run([]string{
+		"profile", "set", "custom", "--config", cfgPath,
+		"--background", "blue",
+	}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("Run returned %d, want 2; stdout=%q", code, stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "--background must be a #rrggbb color") {
+		t.Fatalf("stderr = %q, want #rrggbb validation message", stderr.String())
+	}
+	if _, err := os.Stat(cfgPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("config file stat error = %v, want not exist", err)
+	}
+}
+
+// A bare "help" only asks for usage in leading position; as a flag value it
+// is ordinary data.
+func TestSetupUsernameHelpIsNotAHelpRequest(t *testing.T) {
+	clearTWIEnv(t)
+	var stdout, stderr bytes.Buffer
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	code := Run([]string{
+		"setup", "--config", cfgPath, "--non-interactive", "--username", "help",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if !strings.Contains(string(data), `twitch_username = "help"`) {
+		t.Fatalf("setup config missing username help:\n%s", data)
 	}
 }
 
@@ -2182,6 +2232,23 @@ func clearTwitchCredentialEnv(t *testing.T) {
 		"TWITCH_CLIENT_SECRET",
 	} {
 		t.Setenv(key, "")
+	}
+}
+
+// clearTWIEnv blanks every TWI_/TWITCH_ variable present in the environment,
+// so tests that assert on config-file values are not affected by whatever a
+// developer shell happens to export. Blank values are enough: config.Load
+// skips empty env entries exactly as if they were unset.
+func clearTWIEnv(t *testing.T) {
+	t.Helper()
+	for _, entry := range os.Environ() {
+		key, _, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		if strings.HasPrefix(key, "TWI_") || strings.HasPrefix(key, "TWITCH_") {
+			t.Setenv(key, "")
+		}
 	}
 }
 

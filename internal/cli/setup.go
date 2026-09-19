@@ -128,7 +128,7 @@ func runSetup(args []string, stdout, stderr io.Writer) int {
 
 	cfg, err := config.Load(os.Environ(), config.Overrides{ConfigPath: opts.cfgPath})
 	if err != nil {
-		fmt.Fprintf(stderr, "load config: %v\n", err)
+		fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
 		return 1
 	}
 	applySetupFlagOptions(&cfg, opts)
@@ -154,6 +154,9 @@ func runSetup(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	// Setup deliberately materializes the env-merged effective config: its job
+	// is to capture the configuration the flags or wizard just confirmed, so
+	// values that arrived via the environment are written along with the rest.
 	if err := config.WriteNonSecretFile(cfg.Path, cfg); err != nil {
 		fmt.Fprintf(stderr, "write config: %s\n", config.RedactDisplayValue(err.Error()))
 		return 1
