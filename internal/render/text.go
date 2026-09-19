@@ -20,10 +20,11 @@ func fitCells(value string, width int) string {
 		return ""
 	}
 	out := value
-	if textWidth(out) > width {
-		out = truncateCells(out, width)
-	}
 	used := textWidth(out)
+	if used > width {
+		out = truncateCells(out, width)
+		used = textWidth(out)
+	}
 	if used < width {
 		out += strings.Repeat(" ", width-used)
 	}

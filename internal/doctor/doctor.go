@@ -98,8 +98,9 @@ func RunWithOptions(ctx context.Context, cfg config.Config, opts Options) Report
 		streamStatusCheck(cfg),
 	}
 
+	redactor := sensitiveRedactor(cfg)
 	for i := range checks {
-		checks[i].Detail = redactSensitive(checks[i].Detail, cfg)
+		checks[i].Detail = redactor.Redact(checks[i].Detail)
 	}
 	return Report{Checks: checks}
 }
@@ -381,11 +382,11 @@ func legacyAssetCacheDir(cacheDir string) (string, error) {
 	if strings.TrimSpace(cacheDir) != "" {
 		return filepath.Join(cacheDir, "assets"), nil
 	}
-	dir, err := os.UserCacheDir()
+	dir, err := config.DefaultCacheDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "twi", "assets"), nil
+	return filepath.Join(dir, "assets"), nil
 }
 
 // staleUsernameDetail explains a configured username that disagrees with the
@@ -594,7 +595,8 @@ func tokenScopesCSV(scopes []twitch.TokenScope) string {
 	return strings.Join(values, ", ")
 }
 
-// redactSensitive makes a diagnostic line safe to print.
+// sensitiveRedactor builds the redactor that makes diagnostic lines safe to
+// print.
 //
 // The rules live in internal/auth, which owns this policy for the whole
 // program; this package used to carry its own copy of the patterns. The
@@ -602,12 +604,12 @@ func tokenScopesCSV(scopes []twitch.TokenScope) string {
 // diagnostic output already prints, and keeping a surface's own marker is
 // exactly the reason WithPlaceholder exists -- previously it was the reason
 // this package kept its own patterns, which is how they drifted.
-func redactSensitive(detail string, cfg config.Config) string {
+func sensitiveRedactor(cfg config.Config) auth.Redactor {
 	values := make([]auth.Secret, 0, 4)
 	for _, secret := range sensitiveValues(cfg) {
 		values = append(values, auth.NewSecret(secret))
 	}
-	return auth.NewRedactor(values...).WithPlaceholder(redactedMarker).Redact(detail)
+	return auth.NewRedactor(values...).WithPlaceholder(redactedMarker)
 }
 
 func sensitiveValues(cfg config.Config) []string {

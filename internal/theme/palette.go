@@ -173,12 +173,7 @@ func Darken(color string, amount float64) string {
 	if !ok {
 		return color
 	}
-	if amount < 0 {
-		amount = 0
-	}
-	if amount > 1 {
-		amount = 1
-	}
+	amount = min(max(amount, 0), 1)
 	factor := 1 - amount
 	return canonicalHex(rgb{
 		r: uint8(math.Round(float64(parsed.r) * factor)),
@@ -204,12 +199,7 @@ func Mix(base, overlay string, amount float64) string {
 	if !ok {
 		return base
 	}
-	if amount < 0 {
-		amount = 0
-	}
-	if amount > 1 {
-		amount = 1
-	}
+	amount = min(max(amount, 0), 1)
 	blend := func(a, b uint8) uint8 {
 		return uint8(math.Round(float64(a)*(1-amount) + float64(b)*amount))
 	}
@@ -305,8 +295,8 @@ func interpolateComponent(start, end uint8, fraction float64) uint8 {
 func contrastRatio(a, b rgb) float64 {
 	la := relativeLuminance(a)
 	lb := relativeLuminance(b)
-	light := math.Max(la, lb)
-	dark := math.Min(la, lb)
+	light := max(la, lb)
+	dark := min(la, lb)
 	return (light + 0.05) / (dark + 0.05)
 }
 

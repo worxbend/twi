@@ -2,7 +2,7 @@ package theme
 
 import (
 	"maps"
-	"sort"
+	"slices"
 )
 
 // claudePalette is twi's default theme, named separately from the preset map
@@ -716,10 +716,5 @@ func Presets() map[string]Palette {
 
 // PresetNames returns preset keys in a stable, deterministic order.
 func PresetNames() []string {
-	names := make([]string, 0, len(presets))
-	for name := range presets {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+	return slices.Sorted(maps.Keys(presets))
 }

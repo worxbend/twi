@@ -82,8 +82,7 @@ func (f Fragment) MergesWith(other Fragment) bool {
 	}
 	return f.Kind == other.Kind &&
 		f.Style == other.Style &&
-		f.Ref == other.Ref &&
-		f.WidthCells == other.WidthCells
+		f.Ref == other.Ref
 }
 
 // Row is a width-bounded collection of render fragments.
@@ -176,13 +175,11 @@ func coalesceAdjacent(in []Fragment) []Fragment {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]Fragment, 0, len(in))
+	row := Row{Fragments: make([]Fragment, 0, len(in))}
 	for _, fragment := range in {
-		row := Row{Fragments: out}
 		row.Append(fragment)
-		out = row.Fragments
 	}
-	return out
+	return row.Fragments
 }
 
 // renderFragment turns one fragment into the escape-sequence-wrapped string a

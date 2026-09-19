@@ -338,14 +338,17 @@ func fragmentUnits(row int, fragment render.Fragment) []RevealUnit {
 		return nil
 	}
 	if isAtomic(fragment) {
-		return []RevealUnit{{Row: row, Fragment: cloneFragment(fragment)}}
+		return []RevealUnit{{Row: row, Fragment: fragment}}
 	}
 
 	graphemes := uniseg.NewGraphemes(fragment.Text)
 	units := make([]RevealUnit, 0)
 	for graphemes.Next() {
-		next := cloneFragment(fragment)
+		next := fragment
 		next.Text = graphemes.Str()
+		// The reserved width belongs to the fragment as a whole; a single
+		// cluster of it must not keep reserving the full width.
+		next.WidthCells = 0
 		units = append(units, RevealUnit{Row: row, Fragment: next})
 	}
 	return units
@@ -401,10 +404,6 @@ func cloneFragments(fragments []render.Fragment) []render.Fragment {
 	out := make([]render.Fragment, len(fragments))
 	copy(out, fragments)
 	return out
-}
-
-func cloneFragment(fragment render.Fragment) render.Fragment {
-	return fragment
 }
 
 func (c Config) withDefaults() Config {

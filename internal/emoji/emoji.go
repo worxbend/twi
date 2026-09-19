@@ -1,7 +1,7 @@
 package emoji
 
 import (
-	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -18,6 +18,11 @@ const (
 // The ID is a lowercase hyphen-separated codepoint sequence with emoji
 // presentation selectors removed.
 func AssetID(cluster string) (string, bool) {
+	// Most clusters seen in chat are plain ASCII text, which can never form
+	// an emoji cluster; answer without allocating for them.
+	if len(cluster) == 1 && cluster[0] < 0x80 && !isKeycapBase(rune(cluster[0])) {
+		return "", false
+	}
 	runes := []rune(cluster)
 	if !isStandardCluster(runes) {
 		return "", false
@@ -28,7 +33,7 @@ func AssetID(cluster string) (string, bool) {
 		if isVariationSelector(r) {
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("%x", r))
+		parts = append(parts, strconv.FormatUint(uint64(r), 16))
 	}
 	if len(parts) == 0 {
 		return "", false

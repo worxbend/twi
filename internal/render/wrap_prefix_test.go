@@ -171,6 +171,45 @@ func TestWrappingBreaksBetweenWords(t *testing.T) {
 	}
 }
 
+// TestOverlongAuthorNameStillWraps guards the case where the prefix alone is
+// wider than the terminal: the name wraps rather than losing the author, and
+// no row -- prefix or content -- runs past the requested width.
+func TestOverlongAuthorNameStillWraps(t *testing.T) {
+	names := []string{
+		strings.Repeat("A", 60),
+		strings.Repeat("日", 30),
+	}
+	for _, name := range names {
+		for _, layout := range []LayoutMode{LayoutInline, LayoutGrouped, LayoutCompact} {
+			for width := minimumRenderWidth; width <= 44; width++ {
+				msg := twitch.ChatMessage{
+					AuthorLogin: "login",
+					DisplayName: name,
+					Text:        "hello there everyone",
+					Type:        twitch.MessageTypeChat,
+				}
+				opts := DefaultOptions(width)
+				opts.Layout = layout
+				rows := Rows(msg, opts)
+				out := strings.Map(func(r rune) rune {
+					if r == ' ' || r == '\n' {
+						return -1
+					}
+					return r
+				}, renderedText(rows))
+				if !strings.Contains(out, name) {
+					t.Fatalf("name=%.10q layout=%s width=%d: author missing from rendered message:\n%s", name, layout, width, out)
+				}
+				for i, row := range rows {
+					if got := row.Width(); got > width {
+						t.Fatalf("name=%.10q layout=%s width=%d: row %d is %d cells wide: %q", name, layout, width, i, got, row.Plain())
+					}
+				}
+			}
+		}
+	}
+}
+
 // TestOverlongWordStillWraps keeps a word wider than the line renderable
 // rather than overflowing or vanishing.
 func TestOverlongWordStillWraps(t *testing.T) {

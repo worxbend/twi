@@ -111,6 +111,23 @@ func TestForegroundOnlyTextPreservesStyleWhileRevealingGraphemes(t *testing.T) {
 	}
 }
 
+func TestSplitUnitsDoNotKeepTheFragmentsReservedWidth(t *testing.T) {
+	units := Units([]render.Row{{Fragments: []render.Fragment{{
+		Kind:       render.FragmentText,
+		Text:       "abc",
+		WidthCells: 12,
+	}}}})
+
+	if len(units) != 3 {
+		t.Fatalf("unit count = %d, want 3 grapheme units", len(units))
+	}
+	for _, unit := range units {
+		if unit.Fragment.WidthCells != 0 {
+			t.Fatalf("split unit %q reserved %d cells, want the reserved width dropped", unit.Fragment.Text, unit.Fragment.WidthCells)
+		}
+	}
+}
+
 func TestFixedWidthFallbackFramesDoNotCoalesce(t *testing.T) {
 	now := time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)
 	cfg := DefaultConfig()

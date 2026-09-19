@@ -2,7 +2,7 @@ package assets
 
 import (
 	"context"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -32,9 +32,10 @@ type emoteIndexEntry struct {
 
 // EmoteIndex caches a name-sorted, deduplicated emote list per channel for
 // Ctrl+E autocomplete search and the composer's quick-select row. It is
-// purely in-memory: AssetRecord/AssetCache are shaped for single image
-// records, not name lists, so this doesn't reuse that disk-cache
-// abstraction. Safe for concurrent use.
+// purely in-memory: the storage asset cache was shaped for single image
+// records, not name lists, and it went away with the image renderer (ADR
+// 0003, superseded), so there is no disk-cache abstraction to reuse. Safe
+// for concurrent use.
 type EmoteIndex struct {
 	Lister EmoteLister
 	TTL    time.Duration
@@ -125,6 +126,6 @@ func mergeEmoteEntries(lists ...[]twitch.EmoteMetadata) []EmoteEntry {
 			})
 		}
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
+	slices.SortFunc(entries, func(a, b EmoteEntry) int { return strings.Compare(a.Name, b.Name) })
 	return entries
 }
