@@ -101,31 +101,16 @@ type Overrides struct {
 // Load returns the effective config. Precedence is flags/overrides > env >
 // config file > defaults.
 func Load(environ []string, overrides Overrides) (Config, error) {
-	cfg := Default()
-
-	path := overrides.ConfigPath
-	if path == "" {
-		defaultPath, err := DefaultPath()
-		if err != nil {
-			return Config{}, err
-		}
-		path = defaultPath
-	}
-	cfg.Path = path
-
-	if err := applyFile(&cfg, path); err != nil {
-		return Config{}, err
-	}
-	applyEnv(&cfg, environ)
-	if len(overrides.Channels) > 0 {
-		cfg.DefaultChannels = normalizeChannels(overrides.Channels)
-	}
-	applyOverrides(&cfg, overrides)
-
-	return cfg, nil
+	return load(environ, overrides, applyFile)
 }
 
+// LoadEnvOnly is Load without the config file: defaults, environment and
+// overrides only. The path is still resolved so callers can report it.
 func LoadEnvOnly(environ []string, overrides Overrides) (Config, error) {
+	return load(environ, overrides, nil)
+}
+
+func load(environ []string, overrides Overrides, fileStep func(*Config, string) error) (Config, error) {
 	cfg := Default()
 
 	path := overrides.ConfigPath
@@ -138,6 +123,11 @@ func LoadEnvOnly(environ []string, overrides Overrides) (Config, error) {
 	}
 	cfg.Path = path
 
+	if fileStep != nil {
+		if err := fileStep(&cfg, path); err != nil {
+			return Config{}, err
+		}
+	}
 	applyEnv(&cfg, environ)
 	if len(overrides.Channels) > 0 {
 		cfg.DefaultChannels = normalizeChannels(overrides.Channels)
@@ -288,7 +278,7 @@ func writeFilePrivate(path string, data []byte) error {
 		_ = tmp.Close()
 		return err
 	}
-	if err := tmp.Chmod(0o600); err != nil {
+	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
 		return err
 	}
@@ -352,7 +342,14 @@ func applyFile(cfg *Config, path string) error {
 	for scanner.Scan() {
 		lineNo++
 		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
+		// A TOML "[section]" header is skipped rather than failing the load:
+		// the flat parser reads every key/value line the same way regardless
+		// of the section it sits under.
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "[") {
+			continue
+		}
+		line = strings.TrimSpace(stripInlineComment(line))
+		if line == "" {
 			continue
 		}
 		key, value, ok := strings.Cut(line, "=")
@@ -367,6 +364,26 @@ func applyFile(cfg *Config, path string) error {
 		return err
 	}
 	return nil
+}
+
+// stripInlineComment removes a trailing "# ..." comment, but only when the
+// "#" sits outside quotes -- inside a quoted value it is data, so a channel
+// written "#beta" in quotes keeps its hash.
+func stripInlineComment(line string) string {
+	var quote byte
+	for i := 0; i < len(line); i++ {
+		switch c := line[i]; {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == '#':
+			return line[:i]
+		}
+	}
+	return line
 }
 
 // legacyEnvAliases are the environment variables twi honoured before the
@@ -439,12 +456,22 @@ func applyKey(cfg *Config, key, value string) {
 
 func trimValue(value string) string {
 	value = strings.TrimSpace(value)
-	value = strings.Trim(value, `"`)
-	value = strings.Trim(value, `'`)
+	value = trimQuotePair(value)
 	if strings.HasPrefix(value, "[") && strings.HasSuffix(value, "]") {
 		value = strings.TrimPrefix(strings.TrimSuffix(value, "]"), "[")
-		value = strings.ReplaceAll(value, `"`, "")
-		value = strings.ReplaceAll(value, `'`, "")
+	}
+	return value
+}
+
+// trimQuotePair removes one matching pair of surrounding quotes, and only
+// one: a value written '"quoted"' keeps its inner quotes, which are part of
+// the value itself.
+func trimQuotePair(value string) string {
+	if len(value) >= 2 {
+		first, last := value[0], value[len(value)-1]
+		if first == last && (first == '"' || first == '\'') {
+			return value[1 : len(value)-1]
+		}
 	}
 	return value
 }
@@ -453,8 +480,33 @@ func splitList(value string) []string {
 	if strings.TrimSpace(value) == "" {
 		return nil
 	}
-	parts := strings.Split(value, ",")
+	parts := splitListItems(value)
+	for i := range parts {
+		parts[i] = trimQuotePair(strings.TrimSpace(parts[i]))
+	}
 	return normalizeChannels(parts)
+}
+
+// splitListItems splits on the commas that separate items, not the ones
+// inside a quoted item: ["a, b", "c"] is two channels, not three.
+func splitListItems(value string) []string {
+	var parts []string
+	start := 0
+	var quote byte
+	for i := 0; i < len(value); i++ {
+		switch c := value[i]; {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == ',':
+			parts = append(parts, value[start:i])
+			start = i + 1
+		}
+	}
+	return append(parts, value[start:])
 }
 
 // normalizeChannels defers to the shared rule in internal/twitch so that a

@@ -489,3 +489,86 @@ func TestChannelsListWithSpaceAfterCommaDropsTheHash(t *testing.T) {
 		t.Fatalf("splitList = %q, want %q", got, want)
 	}
 }
+
+func TestLoadStripsInlineCommentsOutsideQuotes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := strings.Join([]string{
+		`theme_name = "nord" # dark theme`,
+		`twitch_username = "file_user" # the login`,
+		`default_channels = "#beta" # hash is data inside quotes`,
+		`animation_mode = reduced # unquoted value`,
+	}, "\n")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(nil, Overrides{ConfigPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Features.ThemeName != "nord" {
+		t.Fatalf("theme name = %q, want nord", cfg.Features.ThemeName)
+	}
+	if cfg.Twitch.Username != "file_user" {
+		t.Fatalf("username = %q, want file_user", cfg.Twitch.Username)
+	}
+	if !reflect.DeepEqual(cfg.DefaultChannels, []string{"beta"}) {
+		t.Fatalf("channels = %#v, want [beta]", cfg.DefaultChannels)
+	}
+	if cfg.Features.AnimationMode != "reduced" {
+		t.Fatalf("animation mode = %q, want reduced", cfg.Features.AnimationMode)
+	}
+}
+
+func TestLoadSkipsSectionHeaders(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := strings.Join([]string{
+		`[twitch]`,
+		`twitch_username = "file_user"`,
+		``,
+		`[features] # sections are ignored, keys stay flat`,
+		`animation_mode = "reduced"`,
+	}, "\n")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(nil, Overrides{ConfigPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Twitch.Username != "file_user" {
+		t.Fatalf("username = %q, want file_user", cfg.Twitch.Username)
+	}
+	if cfg.Features.AnimationMode != "reduced" {
+		t.Fatalf("animation mode = %q, want reduced", cfg.Features.AnimationMode)
+	}
+}
+
+func TestLoadBracketListKeepsQuotedCommasTogether(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := `default_channels = ["a, b", "c"]` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(nil, Overrides{ConfigPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"a, b", "c"}; !reflect.DeepEqual(cfg.DefaultChannels, want) {
+		t.Fatalf("channels = %#v, want %#v", cfg.DefaultChannels, want)
+	}
+}
+
+func TestTrimValueRemovesOneQuotePairOnly(t *testing.T) {
+	if got := trimValue(`'"value"'`); got != `"value"` {
+		t.Fatalf("trimValue = %q, want %q", got, `"value"`)
+	}
+	if got := trimValue(`["a", "b"]`); got != `"a", "b"` {
+		t.Fatalf("trimValue = %q, want list items to keep their quotes", got)
+	}
+}
