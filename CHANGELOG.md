@@ -11,6 +11,45 @@ constant in the source tree.
 
 ## [Unreleased]
 
+### Security
+
+- **Desktop notifications on Windows could run chat text as commands.**
+  Notification titles and bodies were interpolated into a PowerShell string
+  that evaluates `$(...)` expressions, so a crafted chat message could execute
+  arbitrary commands when the notification appeared. Payloads are now escaped
+  so they can only ever be literal text.
+
+### Fixed
+
+- **Quitting during a reconnect could hang the process forever.** A
+  reconnection that lost its race with shutdown waited on a goroutine that
+  was never started, while shutdown waited on the reconnection.
+- **`/clip` clipped your own channel instead of the one on screen,** failing
+  with "not currently live" unless you happened to be streaming yourself.
+- **Follow annotations described follows of your own channel on every
+  roster,** including channels you were only watching. They now appear only
+  on your own channel — the only one Twitch lets you check.
+- **A `config.toml` with ordinary TOML syntax broke or mangled settings.** An
+  inline `# comment` became part of the value, a `[section]` header silently
+  discarded every file setting, and `["a, b", "c"]` in a list was read as
+  three entries.
+- **`twi profile set` wrote your shell's environment into `config.toml`,**
+  snapshotting unrelated `TWI_*` values alongside the theme you asked to
+  change. Only the keys being changed are written now, and malformed hex
+  colors are rejected instead of being saved.
+- **Sending could silently queue into a void during a reconnect,** because
+  the client still reported itself as connected. Sends are now refused until
+  the connection is re-established.
+- Mentions written adjacently (`@a@b`) missed the second one; an empty
+  stream-info edit claimed "saved"; Page Up/Down on a zero-height layout
+  scrolled a row; the chatter roster could evict the newest arrival instead
+  of the oldest.
+- Abandoned login attempts accumulated for the process lifetime, and a token
+  response without a scope field failed the login even when validation
+  confirmed the scopes.
+- The credential store now validates the opened file rather than only its
+  path, and a restrictive umask can no longer make first-time setup fail.
+
 ## [0.17.0] — 2026-08-21
 
 ### Fixed
