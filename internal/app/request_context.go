@@ -26,13 +26,3 @@ func (m shellModel) lifetimeContext() context.Context {
 	}
 	return m.lifetime
 }
-
-// requestContext derives the context for one outbound Twitch call: bounded by
-// timeout, and cancelled early if the user quits before the call finishes.
-//
-// Call it inside the Bubble Tea command closure, not outside, so the deadline
-// starts when the request starts rather than when the command was created. The
-// caller must defer the returned cancel.
-func (m shellModel) requestContext(timeout time.Duration) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(m.lifetimeContext(), timeout)
-}

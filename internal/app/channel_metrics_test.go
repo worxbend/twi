@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/twitch"
@@ -76,6 +77,39 @@ func TestChannelMetricsErrorLeavesCountsUnknown(t *testing.T) {
 	model = model.applyChannelMetrics(msg)
 	if model.metrics.followerCountKnown || model.metrics.subscriberCountKnown {
 		t.Fatalf("counts known after error = follower:%v sub:%v, want both false", model.metrics.followerCountKnown, model.metrics.subscriberCountKnown)
+	}
+}
+
+func TestChannelMetricsAnnotatesRosterOnlyForOwnChannel(t *testing.T) {
+	newModelWithFollowerPage := func(username string) shellModel {
+		cfg := config.Default()
+		cfg.Twitch.Username = username
+		model := newMockModel("example", cfg)
+		model.services.followerLookup = &appFakeFollowerLookup{page: twitch.FollowersPage{Total: 1, Followers: []twitch.Follower{
+			{UserID: "1", UserLogin: "viewer", UserName: "Viewer"},
+		}}}
+		model.activeChannelState().roster.ensure("viewer", time.Now())
+		return model
+	}
+	followerPage := twitch.FollowersPage{Total: 1, Followers: []twitch.Follower{
+		{UserID: "1", UserLogin: "viewer", UserName: "Viewer"},
+	}}
+
+	watching := newModelWithFollowerPage("streamer")
+	watching = watching.applyChannelMetrics(channelMetricsResolvedMsg{broadcasterID: "123", followers: followerPage})
+	entry, ok := watching.activeChannelState().roster.lookup("viewer")
+	if !ok {
+		t.Fatal("roster entry for viewer missing")
+	}
+	if entry.FollowKnown {
+		t.Fatal("roster annotated from the logged-in user's followers while watching another channel")
+	}
+
+	own := newModelWithFollowerPage("example")
+	own = own.applyChannelMetrics(channelMetricsResolvedMsg{broadcasterID: "123", followers: followerPage})
+	entry, ok = own.activeChannelState().roster.lookup("viewer")
+	if !ok || !entry.FollowKnown {
+		t.Fatal("roster not annotated while watching the logged-in user's own channel")
 	}
 }
 

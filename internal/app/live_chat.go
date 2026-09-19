@@ -169,7 +169,7 @@ func newLiveChatClient(ctx context.Context, reconnectFactory, initialFactory Liv
 	}
 
 	client.setSession(session)
-	go client.bridge(session)
+	client.startBridge(session)
 	return client, nil
 }
 
@@ -471,13 +471,22 @@ func (c *LiveChatClient) reconnect(ctx context.Context, kind string) error {
 		return c.logReconnectFailure(err)
 	}
 	c.setSession(session)
-	go c.bridge(session)
+	c.startBridge(session)
 	// The replacement transport joined the configured default channels on its
 	// own; anything the user opened or closed since then has to be replayed,
 	// or those channels quietly stop delivering while still looking connected.
 	c.replayRuntimeChannels(session.transport)
 	c.debugLiveEvent("live_chat.reconnect.session_started")
 	return nil
+}
+
+// startBridge launches the session's bridge goroutine and records that it
+// did, so stop knows there is someone who will close session.done.
+func (c *LiveChatClient) startBridge(session *liveChatSession) {
+	session.mu.Lock()
+	session.bridged = true
+	session.mu.Unlock()
+	go c.bridge(session)
 }
 
 func (c *LiveChatClient) bridge(session *liveChatSession) {
@@ -741,6 +750,7 @@ type liveChatSession struct {
 
 	mu                 sync.RWMutex
 	suppressCloseState bool
+	bridged            bool
 }
 
 func (s *liveChatSession) stop(suppressCloseState bool) error {
@@ -751,10 +761,17 @@ func (s *liveChatSession) stop(suppressCloseState bool) error {
 	if suppressCloseState {
 		s.suppressCloseState = true
 	}
+	bridged := s.bridged
 	s.mu.Unlock()
 	s.cancel()
 	err := s.transport.Close()
-	<-s.done
+	// done is closed only by the bridge goroutine. A session that never got
+	// one -- reconnect built it, then found the client closed before
+	// installing it -- has nobody to close done, so waiting on it would hang
+	// reconnect while it holds lifecycleMu, and Close right behind it.
+	if bridged {
+		<-s.done
+	}
 	return err
 }
 

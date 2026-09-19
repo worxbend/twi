@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -75,9 +76,13 @@ func (m shellModel) applyChannelMetrics(msg channelMetricsResolvedMsg) shellMode
 		m.metrics.followerCount = msg.followers.Total
 		m.metrics.followerCountKnown = true
 		m.applyNewFollowerActivity(msg.followers.Followers)
-		// Followers are polled per broadcaster, so only the active channel's
-		// roster can be annotated from this page.
-		m.activeChannelState().roster.applyFollowers(msg.followers.Followers)
+		// GetChannelFollowers only ever returns the logged-in user's own
+		// followers, so the page can annotate a roster only while the active
+		// channel is the user's own channel.
+		if username := m.effectiveConfig.Twitch.Username; username != "" &&
+			strings.EqualFold(m.activeChannelState().name, username) {
+			m.activeChannelState().roster.applyFollowers(msg.followers.Followers)
+		}
 	}
 	if m.services.subscriptionLookup != nil && msg.subscriptionsErr == nil {
 		m.metrics.subscriberCount = msg.subscriptions.Total

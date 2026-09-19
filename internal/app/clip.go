@@ -134,9 +134,11 @@ func (m *shellModel) scheduleClipCreate(state *channelState, offsets clipOffsets
 
 	clipManager := m.services.clipManager
 	userLookup := m.services.userLookup
-	username := m.effectiveConfig.Twitch.Username
-	knownID := m.selfBroadcasterID
 	channel := state.name
+	knownID := state.broadcasterID
+	if knownID == "" && strings.EqualFold(channel, m.effectiveConfig.Twitch.Username) {
+		knownID = m.selfBroadcasterID
+	}
 
 	state.sendState = composerSendSending
 	state.sendFeedback = "clip: creating..."
@@ -146,7 +148,7 @@ func (m *shellModel) scheduleClipCreate(state *channelState, offsets clipOffsets
 		ctx, cancel := context.WithTimeout(lifetime, clipRequestTimeout)
 		defer cancel()
 
-		id, err := resolveBroadcasterID(ctx, userLookup, username, knownID)
+		id, err := resolveBroadcasterID(ctx, userLookup, channel, knownID)
 		if err != nil {
 			return clipCreatedMsg{channel: channel, offsets: offsets, err: err}
 		}
@@ -159,12 +161,17 @@ func (m *shellModel) scheduleClipCreate(state *channelState, offsets clipOffsets
 }
 
 func (m shellModel) applyClipCreated(msg clipCreatedMsg) shellModel {
-	if msg.broadcasterID != "" {
-		m.selfBroadcasterID = msg.broadcasterID
-	}
 	state := m.channels.ensure(msg.channel)
 	if state == nil {
 		return m
+	}
+	if msg.broadcasterID != "" {
+		state.broadcasterID = msg.broadcasterID
+		// selfBroadcasterID is the logged-in user's own ID; only a clip of the
+		// user's own channel resolves to it.
+		if strings.EqualFold(state.name, m.effectiveConfig.Twitch.Username) {
+			m.selfBroadcasterID = msg.broadcasterID
+		}
 	}
 	if msg.err != nil {
 		state.sendState = composerSendFailed

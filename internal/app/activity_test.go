@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -109,6 +110,25 @@ func TestApplyNewFollowerActivityDetectsNewFollowersAfterBaseline(t *testing.T) 
 	})
 	if len(model.activity.activityLog) != 1 {
 		t.Fatalf("activityLog after repeat poll = %#v, want still 1 entry", model.activity.activityLog)
+	}
+}
+
+func TestApplyNewFollowerActivityReseedsOversizedSeenSet(t *testing.T) {
+	model := newMockModel("example", config.Default())
+	model.activity.seenFollowerIDs = make(map[string]bool, maxSeenFollowerIDs+1)
+	for i := 0; i <= maxSeenFollowerIDs; i++ {
+		model.activity.seenFollowerIDs[strconv.Itoa(i)] = true
+	}
+
+	model.applyNewFollowerActivity([]twitch.Follower{
+		{UserID: "new-1", UserName: "First"},
+		{UserID: "new-2", UserName: "Second"},
+	})
+	if len(model.activity.seenFollowerIDs) != 2 {
+		t.Fatalf("seenFollowerIDs = %d entries, want reseeded to the 2-entry page", len(model.activity.seenFollowerIDs))
+	}
+	if len(model.activity.activityLog) != 0 {
+		t.Fatalf("activityLog = %#v, want empty (reseed is a fresh baseline)", model.activity.activityLog)
 	}
 }
 

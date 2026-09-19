@@ -24,6 +24,15 @@ func TestMessageFilterMatching(t *testing.T) {
 			want:         true,
 		},
 		{
+			name: "mention matches adjacent mention after another mention",
+			message: twitch.ChatMessage{
+				Text: "@someone_else@twi_bot",
+			},
+			filter:       messageFilterMentions,
+			mentionLogin: "twi_bot",
+			want:         true,
+		},
+		{
 			name: "mention rejects other users when configured",
 			message: twitch.ChatMessage{
 				Fragments: []twitch.MessageFragment{{Type: twitch.FragmentMention, Text: "@someone_else"}},

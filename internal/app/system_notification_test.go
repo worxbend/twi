@@ -3,10 +3,12 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf16"
 )
 
 func TestDesktopNotificationCommandByPlatform(t *testing.T) {
@@ -47,6 +49,57 @@ func TestDesktopNotificationCommandByPlatform(t *testing.T) {
 	if _, _, ok := desktopNotificationCommand("plan9", "Raid", "body"); ok {
 		t.Fatal("unsupported platform returned ok=true")
 	}
+}
+
+func TestWindowsToastCommandEscapesPowerShellInterpolation(t *testing.T) {
+	script := decodeWindowsToastScript(t, windowsToastPowerShellCommand(
+		"$(whoami) $env:USERNAME",
+		"run `$(calc.exe) back`tick",
+	))
+	start := strings.Index(script, "@\"")
+	end := strings.Index(script, "\"@")
+	if start < 0 || end < 0 || end <= start {
+		t.Fatalf("encoded script has no expandable here-string:\n%s", script)
+	}
+	payload := script[start+2 : end]
+	if i := unescapedPowerShellDollar(payload); i >= 0 {
+		t.Fatalf("here-string payload has an unescaped $ at offset %d:\n%s", i, payload)
+	}
+	for _, want := range []string{"`$(whoami)", "`$env:USERNAME", "```$(calc.exe)", "back``tick"} {
+		if !strings.Contains(payload, want) {
+			t.Fatalf("here-string payload missing escaped form %q:\n%s", want, payload)
+		}
+	}
+}
+
+// unescapedPowerShellDollar returns the offset of the first $ that PowerShell
+// would interpolate, i.e. one not introduced by a backtick escape.
+func unescapedPowerShellDollar(script string) int {
+	for i := 0; i < len(script); i++ {
+		switch script[i] {
+		case '`':
+			i++
+		case '$':
+			return i
+		}
+	}
+	return -1
+}
+
+func decodeWindowsToastScript(t *testing.T, encoded string) string {
+	t.Helper()
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatalf("encoded command is not base64: %v", err)
+	}
+	if len(raw)%2 != 0 {
+		t.Fatalf("encoded command has odd byte length %d, want UTF-16LE", len(raw))
+	}
+	units := make([]uint16, 0, len(raw)/2)
+	for i := 0; i < len(raw); i += 2 {
+		units = append(units, uint16(raw[i])|uint16(raw[i+1])<<8)
+	}
+	return string(utf16.Decode(units))
 }
 
 func TestDefaultSystemNotifierUsesDesktopNotificationWhenAvailable(t *testing.T) {

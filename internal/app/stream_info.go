@@ -53,9 +53,10 @@ type streamInfoState struct {
 	editing    bool
 	editBuffer string
 
-	saving  bool
-	saveErr string
-	saveOK  bool
+	saving        bool
+	saveErr       string
+	saveOK        bool
+	saveNoChanges bool
 }
 
 type streamInfoLoadedMsg struct {
@@ -65,8 +66,9 @@ type streamInfoLoadedMsg struct {
 }
 
 type streamInfoSavedMsg struct {
-	info twitch.ChannelInfo
-	err  error
+	info      twitch.ChannelInfo
+	err       error
+	noChanges bool
 }
 
 // scheduleStreamInfoLoad fetches the logged-in broadcaster's current channel
@@ -149,6 +151,7 @@ func (m *shellModel) scheduleStreamInfoSave() tea.Cmd {
 	m.streamInfo.saving = true
 	m.streamInfo.saveErr = ""
 	m.streamInfo.saveOK = false
+	m.streamInfo.saveNoChanges = false
 
 	lifetime := m.lifetimeContext()
 	return func() tea.Msg {
@@ -178,7 +181,7 @@ func (m *shellModel) scheduleStreamInfoSave() tea.Cmd {
 		}
 
 		if update.IsEmpty() {
-			return streamInfoSavedMsg{info: next}
+			return streamInfoSavedMsg{info: next, noChanges: true}
 		}
 		if err := channelManager.ModifyChannelInformation(ctx, broadcasterID, update); err != nil {
 			return streamInfoSavedMsg{err: err}
@@ -195,7 +198,8 @@ func (m shellModel) applyStreamInfoSaved(msg streamInfoSavedMsg) shellModel {
 		return m
 	}
 	m.streamInfo.saveErr = ""
-	m.streamInfo.saveOK = true
+	m.streamInfo.saveOK = !msg.noChanges
+	m.streamInfo.saveNoChanges = msg.noChanges
 	m.streamInfo.original = msg.info
 	m.streamInfo.title = msg.info.Title
 	m.streamInfo.category = msg.info.GameName
@@ -304,6 +308,7 @@ func (m shellModel) handleStreamInfoKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
 	case tea.KeyEsc:
 		m.streamInfo.saveErr = ""
 		m.streamInfo.saveOK = false
+		m.streamInfo.saveNoChanges = false
 	}
 	return m, nil
 }
@@ -410,6 +415,8 @@ func (m shellModel) streamInfoFieldLines(width int) []string {
 		lines = []string{" Stream Info (saving...)"}
 	case m.streamInfo.saveErr != "":
 		lines = wrapIndentedText("Stream Info: save failed: "+m.streamInfo.saveErr, width)
+	case m.streamInfo.saveNoChanges:
+		lines = []string{" Stream Info: no changes to save"}
 	case m.streamInfo.saveOK:
 		lines = []string{" Stream Info: saved"}
 	default:

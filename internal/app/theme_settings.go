@@ -1,7 +1,9 @@
 package app
 
 import (
+	"slices"
 	"strings"
+	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/rivo/uniseg"
@@ -30,11 +32,11 @@ const (
 
 // themeSettingsNames lists the selectable entries: every built-in preset in
 // stable order, plus a trailing "custom" entry that previews whatever
-// cfg.Features.ThemeCustom currently holds.
-func themeSettingsNames() []string {
-	names := append(append([]string(nil), theme.PresetNames()...), "custom")
-	return names
-}
+// cfg.Features.ThemeCustom currently holds. The preset list is static, so it
+// is computed once instead of being re-copied on every render.
+var themeSettingsNames = sync.OnceValue(func() []string {
+	return slices.Concat(theme.PresetNames(), []string{"custom"})
+})
 
 func (m *shellModel) toggleThemeSettings() {
 	if m.themeSettings.open {

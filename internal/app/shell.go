@@ -2232,7 +2232,7 @@ func (m *shellModel) resetActiveMessageFilters() tea.Cmd {
 
 func (m *shellModel) scrollBy(delta int) {
 	if delta == 0 {
-		delta = 1
+		return
 	}
 	m.activeChannelState().scrollOffset += delta
 	m.clampScroll()
@@ -2577,13 +2577,13 @@ func (m *shellModel) completeReveals(completed []animation.CompletedReveal) {
 		preserveScrolledView := state.scrollOffset > 0
 		beforeRows := 0
 		if preserveScrolledView {
-			beforeRows = len(m.chatRows(m.layout()))
+			beforeRows = m.chatRowCount(m.layout())
 		}
 		delete(state.activeMessages, reveal.ID)
 		m.removeActiveReveal(reveal.ID)
 		m.appendStaticMessage(message, false)
 		if preserveScrolledView {
-			state.scrollOffset = clampMin(state.scrollOffset+len(m.chatRows(m.layout()))-beforeRows, 0)
+			state.scrollOffset = clampMin(state.scrollOffset+m.chatRowCount(m.layout())-beforeRows, 0)
 		}
 	}
 }

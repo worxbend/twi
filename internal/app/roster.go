@@ -15,6 +15,11 @@ const (
 	// the least recently seen entries are evicted past this point.
 	rosterMaxEntries = 4096
 
+	// rosterEvictionSlack amortizes eviction: evictOldest only sorts and
+	// prunes once the roster has grown this far past the cap, so each pass
+	// removes a batch instead of running on every new unique chatter.
+	rosterEvictionSlack = 64
+
 	// rosterActiveWindow is how long a chatter counts as "active" after their
 	// last message when Twitch is not sending membership for the channel.
 	rosterActiveWindow = 10 * time.Minute
@@ -84,13 +89,18 @@ func (r *chatterRoster) ensure(login string, at time.Time) *chatterEntry {
 	if !ok {
 		entry = &chatterEntry{Login: key, FirstSeen: at}
 		r.entries[key] = entry
-		r.evictOldest()
 	}
 	if entry.FirstSeen.IsZero() || (!at.IsZero() && at.Before(entry.FirstSeen)) {
 		entry.FirstSeen = at
 	}
 	if at.After(entry.LastSeen) {
 		entry.LastSeen = at
+	}
+	if !ok {
+		// Evict only after LastSeen is set: a brand-new entry still has the
+		// zero time here, and would otherwise sort as the oldest and be the
+		// first one dropped.
+		r.evictOldest()
 	}
 	return entry
 }
@@ -99,7 +109,7 @@ func (r *chatterRoster) ensure(login string, at time.Time) *chatterEntry {
 // bound, keeping long-running sessions in busy channels from growing without
 // limit.
 func (r *chatterRoster) evictOldest() {
-	if len(r.entries) <= rosterMaxEntries {
+	if len(r.entries) <= rosterMaxEntries+rosterEvictionSlack {
 		return
 	}
 	keys := make([]string, 0, len(r.entries))

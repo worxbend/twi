@@ -160,13 +160,23 @@ $xml = New-Object Windows.Data.Xml.Dom.XmlDocument
 $xml.LoadXml($template)
 $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("twi")
 $notifier.Show([Windows.UI.Notifications.ToastNotification]::new($xml))
-`, escapeNotificationXML(title), escapeNotificationXML(body))
+`, escapePowerShellExpandable(escapeNotificationXML(title)), escapePowerShellExpandable(escapeNotificationXML(body)))
 	encoded := utf16.Encode([]rune(script))
 	bytes := make([]byte, 0, len(encoded)*2)
 	for _, r := range encoded {
 		bytes = append(bytes, byte(r), byte(r>>8))
 	}
 	return base64.StdEncoding.EncodeToString(bytes)
+}
+
+// escapePowerShellExpandable makes value safe to embed in a PowerShell
+// expandable here-string (@"..."@), where the backtick is the escape
+// character and $ introduces variable references and $(...) subexpressions.
+// Notification text is remote chat content; without this a message containing
+// $(...) would execute arbitrary commands when the toast renders.
+func escapePowerShellExpandable(value string) string {
+	value = strings.ReplaceAll(value, "`", "``")
+	return strings.ReplaceAll(value, "$", "`$")
 }
 
 func escapeNotificationXML(value string) string {

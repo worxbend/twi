@@ -85,9 +85,4 @@ func TestModelWithNoLifetimeStillMakesCalls(t *testing.T) {
 	if got := model.lifetimeContext(); got == nil {
 		t.Fatal("lifetimeContext returned nil for a model with no lifetime")
 	}
-	ctx, cancel := model.requestContext(twitchRequestTimeout)
-	defer cancel()
-	if _, ok := ctx.Deadline(); !ok {
-		t.Error("requestContext returned a context with no deadline")
-	}
 }

@@ -1502,6 +1502,65 @@ func TestCloseDoesNotDeadlockAgainstAFailingReconnect(t *testing.T) {
 	}
 }
 
+// TestReconnectStopsUnbridgedSessionWhenClosedMidflight is a regression test
+// for a hang on quit during reconnect.
+//
+// Close flips closedFlag after the replacement session was built but before
+// reconnect installs it, so reconnect stops that session instead. The bridge
+// goroutine that closes session.done starts only as part of the install, and
+// stop used to wait on done unconditionally -- reconnect hung forever holding
+// lifecycleMu, and Close hung right behind it.
+func TestReconnectStopsUnbridgedSessionWhenClosedMidflight(t *testing.T) {
+	factory := &fakeRestartTransportFactory{}
+	factory.queueTransport(newFakeTwitchTransport(4))
+	factory.queueTransport(newFakeTwitchTransport(4))
+
+	// The reconnect's factory call is held open, so that once entered fires
+	// the reconnect is known to hold lifecycleMu.
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	factory.blockCall(2, entered, release)
+
+	client, err := NewRestartableLiveChatClient(context.Background(), factory.newTransport, 4)
+	if err != nil {
+		t.Fatalf("NewRestartableLiveChatClient returned error: %v", err)
+	}
+
+	reconnectReturned := make(chan error, 1)
+	go func() { reconnectReturned <- client.reconnect(context.Background(), "manual") }()
+
+	<-entered // the reconnect now holds lifecycleMu inside the factory call
+	closeReturned := make(chan error, 1)
+	go func() { closeReturned <- client.Close() }()
+
+	// Wait for Close to set closedFlag, then let the factory return; the
+	// reconnect must find the client closed and stop the session it built.
+	deadline := time.After(10 * time.Second)
+	for !client.isClosed() {
+		select {
+		case <-deadline:
+			t.Fatal("Close did not mark the client closed")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	close(release)
+
+	select {
+	case err := <-reconnectReturned:
+		if !errors.Is(err, ErrLiveChatClientClosed) {
+			t.Fatalf("reconnect returned %v, want %v", err, ErrLiveChatClientClosed)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("reconnect did not return: stop hung on a session with no bridge")
+	}
+	select {
+	case <-closeReturned:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close did not return after the mid-flight reconnect finished")
+	}
+}
+
 // TestReconnectReplaysRuntimeChannelChanges is a regression test for channels
 // opened at runtime going silently dead after a reconnect.
 //

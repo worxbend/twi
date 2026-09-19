@@ -79,6 +79,7 @@ func TestLiveShellClipInputCreatesClip(t *testing.T) {
 	model := newLiveModelWithClock("example", config.Default(), NewFakeChatClient(1), nil)
 	model.focus = focusComposer
 	model.services.clipManager = fake
+	model.services.userLookup = &appFakeUserLookup{users: []twitch.UserIdentity{{UserID: "456", Login: "example"}}}
 	model.selfBroadcasterID = "123"
 	model.activeChannelState().composerText = "/clip T-5m"
 
@@ -98,8 +99,11 @@ func TestLiveShellClipInputCreatesClip(t *testing.T) {
 	updated, _ = model.Update(msg)
 	model = updated.(shellModel)
 
-	if fake.calls != 1 || fake.lastID != "123" {
-		t.Fatalf("CreateClip calls = %d lastID = %q, want 1 call for broadcaster 123", fake.calls, fake.lastID)
+	if fake.calls != 1 || fake.lastID != "456" {
+		t.Fatalf("CreateClip calls = %d lastID = %q, want 1 call for the active channel's broadcaster 456", fake.calls, fake.lastID)
+	}
+	if model.selfBroadcasterID != "123" {
+		t.Fatalf("selfBroadcasterID = %q, want unchanged 123 (clipped channel is not the logged-in user)", model.selfBroadcasterID)
 	}
 	feedback := model.activeChannelState().sendFeedback
 	if !strings.Contains(feedback, "https://clips.twitch.tv/abc/edit") || !strings.Contains(feedback, "5m ago") {
@@ -154,8 +158,8 @@ func TestClipCreateFailureIsUserFriendlyOnMissingScope(t *testing.T) {
 	cfg := config.Default()
 	model := newMockModel("example", cfg)
 	model.services.clipManager = helix.NewClipsClient(helix.ClipsClientConfig{Endpoint: server.URL})
-	model.selfBroadcasterID = "123"
 	state := model.channels.ensure("example")
+	state.broadcasterID = "123"
 	model.channels.active = "example"
 
 	cmd := model.scheduleClipCreate(state, clipOffsets{})
@@ -179,8 +183,8 @@ func TestClipCreateFailureIsUserFriendlyOnNotLive(t *testing.T) {
 	cfg := config.Default()
 	model := newMockModel("example", cfg)
 	model.services.clipManager = helix.NewClipsClient(helix.ClipsClientConfig{Endpoint: server.URL})
-	model.selfBroadcasterID = "123"
 	state := model.channels.ensure("example")
+	state.broadcasterID = "123"
 	model.channels.active = "example"
 
 	cmd := model.scheduleClipCreate(state, clipOffsets{})

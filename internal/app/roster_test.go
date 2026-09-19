@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -112,6 +113,28 @@ func TestRosterApplyFollowersOnlyAnnotatesKnownChatters(t *testing.T) {
 	}
 	if _, ok := roster.lookup("never-spoke"); ok {
 		t.Fatal("applyFollowers invented a roster entry for a user never seen in chat")
+	}
+}
+
+func TestRosterEvictionIsBatchedPastTheCap(t *testing.T) {
+	roster := newChatterRoster()
+	at := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < rosterMaxEntries+rosterEvictionSlack; i++ {
+		roster.ensure("user"+strconv.Itoa(i), at.Add(time.Duration(i)*time.Second))
+	}
+	if got, want := len(roster.entries), rosterMaxEntries+rosterEvictionSlack; got != want {
+		t.Fatalf("entries = %d, want %d (no eviction until the cap is exceeded by the slack)", got, want)
+	}
+
+	roster.ensure("one-more", at.Add(time.Duration(rosterMaxEntries+rosterEvictionSlack)*time.Second))
+	if got := len(roster.entries); got != rosterMaxEntries {
+		t.Fatalf("entries after eviction = %d, want %d", got, rosterMaxEntries)
+	}
+	if _, ok := roster.lookup("user0"); ok {
+		t.Fatal("eviction kept user0, the least recently seen entry")
+	}
+	if _, ok := roster.lookup("one-more"); !ok {
+		t.Fatal("eviction dropped one-more, the just-added entry")
 	}
 }
 

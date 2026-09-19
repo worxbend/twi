@@ -10,6 +10,12 @@ import (
 
 const maxActivityEntries = 200
 
+// maxSeenFollowerIDs bounds the follower-diff set. Only the latest
+// 25-follower page is ever diffed against it, so once the set has grown far
+// past a page it is cleared and reseeded rather than kept for the whole
+// session.
+const maxSeenFollowerIDs = 4096
+
 // activityKind coarsely categorizes an activity log entry for potential
 // future filtering/styling. Twitch's IRC system events (raids, subs, gift
 // subs, etc.) map to activityIRCEvent; new followers map to activityFollow
@@ -191,6 +197,15 @@ func (m *shellModel) applyNewFollowerActivity(page []twitch.Follower) {
 	hadBaseline := m.activity.seenFollowerIDs != nil
 	if m.activity.seenFollowerIDs == nil {
 		m.activity.seenFollowerIDs = make(map[string]bool, len(page))
+	}
+	if len(m.activity.seenFollowerIDs) > maxSeenFollowerIDs {
+		m.activity.seenFollowerIDs = make(map[string]bool, len(page))
+		for _, follower := range page {
+			if follower.UserID != "" {
+				m.activity.seenFollowerIDs[follower.UserID] = true
+			}
+		}
+		return
 	}
 	for i := len(page) - 1; i >= 0; i-- {
 		follower := page[i]

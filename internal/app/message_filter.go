@@ -152,7 +152,9 @@ func textHasMention(text, target string) bool {
 		if target == "" || mention == target {
 			return true
 		}
-		i = end
+		// Re-examine the rune that ended this mention: in "@a@b" it is the
+		// '@' that starts the next one.
+		i = end - 1
 	}
 	return false
 }
