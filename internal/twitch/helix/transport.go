@@ -8,9 +8,17 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/worxbend/twi/internal/twitch"
 )
+
+// defaultHTTPTimeout bounds Helix and OAuth endpoint calls made without a
+// configured client. http.DefaultClient has no timeout, and nothing else on
+// these paths sets a deadline either, so an endpoint that accepts the
+// connection and then stalls would hang the caller indefinitely. Matches the
+// login flow's timeout.
+const defaultHTTPTimeout = 15 * time.Second
 
 // transport carries the HTTP plumbing every Helix adapter in this
 // package shares: the HTTP client to send on, the registered application's
@@ -28,11 +36,11 @@ type transport struct {
 }
 
 // newTransport builds the shared plumbing from the fields every Helix
-// client config carries. A nil httpClient falls back to http.DefaultClient so
-// a zero-valued config still produces a usable client.
+// client config carries. A nil httpClient falls back to a client with a
+// timeout so a zero-valued config still produces a usable client.
 func newTransport(httpClient *http.Client, clientID string, tokenSource func() string, staticToken string) transport {
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = &http.Client{Timeout: defaultHTTPTimeout}
 	}
 	return transport{
 		httpClient:       httpClient,

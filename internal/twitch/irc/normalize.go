@@ -2,6 +2,7 @@ package irc
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strconv"
@@ -344,14 +345,8 @@ func normalizeBadges(in map[string]int, tags map[string]string) []twitch.Badge {
 		return nil
 	}
 
-	keys := make([]string, 0, len(in))
-	for key := range in {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	badges := make([]twitch.Badge, 0, len(keys))
-	for _, key := range keys {
+	badges := make([]twitch.Badge, 0, len(in))
+	for _, key := range slices.Sorted(maps.Keys(in)) {
 		badges = append(badges, twitch.Badge{
 			SetID: textsafe.Display(key),
 			ID:    strconv.Itoa(in[key]),

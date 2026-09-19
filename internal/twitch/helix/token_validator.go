@@ -15,8 +15,8 @@ import (
 const defaultOAuthValidateURL = "https://id.twitch.tv/oauth2/validate"
 
 // OAuthTokenValidatorConfig configures the Twitch OAuth token validation HTTP
-// adapter. Zero values use Twitch's production validation endpoint and the
-// default HTTP client.
+// adapter. Zero values use Twitch's production validation endpoint and a
+// default HTTP client with a timeout.
 type OAuthTokenValidatorConfig struct {
 	Endpoint   string
 	HTTPClient *http.Client
@@ -43,7 +43,7 @@ func NewOAuthTokenValidator(cfg OAuthTokenValidatorConfig) *OAuthTokenValidator 
 	}
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = &http.Client{Timeout: defaultHTTPTimeout}
 	}
 	now := cfg.Now
 	if now == nil {

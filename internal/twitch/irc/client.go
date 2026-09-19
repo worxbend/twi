@@ -104,6 +104,11 @@ type Client struct {
 	done      chan struct{}
 	closeOnce sync.Once
 
+	// connectStarted guards Connect: a second call would register a duplicate
+	// set of gempir handlers and spawn a second read goroutine on the same
+	// session.
+	connectStarted atomic.Bool
+
 	limiter *sendLimiter
 
 	droppedEvents atomic.Uint64
@@ -182,13 +187,19 @@ func NewClient(cfg Config) (*Client, error) {
 }
 
 func (c *Client) Connect(ctx context.Context) (<-chan twitch.Event, error) {
+	if !c.connectStarted.CompareAndSwap(false, true) {
+		return nil, errors.New("twitch IRC Connect called more than once")
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
 	events := make(chan twitch.Event, c.buffer)
+	c.mu.RLock()
+	channelCount := len(c.channels)
+	c.mu.RUnlock()
 	c.logger.Log(ctx, "twitch.irc.connect.start",
-		slog.Int("channel_count", len(c.channels)),
+		slog.Int("channel_count", channelCount),
 		slog.Int("buffer", c.buffer),
 	)
 	// emit drops the oldest queued event rather than blocking when the
@@ -203,7 +214,10 @@ func (c *Client) Connect(ctx context.Context) (<-chan twitch.Event, error) {
 			switch event.Connection.Type {
 			case twitch.ConnectionEventConnect:
 				c.connected.Store(true)
-			case twitch.ConnectionEventDisconnect:
+			case twitch.ConnectionEventReconnect, twitch.ConnectionEventDisconnect:
+				// A reconnect means the registered session is gone: until the
+				// replacement completes registration, Send must not report a
+				// queue into a buffer that may never flush as success.
 				c.connected.Store(false)
 			}
 		}
@@ -357,11 +371,11 @@ func (c *Client) connectOnceWithAuthRefresh(ctx context.Context, emit func(twitc
 	}
 	c.logger.Log(ctx, "twitch.irc.auth_refresh.succeeded", slog.Bool("refresh_token_updated", refreshed.RefreshTokenUpdated))
 
-	oldToken := c.token
-	oldRefreshToken := c.refresh.RefreshToken
 	token := strings.TrimSpace(stripControlChars(refreshed.AccessToken.Reveal()))
 	refreshToken := refreshed.RefreshToken.Reveal()
 	c.mu.Lock()
+	oldToken := c.token
+	oldRefreshToken := c.refresh.RefreshToken
 	c.token = token
 	c.refresh.RefreshToken = refreshToken
 	next := newSession(c.username, token, c.channels)
@@ -555,11 +569,15 @@ func (c *Client) persistOAuthRefresh(ctx context.Context, refreshed OAuthRefresh
 }
 
 func (c *Client) refreshPersistenceWarning(err error, refreshed OAuthRefresh, oldToken, oldRefreshToken string) string {
+	c.mu.RLock()
+	token := c.token
+	refreshToken := c.refresh.RefreshToken
+	c.mu.RUnlock()
 	redactor := auth.NewRedactor(
 		auth.NewSecret(oldToken),
 		auth.NewSecret(oldRefreshToken),
-		auth.NewSecret(c.token),
-		auth.NewSecret(c.refresh.RefreshToken),
+		auth.NewSecret(token),
+		auth.NewSecret(refreshToken),
 		auth.NewSecret(c.refresh.ClientSecret),
 		refreshed.AccessToken,
 		refreshed.RefreshToken,
