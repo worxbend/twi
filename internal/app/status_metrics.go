@@ -175,41 +175,77 @@ func (m shellModel) fps() float64 {
 	return float64(len(m.frames.frameTimestamps))
 }
 
-// formatStatusMetrics renders the LIVE/REC telemetry segment of the status
+// statusMetric is one telemetry segment of the status bar: its exact text
+// plus the semantic role that decides how statusLine styles it.
+type statusMetric struct {
+	text string
+	kind statusMetricKind
+}
+
+type statusMetricKind int
+
+const (
+	// metricLive is the LIVE/OFFLINE badge (and its elapsed time): the one
+	// segment allowed to shout.
+	metricLive statusMetricKind = iota
+	// metricRecording is the REC badge for debug recording.
+	metricRecording
+	// metricCount is audience telemetry (viewers, followers, subs).
+	metricCount
+	// metricSystem is twi's own telemetry (cpu, mem, fps, chat rate).
+	metricSystem
+)
+
+// statusMetricParts renders the LIVE/REC telemetry segments of the status
 // bar. debugRecording is cfg.Debug.Enabled: twi's own debug-log recording,
 // the only "recording" concept this app has. now is the zero time before the
 // animation clock's first tick (animation disabled, or no Update() cycle has
 // run yet), in which case elapsed/pulse render as static, deterministic
 // values instead of reading the wall clock directly from View().
-func (m shellModel) formatStatusMetrics(now time.Time, debugRecording bool) string {
+func (m shellModel) statusMetricParts(now time.Time, debugRecording bool) []statusMetric {
 	active := m.activeChannelState()
 	pulse := statusPulse(now)
 
-	parts := make([]string, 0, 8)
+	parts := make([]statusMetric, 0, 8)
 	if active.live {
-		parts = append(parts, pulseLabel("LIVE", pulse)+" "+formatElapsed(liveElapsed(now, active.liveSince)))
+		parts = append(parts, statusMetric{
+			text: pulseLabel("LIVE", pulse) + " " + formatElapsed(liveElapsed(now, active.liveSince)),
+			kind: metricLive,
+		})
 		if active.viewerCount > 0 {
-			parts = append(parts, fmt.Sprintf("viewers=%d", active.viewerCount))
+			parts = append(parts, statusMetric{text: fmt.Sprintf("viewers=%d", active.viewerCount), kind: metricCount})
 		}
 	} else {
-		parts = append(parts, "OFFLINE")
+		parts = append(parts, statusMetric{text: "OFFLINE", kind: metricLive})
 	}
 	if m.metrics.followerCountKnown {
-		parts = append(parts, fmt.Sprintf("followers=%d", m.metrics.followerCount))
+		parts = append(parts, statusMetric{text: fmt.Sprintf("followers=%d", m.metrics.followerCount), kind: metricCount})
 	}
 	if m.metrics.subscriberCountKnown {
-		parts = append(parts, fmt.Sprintf("subs=%d", m.metrics.subscriberCount))
+		parts = append(parts, statusMetric{text: fmt.Sprintf("subs=%d", m.metrics.subscriberCount), kind: metricCount})
 	}
 	if debugRecording {
-		parts = append(parts, pulseLabel("REC", pulse))
+		parts = append(parts, statusMetric{text: pulseLabel("REC", pulse), kind: metricRecording})
 	}
 	if m.runtime.cpuAvailable {
-		parts = append(parts, fmt.Sprintf("cpu=%.0f%%", m.runtime.cpuPercent))
+		parts = append(parts, statusMetric{text: fmt.Sprintf("cpu=%.0f%%", m.runtime.cpuPercent), kind: metricSystem})
 	}
-	parts = append(parts, fmt.Sprintf("mem=%.0fMB", m.runtime.memoryMB))
-	parts = append(parts, fmt.Sprintf("fps=%.0f", m.fps()))
-	parts = append(parts, fmt.Sprintf("chat=%.1fKB/s", m.chatBitrateBps()/1024))
-	return strings.Join(parts, " ")
+	parts = append(parts, statusMetric{text: fmt.Sprintf("mem=%.0fMB", m.runtime.memoryMB), kind: metricSystem})
+	parts = append(parts, statusMetric{text: fmt.Sprintf("fps=%.0f", m.fps()), kind: metricSystem})
+	parts = append(parts, statusMetric{text: fmt.Sprintf("chat=%.1fKB/s", m.chatBitrateBps()/1024), kind: metricSystem})
+	return parts
+}
+
+// formatStatusMetrics renders the LIVE/REC telemetry segment of the status
+// bar as one plain string. The status line itself styles statusMetricParts;
+// this projection stays for callers (and tests) that want the text.
+func (m shellModel) formatStatusMetrics(now time.Time, debugRecording bool) string {
+	parts := m.statusMetricParts(now, debugRecording)
+	texts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		texts = append(texts, part.text)
+	}
+	return strings.Join(texts, " ")
 }
 
 // metricsNow returns the animation clock's last tick time (the zero time
@@ -219,17 +255,6 @@ func (m shellModel) formatStatusMetrics(now time.Time, debugRecording bool) stri
 // tested with an injectable clock rather than free-floating real time.
 func (m shellModel) metricsNow() time.Time {
 	return m.frames.lastFrameAt
-}
-
-// compactStatusMetrics renders just the LIVE/OFFLINE badge and elapsed time
-// for narrower terminals that don't have room for the full metrics line.
-func (m shellModel) compactStatusMetrics(now time.Time) string {
-	active := m.activeChannelState()
-	pulse := statusPulse(now)
-	if !active.live {
-		return "OFFLINE"
-	}
-	return pulseLabel("LIVE", pulse) + " " + formatElapsed(liveElapsed(now, active.liveSince))
 }
 
 // statusPulse reports whether a pulsing status label (LIVE, REC) is in its

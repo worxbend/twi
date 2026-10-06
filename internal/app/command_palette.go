@@ -360,7 +360,9 @@ func (m shellModel) commandPaletteView(layout shellLayout) string {
 		framed:        layout.paletteFramed,
 		lines: func(width, height int) []string {
 			lines := m.commandPaletteLines(width, height)
-			return m.paletteRevealedLines(lines, width)
+			lines = m.paletteRevealedLines(lines, width)
+			selectedLine := pickerSelectedLine(m.palette.selected, len(m.visibleCommandPaletteCommands()), height)
+			return m.stylePickerLines(lines, width, selectedLine)
 		},
 	})
 }

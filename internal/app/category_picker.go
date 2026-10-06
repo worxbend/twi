@@ -193,7 +193,9 @@ func (m shellModel) categoryPickerView(layout shellLayout) string {
 		contentHeight: layout.categoryPickerContentHeight,
 		framed:        layout.categoryPickerFramed,
 		lines: func(width, height int) []string {
-			return m.categoryPickerLines(width, height)
+			lines := m.categoryPickerLines(width, height)
+			selectedLine := pickerSelectedLine(m.categoryPicker.selected, len(m.categoryPickerEntries()), height)
+			return m.stylePickerLines(lines, width, selectedLine)
 		},
 	})
 }

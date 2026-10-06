@@ -8,8 +8,6 @@ import (
 	"github.com/worxbend/twi/internal/theme"
 )
 
-const canvasDarkenAmount = 0.14
-
 type paneSpec struct {
 	icon          string
 	title         string
@@ -22,7 +20,7 @@ type paneSpec struct {
 }
 
 func (m shellModel) canvasBackground() string {
-	return theme.Darken(m.theme.Background, canvasDarkenAmount)
+	return m.tokens().Canvas
 }
 
 // renderPane builds an exact-size panel whose title occupies the existing top

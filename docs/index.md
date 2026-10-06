@@ -13,6 +13,7 @@ The [project website](https://worxbend.github.io/twi/) is a visual tour: screens
 | Operator | [config.md](config.md) and [auth.md](auth.md) | Understand config precedence, credential sources, login, token refresh, and redaction. |
 | Docker user | [docker.md](docker.md) | Build and run the local container without baking secrets into the image. |
 | Contributor | [../CONTRIBUTING.md](../CONTRIBUTING.md), [development.md](development.md), and [code-style.md](code-style.md) | Work safely in the codebase, run checks, and preserve package boundaries. |
+| UI contributor | [design-system.md](design-system.md) | Learn the token layer and component kit every surface styles from. |
 | Security reviewer | [../SECURITY.md](../SECURITY.md) | Report credential-handling issues without exposing secrets. |
 | Release owner | [release.md](release.md) and [manual-validation.md](manual-validation.md) | Run release packaging, record manual checks, and avoid unsupported claims. |
 | Anyone upgrading | [../CHANGELOG.md](../CHANGELOG.md) | See what changed between releases, including behavior changes. |

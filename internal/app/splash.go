@@ -77,13 +77,14 @@ func (m shellModel) splashViewAt(now time.Time) string {
 	decorativeLine := m.splashDecorativeLine(contentWidth, elapsed, canvas)
 	blankLine := splashStyledLine(centeredFittedLine("", contentWidth), m.theme.Muted, canvas, false)
 	progressWidth := min(splashProgressWidth, clampMin(contentWidth-2, 0))
-	progressLine := gradientForegroundText(
-		centeredFittedLine(splashProgressBar(fraction, progressWidth), contentWidth),
-		m.theme.Accent,
-		m.gradientEndColor(),
+	// The boot meter is the design system's sub-cell progress bar: a gradient
+	// fill advancing in eighth-cell steps over a dim track, bracketed in mute.
+	progressLine := centeredEffectLine(
+		splashStyledLine("[", m.theme.Muted, canvas, false)+
+			m.progressBar(progressWidth, fraction, canvas, phase)+
+			splashStyledLine("]", m.theme.Muted, canvas, false),
+		contentWidth,
 		canvas,
-		phase,
-		true,
 	)
 	phaseLabel := splashPhaseLabel(fraction, m.activeChannelName())
 	if hint := splashSkipHint(fraction); hint != "" && contentWidth >= uniseg.StringWidth(phaseLabel)+uniseg.StringWidth(hint)+5 {
@@ -193,17 +194,6 @@ func splashContentWidth(width int) int {
 		return width
 	}
 	return min(width-2, 54)
-}
-
-func splashProgressBar(fraction float64, width int) string {
-	if width <= 0 {
-		return "◆"
-	}
-	filled := int(clampFraction(fraction) * float64(width))
-	if filled >= width {
-		return "[" + strings.Repeat("━", width) + "]"
-	}
-	return "[" + strings.Repeat("━", filled) + "◆" + strings.Repeat("·", width-filled-1) + "]"
 }
 
 // splashSkipHint tells the user the splash is optional. Ten seconds is a

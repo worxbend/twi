@@ -1249,63 +1249,155 @@ const (
 )
 
 func (m shellModel) statusLine(width int) string {
+	if width <= 0 {
+		return ""
+	}
+	tokens := m.tokens()
 	active := m.activeChannelState()
 	channelCount := len(m.channels.channelNames())
 	separator := " | "
-	left := fmt.Sprintf("#%s %s", active.name, active.status.Status)
-	if m.channels.empty() {
-		left = "no channel open"
+
+	// The line is assembled as styled runs over a quiet surface: the channel
+	// and its connection state carry the accent/semantic colors, telemetry
+	// recedes through Muted to Faint, and only badges that demand attention
+	// (live, recording, dropped messages, an armed confirmation) go solid.
+	// Every conditional below mirrors the historical plain-text assembly
+	// byte-for-byte, so width-budget behavior and the strings tests (and
+	// users) match on are unchanged.
+	runs := []run{{text: " ", foreground: tokens.Muted}}
+	appendSegments := func(segments ...run) {
+		runs = append(runs, segments...)
+	}
+	appendSeparated := func(segments ...run) {
+		appendSegments(append([]run{separatorRun(separator, tokens)}, segments...)...)
+	}
+
+	channelColor := tokens.Muted
+	if !m.channels.empty() {
+		channelColor = connectionStatusColor(active.status.Status, tokens)
 	}
 	if width >= statusWidthFullMetrics {
-		left = m.formatStatusMetrics(m.metricsNow(), m.debugRecording) + separator + left
+		appendSegments(m.statusMetricRuns(m.statusMetricParts(m.metricsNow(), m.debugRecording), tokens)...)
+		appendSeparated()
 	} else if width >= statusWidthCompactMetrics {
-		left = m.compactStatusMetrics(m.metricsNow()) + separator + left
+		parts := m.statusMetricParts(m.metricsNow(), m.debugRecording)
+		appendSegments(m.statusMetricRuns(parts[:1], tokens)...)
+		appendSeparated()
+	}
+
+	if m.channels.empty() {
+		appendSegments(run{text: "no channel open", foreground: tokens.Muted, italic: true})
+	} else {
+		appendSegments(run{
+			text:       fmt.Sprintf("#%s %s", active.name, active.status.Status),
+			foreground: channelColor,
+			bold:       true,
+		})
 	}
 	if channelCount > 1 && width >= statusWidthChannelCount {
-		left += separator + fmt.Sprintf("channels=%d", channelCount)
+		appendSeparated(run{text: fmt.Sprintf("channels=%d", channelCount), foreground: tokens.Muted})
 	}
 	if totalUnread := m.channels.totalUnread(); totalUnread > 0 && width >= statusWidthUnreadCount {
-		left += separator + fmt.Sprintf("unread=%d", totalUnread)
+		appendSeparated(run{text: fmt.Sprintf("unread=%d", totalUnread), foreground: tokens.Warning, bold: true})
 	}
 	// Dropped messages are shown unconditionally once any exist, at any width.
 	// Chat quietly losing messages is exactly the thing a moderator must not
 	// have to discover for themselves, so this outranks the decorations above
 	// it in the same line.
 	if dropped := m.droppedMessageCount(); dropped > 0 {
-		left += separator + fmt.Sprintf("dropped=%d", dropped)
+		appendSeparated(run{text: fmt.Sprintf("dropped=%d", dropped), foreground: tokens.OnError, background: tokens.Error, bold: true})
 	}
 	// The prompt is the whole point of the guard: an armed confirmation the
 	// user cannot see is worse than no guard at all.
 	if m.pendingClearChat {
-		left += separator + "clear chat? ctrl+L again to confirm"
+		appendSeparated(run{text: "clear chat? ctrl+L again to confirm", foreground: tokens.Warning, bold: true})
 	}
 	if m.lastSystemNotification != nil && width >= statusWidthNotification {
-		left += separator + "notify: " + systemNotificationSummary(*m.lastSystemNotification)
+		appendSeparated(run{text: "notify: " + systemNotificationSummary(*m.lastSystemNotification), foreground: tokens.Muted})
 	}
 	if summary := active.messageFilters.summary(); summary != "" && width >= statusWidthFilterSummary {
-		left += separator + "filter=" + summary
-	}
-	right := ""
-	if width >= statusWidthFullFocusInfo {
-		right = fmt.Sprintf(" focus=%s animation=%s", m.focusName(), m.animationMode)
-	} else if width >= statusWidthFocusOnly {
-		right = fmt.Sprintf(" focus=%s", m.focusName())
+		appendSeparated(run{text: "filter=" + summary, foreground: tokens.Info})
 	}
 	if width >= statusWidthSendFeedback && active.sendFeedback != "" {
-		left += separator + "send: " + active.sendFeedback
+		appendSeparated(run{text: "send: " + active.sendFeedback, foreground: tokens.Muted})
 	} else if width >= statusWidthChannelDetail && active.status.Detail != "" && (channelCount == 1 || width >= statusWidthDetailMultiChannel) {
-		left += " - " + active.status.Detail
+		appendSegments(run{text: " - " + active.status.Detail, foreground: tokens.Faint})
 	}
-	line := fitLine(" "+left+right, width)
+	if width >= statusWidthFullFocusInfo {
+		appendSegments(run{text: fmt.Sprintf(" focus=%s animation=%s", m.focusName(), m.animationMode), foreground: tokens.Faint})
+	} else if width >= statusWidthFocusOnly {
+		appendSegments(run{text: fmt.Sprintf(" focus=%s", m.focusName()), foreground: tokens.Faint})
+	}
 
-	statusBackground := m.theme.Accent
-	statusForeground := theme.ContrastCorrectedForeground(m.theme.Foreground, statusBackground, m.canvasBackground())
-	return lipgloss.NewStyle().
-		Width(width).
-		Foreground(lipgloss.Color(statusForeground)).
-		Background(lipgloss.Color(statusBackground)).
-		Bold(true).
-		Render(line)
+	return renderRuns(width, tokens.Surface, runs...)
+}
+
+// statusMetricRuns styles the telemetry segments: LIVE and REC are solid
+// badges in their semantic color (dimmed to a soft badge on the pulse's off
+// beat), audience counts sit in Muted, and twi's own vitals recede to Faint.
+// The single spaces joining segments take the following badge's background,
+// which is what gives the badge its pill silhouette without changing the
+// line's text.
+func (m shellModel) statusMetricRuns(parts []statusMetric, tokens theme.Tokens) []run {
+	runs := make([]run, 0, len(parts)*2)
+	for index, part := range parts {
+		if index > 0 {
+			runs = append(runs, run{text: " ", foreground: tokens.Faint})
+		}
+		switch part.kind {
+		case metricLive:
+			runs = append(runs, liveBadgeRuns(part.text, m.activeChannelState().live, tokens)...)
+		case metricRecording:
+			solid := !strings.HasPrefix(part.text, "·")
+			runs = append(runs, badgeTextRun(part.text, theme.KindError, solid, tokens))
+		case metricCount:
+			runs = append(runs, run{text: part.text, foreground: tokens.Muted})
+		default:
+			runs = append(runs, run{text: part.text, foreground: tokens.Faint})
+		}
+	}
+	return runs
+}
+
+// liveBadgeRuns styles "LIVE 0:00" (or its pulsing "·LIVE" form, or OFFLINE):
+// the badge word solid, the elapsed time beside it in the same hue.
+func liveBadgeRuns(text string, live bool, tokens theme.Tokens) []run {
+	if !live {
+		return []run{{text: text, foreground: tokens.Muted, background: tokens.SurfaceHi, bold: true}}
+	}
+	word, rest, _ := strings.Cut(text, " ")
+	solid := !strings.HasPrefix(word, "·")
+	runs := []run{badgeTextRun(word, theme.KindError, solid, tokens)}
+	if rest != "" {
+		runs = append(runs, run{text: " " + rest, foreground: tokens.Error})
+	}
+	return runs
+}
+
+// badgeTextRun draws label as a solid kind-colored badge, or as the soft
+// variant when solid is false (the pulse's dim beat). The label's own text
+// never changes.
+func badgeTextRun(label string, kind theme.Kind, solid bool, tokens theme.Tokens) run {
+	if !solid {
+		foreground, background := tokens.SoftBadge(kind)
+		return run{text: label, foreground: foreground, background: background, bold: true}
+	}
+	return run{text: label, foreground: tokens.OnColor(kind), background: tokens.Color(kind), bold: true}
+}
+
+// connectionStatusColor maps a channel's connection state onto the semantic
+// token that should announce it.
+func connectionStatusColor(status ConnectionStatus, tokens theme.Tokens) string {
+	switch status {
+	case ConnectionConnected:
+		return tokens.Success
+	case ConnectionConnecting, ConnectionReconnecting:
+		return tokens.Warning
+	case ConnectionDisconnected, ConnectionFailed:
+		return tokens.Error
+	default:
+		return tokens.Muted
+	}
 }
 
 // visibleChatRows returns exactly the styled rows the chat pane will draw,
@@ -1954,14 +2046,40 @@ func (m shellModel) helpView(width, height int) string {
 	if len(lines) > 0 && width >= 6 {
 		lines[0] = "⌨ " + strings.TrimLeft(lines[0], " ")
 	}
-	for i := range lines {
-		lines[i] = fitLine(lines[i], width)
+	tokens := m.tokens()
+	styled := make([]string, len(lines))
+	for i, line := range lines {
+		styled[i] = renderRuns(width, tokens.Surface, helpLineRuns(line, tokens)...)
 	}
-	return lipgloss.NewStyle().
-		Width(width).
-		Foreground(lipgloss.Color(m.theme.Muted)).
-		Background(lipgloss.Color(m.theme.Surface)).
-		Render(strings.Join(lines, "\n"))
+	return strings.Join(styled, "\n")
+}
+
+// helpLineRuns styles one help row without changing its text: the "keys"
+// half of each "keys: description" part becomes a keycap (raised fill,
+// accent, bold), descriptions stay muted, and the " | " group separators
+// recede to faint. Parts with no ": " (the compact fallbacks) pass through
+// quietly.
+func helpLineRuns(line string, tokens theme.Tokens) []run {
+	var runs []run
+	parts := strings.Split(line, " | ")
+	for index, part := range parts {
+		if index > 0 {
+			runs = append(runs, separatorRun(" | ", tokens))
+		}
+		keys, description, found := strings.Cut(part, ": ")
+		switch {
+		case found:
+			runs = append(runs, keycap(keys, tokens))
+			runs = append(runs, run{text: ": ", foreground: tokens.Faint})
+			runs = append(runs, run{text: description, foreground: tokens.Muted})
+		case strings.HasPrefix(part, "⌨ "):
+			runs = append(runs, run{text: "⌨ ", foreground: tokens.Accent, bold: true})
+			runs = append(runs, run{text: strings.TrimPrefix(part, "⌨ "), foreground: tokens.Muted})
+		default:
+			runs = append(runs, run{text: part, foreground: tokens.Muted})
+		}
+	}
+	return runs
 }
 
 func isInteractiveTerminal(w io.Writer) bool {

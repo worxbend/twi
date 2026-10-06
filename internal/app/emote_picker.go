@@ -81,7 +81,9 @@ func (m shellModel) emotePickerView(layout shellLayout) string {
 		contentHeight: layout.emotePickerContentHeight,
 		framed:        layout.emotePickerFramed,
 		lines: func(width, height int) []string {
-			return m.emotePickerLines(width, height)
+			lines := m.emotePickerLines(width, height)
+			selectedLine := pickerSelectedLine(m.emotePicker.selected, len(m.visibleEmotePickerEntries()), height)
+			return m.stylePickerLines(lines, width, selectedLine)
 		},
 	})
 }

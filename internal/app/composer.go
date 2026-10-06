@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rivo/uniseg"
 	"github.com/worxbend/twi/internal/animation"
+	"github.com/worxbend/twi/internal/theme"
 )
 
 type composerSegment struct {
@@ -43,9 +44,16 @@ func (m shellModel) composerView(layout shellLayout) string {
 
 	lines := make([]string, 0, layout.composerHeight)
 	panelLines := m.composerPanelLines(panelHeight, contentWidth)
+	// The focus rail carries the same shimmering gradient the pane frames
+	// use, so "where does my next keystroke go" reads identically on the
+	// composer and on every panel. Unfocused it recedes to the quiet border.
 	railColor := m.theme.Border
 	if m.composerFocused() {
-		railColor = m.theme.Accent
+		if colors := theme.SeamlessGradient(m.theme.Accent, m.gradientEndColor(), 12); len(colors) > 0 {
+			railColor = colors[m.gradientPhase(len(colors))%len(colors)]
+		} else {
+			railColor = m.theme.Accent
+		}
 	}
 	for _, segments := range panelLines {
 		body := renderComposerSegments(segments, contentWidth, m.theme.Surface)

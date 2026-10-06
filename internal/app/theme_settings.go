@@ -219,6 +219,12 @@ func (m shellModel) themeSettingsEntryLine(name string, width int, selected bool
 	if width <= 0 {
 		return ""
 	}
+	// The highlighted row lifts onto the Selection token so the live preview
+	// reads as "this is the one you are about to keep" before Enter lands.
+	rowBackground := background
+	if selected {
+		rowBackground = m.tokens().Selection
+	}
 
 	prefix, prefixColor := "  ", m.theme.Muted
 	if selected {
@@ -236,7 +242,7 @@ func (m shellModel) themeSettingsEntryLine(name string, width int, selected bool
 		if text == "" {
 			return
 		}
-		builder.WriteString(paneStyledText(text, color, background, bold))
+		builder.WriteString(paneStyledText(text, color, rowBackground, bold))
 		used += uniseg.StringWidth(text)
 	}
 
@@ -257,7 +263,7 @@ func (m shellModel) themeSettingsEntryLine(name string, width int, selected bool
 		}
 	}
 	if used < width {
-		builder.WriteString(paneStyledText(strings.Repeat(" ", width-used), m.theme.Muted, background, false))
+		builder.WriteString(paneStyledText(strings.Repeat(" ", width-used), m.theme.Muted, rowBackground, false))
 	}
 	return builder.String()
 }

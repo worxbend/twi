@@ -11,6 +11,26 @@ constant in the source tree.
 
 ## [Unreleased]
 
+### Changed
+
+- **The TUI chrome was rebuilt on a semantic design-token layer.** Every
+  palette (built-in or custom) now derives a full token set — canvas, raised
+  surface, track, faint, accent-soft selection, and readable on-color pairs —
+  and every surface styles from those tokens instead of raw palette fields.
+- **The tab bar is now a pill strip on a quiet track** instead of a full-width
+  gradient: the active tab is a solid accent pill that shimmers with the
+  shared frame clock, inactive tabs recede to muted text.
+- **The status line is segmented and semantic** instead of a flat accent
+  block: LIVE/REC are solid badges that dim on the pulse's off beat, the
+  channel name carries its connection-state color, dropped-message and
+  clear-chat warnings go solid, and telemetry recedes from muted to faint.
+- **Pickers, the command palette, and the Stream Info/Markers tabs highlight
+  the selected row** on the accent-soft selection token with an accent
+  marker, raise their query/header rows, and color failure/success rows.
+- **Help renders keys as keycaps, the composer's focus rail shimmers** with
+  the same gradient the pane frames use, and the splash boot meter is a
+  sub-cell (eighth-block) gradient progress bar over a dim track.
+
 ### Security
 
 - **Desktop notifications on Windows could run chat text as commands.**

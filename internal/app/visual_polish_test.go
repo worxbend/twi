@@ -56,7 +56,7 @@ func TestSplashViewHasAnimatedLogoAndNamedBootPhases(t *testing.T) {
 	// milliseconds, so changing the splash length does not silently move
 	// this assertion into a different phase.
 	ready := model.splashViewAt(started.Add(splashDuration * 9 / 10))
-	if !strings.Contains(ready, "ready for #alpha") || !strings.Contains(ready, "━") {
+	if !strings.Contains(ready, "ready for #alpha") || !strings.Contains(ready, "█") {
 		t.Fatalf("late splash missing ready phase or progress:\n%s", ready)
 	}
 	if loading == ready {

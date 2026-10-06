@@ -230,7 +230,7 @@ func (m shellModel) miscView(layout shellLayout) string {
 		contentWidth = clampMin(layout.width-4, 1)
 	}
 	lines := m.miscLines(contentWidth, layout.miscContentHeight)
-	content := strings.Join(lines, "\n")
+	content := strings.Join(m.styleFormLines(lines, contentWidth), "\n")
 	if !layout.miscFramed {
 		return fitBlock(content, layout.width, layout.miscHeight)
 	}

@@ -375,7 +375,7 @@ func (m shellModel) streamInfoView(layout shellLayout) string {
 		contentWidth = clampMin(layout.width-4, 1)
 	}
 	lines := m.streamInfoLines(contentWidth, layout.streamInfoContentHeight)
-	content := strings.Join(lines, "\n")
+	content := strings.Join(m.styleFormLines(lines, contentWidth), "\n")
 	if !layout.streamInfoFramed {
 		return fitBlock(content, layout.width, layout.streamInfoHeight)
 	}

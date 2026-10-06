@@ -223,7 +223,9 @@ func (m shellModel) channelPickerView(layout shellLayout) string {
 		contentHeight: layout.channelPickerContentHeight,
 		framed:        layout.channelPickerFramed,
 		lines: func(width, height int) []string {
-			return m.channelPickerLines(width, height)
+			lines := m.channelPickerLines(width, height)
+			selectedLine := pickerSelectedLine(m.channelPicker.selected, len(m.channelPickerEntries()), height)
+			return m.stylePickerLines(lines, width, selectedLine)
 		},
 	})
 }
