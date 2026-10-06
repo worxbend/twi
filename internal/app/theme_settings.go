@@ -40,6 +40,7 @@ var themeSettingsNames = sync.OnceValue(func() []string {
 
 func (m *shellModel) toggleThemeSettings() {
 	if m.themeSettings.open {
+		m.theme = m.themeSettings.originalPalette
 		m.themeSettings = themeSettingsState{}
 		return
 	}

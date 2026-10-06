@@ -111,6 +111,7 @@ func markerErrorLabels(action, endpoint string) errorLabels {
 	return errorLabels{
 		action:     action,
 		readAction: "read Twitch stream markers response",
+		subject:    "stream markers",
 		endpoint:   endpoint,
 		channelAPIReasons: map[int]twitch.ChannelAPIReason{
 			http.StatusUnauthorized: twitch.ChannelAPIMissingScope,

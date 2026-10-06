@@ -15,6 +15,10 @@ import (
 
 const streamInfoRequestTimeout = 5 * time.Second
 
+// streamInfoTitleRow heads the tab's placeholder states (loading, error,
+// unavailable) the same way the field list is headed when loaded.
+const streamInfoTitleRow = " Stream Info"
+
 // streamInfoField is one editable row on the Stream Info tab.
 type streamInfoField int
 
@@ -120,12 +124,7 @@ func (m shellModel) applyStreamInfoLoaded(msg streamInfoLoadedMsg) shellModel {
 	}
 	m.streamInfo.loadErr = ""
 	m.streamInfo.loaded = true
-	m.streamInfo.original = msg.info
-	m.streamInfo.title = msg.info.Title
-	m.streamInfo.category = msg.info.GameName
-	m.streamInfo.categoryGameID = msg.info.GameID
-	m.streamInfo.language = msg.info.Language
-	m.streamInfo.tags = strings.Join(msg.info.Tags, ", ")
+	m.seedStreamInfoFields(msg.info)
 	return m
 }
 
@@ -135,7 +134,11 @@ func (m shellModel) applyStreamInfoLoaded(msg streamInfoLoadedMsg) shellModel {
 // picking a real category in the category picker (category_picker.go), never
 // typed - so no name->ID resolution is needed here.
 func (m *shellModel) scheduleStreamInfoSave() tea.Cmd {
-	if m.services.channelManager == nil || m.selfBroadcasterID == "" || m.streamInfo.saving {
+	if m.services.channelManager == nil || m.streamInfo.saving {
+		return nil
+	}
+	if m.selfBroadcasterID == "" {
+		m.streamInfo.saveErr = "Cannot save yet: stream info has not finished loading. Reopen the tab (alt+2) to retry."
 		return nil
 	}
 
@@ -169,8 +172,7 @@ func (m *shellModel) scheduleStreamInfoSave() tea.Cmd {
 			next.Language = language
 		}
 		if !slices.Equal(tags, original.Tags) {
-			t := tags
-			update.Tags = &t
+			update.Tags = &tags
 			next.Tags = tags
 		}
 		if category != original.GameName {
@@ -200,13 +202,20 @@ func (m shellModel) applyStreamInfoSaved(msg streamInfoSavedMsg) shellModel {
 	m.streamInfo.saveErr = ""
 	m.streamInfo.saveOK = !msg.noChanges
 	m.streamInfo.saveNoChanges = msg.noChanges
-	m.streamInfo.original = msg.info
-	m.streamInfo.title = msg.info.Title
-	m.streamInfo.category = msg.info.GameName
-	m.streamInfo.categoryGameID = msg.info.GameID
-	m.streamInfo.language = msg.info.Language
-	m.streamInfo.tags = strings.Join(msg.info.Tags, ", ")
+	m.seedStreamInfoFields(msg.info)
 	return m
+}
+
+// seedStreamInfoFields resets the working field values (and the confirmed
+// snapshot they are diffed against on save) from a Twitch-side ChannelInfo,
+// after either a successful load or a successful save.
+func (m *shellModel) seedStreamInfoFields(info twitch.ChannelInfo) {
+	m.streamInfo.original = info
+	m.streamInfo.title = info.Title
+	m.streamInfo.category = info.GameName
+	m.streamInfo.categoryGameID = info.GameID
+	m.streamInfo.language = info.Language
+	m.streamInfo.tags = strings.Join(info.Tags, ", ")
 }
 
 // wrapIndentedText greedily word-wraps text into lines no wider than width,
@@ -391,14 +400,14 @@ func (m shellModel) streamInfoLines(width, height int) []string {
 	switch {
 	case m.services.channelManager == nil:
 		lines = []string{
-			" Stream Info",
+			streamInfoTitleRow,
 			" Unavailable: requires Twitch API credentials (client ID + OAuth token).",
 			" Run `twi login` to grant channel:manage:broadcast, then restart twi.",
 		}
 	case m.streamInfo.loading && !m.streamInfo.loaded:
-		lines = []string{" Stream Info", " Loading current stream info..."}
+		lines = []string{streamInfoTitleRow, " Loading current stream info..."}
 	case m.streamInfo.loadErr != "":
-		lines = append([]string{" Stream Info"}, wrapIndentedText("Load failed: "+m.streamInfo.loadErr, width)...)
+		lines = append([]string{streamInfoTitleRow}, wrapIndentedText("Load failed: "+m.streamInfo.loadErr, width)...)
 		lines = append(lines, " Reopen the tab (alt+2) to retry.")
 	default:
 		lines = m.streamInfoFieldLines(width)

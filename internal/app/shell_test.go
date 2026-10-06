@@ -26,6 +26,10 @@ type appFakeClock struct {
 	now time.Time
 }
 
+// errNetworkUnavailable is the shared send failure queued by tests that
+// assert how the composer surfaces a network error.
+var errNetworkUnavailable = errors.New("network unavailable")
+
 type appFakeSystemNotifier struct {
 	notifications []SystemNotification
 	err           error
@@ -465,7 +469,7 @@ func TestLiveShellEnterIgnoresEmptyComposer(t *testing.T) {
 
 func TestLiveShellFailedSendShowsReasonAndRestoresComposer(t *testing.T) {
 	client := NewFakeChatClient(1)
-	if err := client.QueueSendResult(SendResult{}, fmt.Errorf("network unavailable")); err != nil {
+	if err := client.QueueSendResult(SendResult{}, errNetworkUnavailable); err != nil {
 		t.Fatalf("QueueSendResult returned error: %v", err)
 	}
 	model := newLiveModelWithClock("example", config.Default(), client, nil)
@@ -484,7 +488,7 @@ func TestLiveShellFailedSendShowsReasonAndRestoresComposer(t *testing.T) {
 	if got, want := model.activeChannelState().sendState, composerSendFailed; got != want {
 		t.Fatalf("sendState after failure = %q, want %q", got, want)
 	}
-	for _, want := range []string{"failed", "network unavailable"} {
+	for _, want := range []string{"failed", errNetworkUnavailable.Error()} {
 		if !strings.Contains(model.View(), want) {
 			t.Fatalf("view missing %q after failed send:\n%s", want, model.View())
 		}
@@ -493,7 +497,7 @@ func TestLiveShellFailedSendShowsReasonAndRestoresComposer(t *testing.T) {
 
 func TestLiveShellSendFailureUsesSendScopeGuidance(t *testing.T) {
 	client := NewFakeChatClient(1)
-	if err := client.QueueSendResult(SendResult{}, errors.Join(twitch.ErrAuthFailed, fmt.Errorf("missing scope for oauth:secret-token"))); err != nil {
+	if err := client.QueueSendResult(SendResult{}, errors.Join(twitch.ErrAuthFailed, errors.New("missing scope for oauth:secret-token"))); err != nil {
 		t.Fatalf("QueueSendResult returned error: %v", err)
 	}
 	model := newLiveModelWithClock("example", config.Default(), client, nil)
@@ -521,7 +525,7 @@ func TestLiveShellSendFailureUsesSendScopeGuidance(t *testing.T) {
 
 func TestLiveShellFailedSendRestoresQueuedFollowupText(t *testing.T) {
 	client := NewFakeChatClient(2)
-	if err := client.QueueSendResult(SendResult{}, fmt.Errorf("network unavailable")); err != nil {
+	if err := client.QueueSendResult(SendResult{}, errNetworkUnavailable); err != nil {
 		t.Fatalf("QueueSendResult returned error: %v", err)
 	}
 	model := newLiveModelWithClock("example", config.Default(), client, nil)
@@ -564,7 +568,7 @@ func TestLiveShellFailedSendRestoresQueuedFollowupText(t *testing.T) {
 	if got := len(client.SentRequests()); got != 1 {
 		t.Fatalf("SentRequests length = %d, want only first send attempted", got)
 	}
-	for _, want := range []string{"failed", "network unavailable"} {
+	for _, want := range []string{"failed", errNetworkUnavailable.Error()} {
 		if !strings.Contains(model.View(), want) {
 			t.Fatalf("view missing %q after queued failure:\n%s", want, model.View())
 		}
@@ -614,7 +618,7 @@ func TestLiveShellKeepsComposerSendStatePerChannel(t *testing.T) {
 	}{
 		{result: SendResult{AcceptedAt: time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC), Detail: "beta action accepted"}},
 		{result: SendResult{RateLimited: true, RetryAfter: 10 * time.Second, Detail: "alpha cooldown"}},
-		{err: fmt.Errorf("network unavailable")},
+		{err: errNetworkUnavailable},
 	} {
 		if err := client.QueueSendResult(queued.result, queued.err); err != nil {
 			t.Fatalf("QueueSendResult returned error: %v", err)
@@ -743,7 +747,7 @@ func TestLiveShellKeepsComposerSendStatePerChannel(t *testing.T) {
 	if got, want := beta.sendState, composerSendFailed; got != want {
 		t.Fatalf("beta sendState after failure = %q, want %q", got, want)
 	}
-	if !strings.Contains(beta.sendFeedback, "network unavailable") {
+	if !strings.Contains(beta.sendFeedback, errNetworkUnavailable.Error()) {
 		t.Fatalf("beta sendFeedback = %q, want failure detail", beta.sendFeedback)
 	}
 
@@ -1104,7 +1108,7 @@ func TestLiveShellMeInputQueuesActionSend(t *testing.T) {
 
 func TestLiveShellFailedReplyRestoresReplyContext(t *testing.T) {
 	client := NewFakeChatClient(1)
-	if err := client.QueueSendResult(SendResult{}, fmt.Errorf("network unavailable")); err != nil {
+	if err := client.QueueSendResult(SendResult{}, errNetworkUnavailable); err != nil {
 		t.Fatalf("QueueSendResult returned error: %v", err)
 	}
 	model := newLiveModelWithClock("example", config.Default(), client, nil)
@@ -1128,7 +1132,7 @@ func TestLiveShellFailedReplyRestoresReplyContext(t *testing.T) {
 
 func TestLiveShellFailedMixedQueueDoesNotMisapplyReplyContext(t *testing.T) {
 	client := NewFakeChatClient(2)
-	if err := client.QueueSendResult(SendResult{}, fmt.Errorf("network unavailable")); err != nil {
+	if err := client.QueueSendResult(SendResult{}, errNetworkUnavailable); err != nil {
 		t.Fatalf("QueueSendResult returned error: %v", err)
 	}
 	model := newLiveModelWithClock("example", config.Default(), client, nil)
@@ -3018,7 +3022,7 @@ func TestScheduleEmoteIndexLookupResolvesAndSkipsWhenCached(t *testing.T) {
 
 func TestApplyEmoteIndexResultPreservesVisibleSelectionsByName(t *testing.T) {
 	model := newLiveModelWithClockAndOptions("alpha", config.Default(), NewFakeChatClient(1), nil, ClientOptions{})
-	model.emotePicker = emotePickerState{open: true, selected: 4}
+	model.emotePicker = emotePickerState{open: true, filterList: filterList{selected: 4}}
 
 	model.applyEmoteIndexResult(emoteIndexResolvedMsg{
 		channel: "alpha",

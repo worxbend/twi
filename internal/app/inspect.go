@@ -10,6 +10,17 @@ import (
 	"github.com/worxbend/twi/internal/twitch"
 )
 
+const (
+	// inspectIDPrefix labels the id field on the inspect pane's message and
+	// reply lines.
+	inspectIDPrefix = "id="
+	// inspectRefPrefix appends an asset reference to a badge, fragment, or
+	// emote label.
+	inspectRefPrefix = " ref="
+	// inspectUnknownFallback stands in for a diagnostic value that is empty.
+	inspectUnknownFallback = "unknown"
+)
+
 func (m shellModel) inspectView(layout shellLayout) string {
 	return m.renderOverlayPane(overlayPaneSpec{
 		icon:          "🔎",
@@ -97,7 +108,7 @@ func (m shellModel) messageByID(id string) (twitch.ChatMessage, bool) {
 
 func inspectMessageLine(message twitch.ChatMessage) string {
 	parts := []string{
-		"id=" + safeDiagnosticValue(message.ID),
+		inspectIDPrefix + safeDiagnosticValue(message.ID),
 		"channel=#" + safeDiagnosticValue(message.Channel),
 		"type=" + safeDiagnosticValue(string(message.Type)),
 	}
@@ -118,7 +129,7 @@ func inspectAuthorLine(message twitch.ChatMessage) string {
 		parts = append(parts, "login="+safeDiagnosticValue(message.AuthorLogin))
 	}
 	if message.AuthorID != "" {
-		parts = append(parts, "id="+safeDiagnosticValue(message.AuthorID))
+		parts = append(parts, inspectIDPrefix+safeDiagnosticValue(message.AuthorID))
 	}
 	if message.AuthorColor != "" {
 		parts = append(parts, "color="+safeDiagnosticValue(message.AuthorColor))
@@ -143,7 +154,7 @@ func inspectBadgesLine(badges []twitch.Badge) string {
 			label += "(" + safeDiagnosticValue(badge.Info) + ")"
 		}
 		if badge.Ref.Kind != "" || badge.Ref.ID != "" {
-			label += " ref=" + inspectAssetRef(badge.Ref)
+			label += inspectRefPrefix + inspectAssetRef(badge.Ref)
 		}
 		parts = append(parts, label)
 	}
@@ -171,7 +182,7 @@ func inspectReplyLine(reply *twitch.Reply) string {
 		return "reply: none"
 	}
 	parts := []string{
-		"id=" + safeDiagnosticValue(reply.ParentMessageID),
+		inspectIDPrefix + safeDiagnosticValue(reply.ParentMessageID),
 		"author=" + safeDiagnosticValue(emptyFallback(reply.ParentAuthor, reply.ParentLogin)),
 	}
 	if reply.ParentAuthorID != "" {
@@ -191,7 +202,7 @@ func inspectFragmentsLine(fragments []twitch.MessageFragment) string {
 			label += "=" + safeDiagnosticValue(compactDiagnosticText(fragment.Text))
 		}
 		if fragment.Ref.Kind != "" || fragment.Ref.ID != "" {
-			label += " ref=" + inspectAssetRef(fragment.Ref)
+			label += inspectRefPrefix + inspectAssetRef(fragment.Ref)
 		}
 		parts = append(parts, label)
 	}
@@ -203,7 +214,7 @@ func inspectEmotesLine(emotes []twitch.Emote) string {
 	for _, emote := range emotes {
 		label := fmt.Sprintf("%s/%s[%d:%d]", safeDiagnosticValue(emote.Name), safeDiagnosticValue(emote.ID), emote.Start, emote.End)
 		if emote.Ref.Kind != "" || emote.Ref.ID != "" {
-			label += " ref=" + inspectAssetRef(emote.Ref)
+			label += inspectRefPrefix + inspectAssetRef(emote.Ref)
 		}
 		parts = append(parts, label)
 	}
@@ -211,8 +222,8 @@ func inspectEmotesLine(emotes []twitch.Emote) string {
 }
 
 func inspectAssetRef(ref twitch.AssetRef) string {
-	kind := emptyFallback(ref.Kind, "unknown")
-	id := emptyFallback(ref.ID, "unknown")
+	kind := emptyFallback(ref.Kind, inspectUnknownFallback)
+	id := emptyFallback(ref.ID, inspectUnknownFallback)
 	return safeDiagnosticValue(kind + ":" + id)
 }
 
@@ -228,7 +239,7 @@ func safeDiagnosticKey(key string) string {
 }
 
 func safeDiagnosticValue(value string) string {
-	return redactDiagnosticText(emptyFallback(value, "unknown"))
+	return redactDiagnosticText(emptyFallback(value, inspectUnknownFallback))
 }
 
 // redactedMarker is what twi's diagnostic output prints in place of a

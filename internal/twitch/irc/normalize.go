@@ -1,10 +1,10 @@
 package irc
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -19,9 +19,11 @@ const rawEventTODO = "TODO: add a typed normalizer for this Twitch IRC message b
 
 const twitchEmoteStaticURLTemplate = "https://static-cdn.jtvnw.net/emoticons/v2/%s/static/light/2.0"
 
-// NormalizeMessage converts a go-twitch-irc callback payload into the
-// internal event model used by the rest of twi.
-func NormalizeMessage(message gempir.Message) twitch.Event {
+// normalizeMessage converts a go-twitch-irc callback payload into the
+// internal event model used by the rest of twi. The Client's registered
+// handlers call the per-type normalizers directly with the injected clock;
+// this dispatch helper (with its time.Now()) exists for the wire-level tests.
+func normalizeMessage(message gempir.Message) twitch.Event {
 	switch message := message.(type) {
 	case *gempir.PrivateMessage:
 		return NormalizePrivateMessage(*message)
@@ -241,18 +243,14 @@ func NormalizeConnect(at time.Time) twitch.Event {
 }
 
 func NormalizeDisconnect(err error, at time.Time) twitch.Event {
-	event := twitch.Event{
+	return twitch.Event{
 		Kind: twitch.EventConnection,
+		Err:  err,
 		Connection: twitch.ConnectionEvent{
 			Type: twitch.ConnectionEventDisconnect,
 			At:   at,
-			Err:  err,
 		},
 	}
-	if err != nil {
-		event.Err = err
-	}
-	return event
 }
 
 func NormalizeRawMessage(message gempir.RawMessage) twitch.Event {
@@ -399,11 +397,11 @@ func normalizeEmotes(in []*gempir.Emote) []twitch.Emote {
 			})
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Start == out[j].Start {
-			return out[i].End < out[j].End
+	slices.SortStableFunc(out, func(a, b twitch.Emote) int {
+		if a.Start != b.Start {
+			return cmp.Compare(a.Start, b.Start)
 		}
-		return out[i].Start < out[j].Start
+		return cmp.Compare(a.End, b.End)
 	})
 	return out
 }
@@ -433,7 +431,7 @@ func normalizeMessageFragments(text string, emotes []twitch.Emote) []twitch.Mess
 	var fragments []twitch.MessageFragment
 	next := 0
 	for _, emote := range emotes {
-		if emote.Start < next || emote.Start < 0 || emote.End < emote.Start || emote.End >= len(runes) {
+		if emote.Start < next || emote.End < emote.Start || emote.End >= len(runes) {
 			continue
 		}
 		if emote.Start > next {
@@ -511,7 +509,14 @@ func coalesceMessageFragments(in []twitch.MessageFragment) []twitch.MessageFragm
 			continue
 		}
 		last := len(out) - 1
-		if last >= 0 && out[last].Type == twitch.FragmentText && fragment.Type == twitch.FragmentText && out[last].Ref == (twitch.AssetRef{}) && fragment.Ref == (twitch.AssetRef{}) {
+		if last < 0 {
+			out = append(out, fragment)
+			continue
+		}
+		prev := out[last]
+		bothText := prev.Type == twitch.FragmentText && fragment.Type == twitch.FragmentText
+		bothRefFree := prev.Ref == (twitch.AssetRef{}) && fragment.Ref == (twitch.AssetRef{})
+		if bothText && bothRefFree {
 			out[last].Text += fragment.Text
 			continue
 		}

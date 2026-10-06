@@ -90,14 +90,15 @@ func newMockModelWithClock(channel string, cfg config.Config, clock animation.Cl
 // credentials or network access.
 func sampleEmoteEntries() []assets.EmoteEntry {
 	names := []string{
-		"Kappa", "✨", "💜", "🔥", "😂", "🎉", "👀", "🚀", "💬", "🌈", "⚡",
 		"PogChamp", "LUL", "monkaS", "KEKW", "5Head", "EZ", "PagMan",
 		"OMEGALUL", "Pog", "BibleThump", "TriHard", "VoHiYo", "ResidentSleeper",
 		"NotLikeThis", "SeemsGood", "HeyGuys", "DansGame",
 	}
-	entries := make([]assets.EmoteEntry, len(names))
-	for i, name := range names {
-		entries[i] = assets.EmoteEntry{Name: name}
+	entries := make([]assets.EmoteEntry, 0, len(names)+11)
+	entries = append(entries, assets.EmoteEntry{Name: "Kappa"})
+	entries = append(entries, builtInEmojiEntries()...)
+	for _, name := range names {
+		entries = append(entries, assets.EmoteEntry{Name: name})
 	}
 	return entries
 }

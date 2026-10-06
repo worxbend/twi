@@ -104,7 +104,7 @@ type loginOptions struct {
 func parseLoginFlags(args []string, stdout, stderr io.Writer) (opts loginOptions, code int, ok bool) {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.StringVar(&opts.configPath, "config", "", "config file path")
+	addConfigFlag(fs, &opts.configPath)
 	fs.StringVar(&opts.redirectURI, "redirect-uri", defaultLoginRedirectURI, "localhost OAuth callback URL registered for the Twitch app")
 	fs.DurationVar(&opts.timeout, "timeout", defaultLoginTimeout, "maximum time to wait for browser authorization and callback")
 	fs.BoolVar(&opts.dryRun, "dry-run", false, "explain login requirements without opening a browser, listening for a callback, or contacting Twitch")
@@ -115,18 +115,13 @@ func parseLoginFlags(args []string, stdout, stderr io.Writer) (opts loginOptions
 		fs.PrintDefaults()
 	}
 
-	if hasHelpArg(args) {
-		fmt.Fprint(stdout, loginUsage)
-		fs.SetOutput(stdout)
-		fs.PrintDefaults()
+	if printUsageOnHelpRequest(fs, loginUsage, args, stdout) {
 		return opts, 0, false
 	}
 	if err := fs.Parse(args); err != nil {
 		return opts, 2, false
 	}
-	if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "unexpected login argument %q\n\n", fs.Arg(0))
-		fs.Usage()
+	if rejectPositionalArgs(fs, "login", stderr) {
 		return opts, 2, false
 	}
 	if opts.timeout <= 0 {
@@ -150,7 +145,7 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 	applyDebugFlagOverrides(&overrides, opts.debugFlags)
 	cfg, err := config.Load(os.Environ(), overrides)
 	if err != nil {
-		fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
+		reportLoadConfigError(stderr, err)
 		return 1
 	}
 	// An explicit --redirect-uri wins; otherwise the config file's value is
@@ -212,34 +207,32 @@ func loginAndSaveCredentials(cfg config.Config, opts loginOptions, redirectURI s
 	// The redactor starts with the secrets already in the config and is
 	// extended as the login learns more of them, so every message printed or
 	// logged from here on redacts everything known at that point.
-	redactor := auth.NewRedactor(
-		auth.NewSecret(cfg.Twitch.OAuthToken),
-		auth.NewSecret(cfg.Twitch.RefreshToken),
-		auth.NewSecret(cfg.Twitch.ClientSecret),
-	)
+	redactor := newTwitchSecretRedactor(cfg)
+	// reportFailure performs the pair every failure path below does -- log the
+	// failed step to the debug log, then print the redacted error. It closes
+	// over logger and redactor so each failure reports with the secrets known
+	// at that point.
+	reportFailure := func(event, action string, err error) {
+		logger.Log(context.Background(), event, slog.String("error", redactor.Redact(err.Error())))
+		printLoginError(stderr, action, err, redactor)
+	}
 	if err := validateLoginConfig(request); err != nil {
-		logger.Log(context.Background(), "cli.login.config_invalid", slog.String("error", redactor.Redact(err.Error())))
-		printLoginError(stderr, "validate login config", err, redactor)
+		reportFailure("cli.login.config_invalid", "validate login config", err)
 		return 2
 	}
 
 	store, err := newCredentialStore()
-	if err != nil {
-		logger.Log(context.Background(), "cli.login.storage_failed", slog.String("error", redactor.Redact(err.Error())))
-		printLoginError(stderr, "prepare credential storage", err, redactor)
-		return 1
+	if err == nil && store == nil {
+		err = errors.New(credentialStoreUnavailableMsg)
 	}
-	if store == nil {
-		err := errors.New("credential store unavailable")
-		logger.Log(context.Background(), "cli.login.storage_failed", slog.String("error", err.Error()))
-		printLoginError(stderr, "prepare credential storage", err, redactor)
+	if err != nil {
+		reportFailure("cli.login.storage_failed", "prepare credential storage", err)
 		return 1
 	}
 
 	waiter, err := newLoginCallbackWaiter(request.RedirectURI)
 	if err != nil {
-		logger.Log(context.Background(), "cli.login.callback_unavailable", slog.String("error", redactor.Redact(err.Error())))
-		printLoginError(stderr, "prepare login callback", err, redactor)
+		reportFailure("cli.login.callback_unavailable", "prepare login callback", err)
 		return 2
 	}
 	defer waiter.Close()
@@ -250,8 +243,7 @@ func loginAndSaveCredentials(cfg config.Config, opts loginOptions, redirectURI s
 	flow := newLoginFlow()
 	challenge, err := flow.BeginLogin(ctx, request)
 	if err != nil {
-		logger.Log(context.Background(), "cli.login.begin_failed", slog.String("error", redactor.Redact(err.Error())))
-		printLoginError(stderr, "start login", err, redactor)
+		reportFailure("cli.login.begin_failed", "start login", err)
 		return 1
 	}
 	logger = logger.WithSecrets(challenge.AuthorizationURL, challenge.State)
@@ -267,16 +259,14 @@ func loginAndSaveCredentials(cfg config.Config, opts loginOptions, redirectURI s
 	fmt.Fprintln(stdout, "Tokens will be validated, saved privately, and never printed.")
 
 	if err := openLoginBrowser(ctx, challenge.AuthorizationURL.Reveal()); err != nil {
-		logger.Log(context.Background(), "cli.login.browser_failed", slog.String("error", redactor.Redact(err.Error())))
-		printLoginError(stderr, "open browser", err, redactor)
+		reportFailure("cli.login.browser_failed", "open browser", err)
 		return 1
 	}
 	logger.Log(context.Background(), "cli.login.browser_opened")
 
 	callback, err := waiter.Wait(ctx, challenge.State)
 	if err != nil {
-		logger.Log(context.Background(), "cli.login.callback_failed", slog.String("error", redactor.Redact(err.Error())))
-		printLoginError(stderr, "wait for OAuth callback", err, redactor)
+		reportFailure("cli.login.callback_failed", "wait for OAuth callback", err)
 		return 1
 	}
 	logger = logger.WithSecrets(callback.Code, callback.State, callback.ExpectedState)
@@ -288,8 +278,7 @@ func loginAndSaveCredentials(cfg config.Config, opts loginOptions, redirectURI s
 	redactor = redactor.With(callback.Code, callback.State, callback.ExpectedState)
 	result, err := flow.CompleteLogin(ctx, callback)
 	if err != nil {
-		logger.Log(context.Background(), "cli.login.complete_failed", slog.String("error", redactor.Redact(err.Error())))
-		printLoginError(stderr, "complete login", err, redactor)
+		reportFailure("cli.login.complete_failed", "complete login", err)
 		return 1
 	}
 	logger = logger.WithSecrets(result.Tokens.AccessToken, result.Tokens.RefreshToken)
@@ -302,8 +291,7 @@ func loginAndSaveCredentials(cfg config.Config, opts loginOptions, redirectURI s
 	redactor = redactor.With(result.Tokens.AccessToken, result.Tokens.RefreshToken)
 	record := storage.CredentialRecordFromLoginResult(result, request.ClientID, time.Now().UTC())
 	if err := store.SaveCredentials(ctx, record); err != nil {
-		logger.Log(context.Background(), "cli.login.save_failed", slog.String("error", redactor.Redact(err.Error())))
-		printLoginError(stderr, "save credentials", err, redactor)
+		reportFailure("cli.login.save_failed", "save credentials", err)
 		return 1
 	}
 	logger.Log(context.Background(), "cli.login.save_succeeded")
@@ -344,6 +332,29 @@ func hasHelpArg(args []string) bool {
 	return false
 }
 
+// printUsageOnHelpRequest prints the full usage to stdout and reports true
+// when args ask for help; parse functions return immediately in that case.
+func printUsageOnHelpRequest(fs *flag.FlagSet, usage string, args []string, stdout io.Writer) bool {
+	if !hasHelpArg(args) {
+		return false
+	}
+	fmt.Fprint(stdout, usage)
+	fs.SetOutput(stdout)
+	fs.PrintDefaults()
+	return true
+}
+
+// rejectPositionalArgs reports and rejects leftover positional arguments,
+// which neither `twi login` nor `twi setup` accepts.
+func rejectPositionalArgs(fs *flag.FlagSet, command string, stderr io.Writer) bool {
+	if fs.NArg() == 0 {
+		return false
+	}
+	fmt.Fprintf(stderr, "unexpected %s argument %q\n\n", command, fs.Arg(0))
+	fs.Usage()
+	return true
+}
+
 func validateLoginConfig(request auth.LoginRequest) error {
 	var missing []string
 	if strings.TrimSpace(request.ClientID) == "" {
@@ -362,11 +373,7 @@ func validateLoginConfig(request auth.LoginRequest) error {
 }
 
 func printLoginDryRun(stdout io.Writer, cfg config.Config, redirectURI string, timeout time.Duration) {
-	redactor := auth.NewRedactor(
-		auth.NewSecret(cfg.Twitch.OAuthToken),
-		auth.NewSecret(cfg.Twitch.RefreshToken),
-		auth.NewSecret(cfg.Twitch.ClientSecret),
-	)
+	redactor := newTwitchSecretRedactor(cfg)
 
 	fmt.Fprintln(stdout, "Twitch OAuth login dry run")
 	fmt.Fprintf(stdout, "Requested scopes: %s\n", strings.Join(auth.ScopeValues(auth.LoginScopes()), ", "))
@@ -447,7 +454,7 @@ func newLocalLoginCallbackWaiter(rawRedirectURI string) (*localLoginCallbackWait
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if r.URL == nil || r.URL.EscapedPath() != parsed.EscapedPath() {
+		if r.URL.EscapedPath() != parsed.EscapedPath() {
 			http.NotFound(w, r)
 			return
 		}
@@ -522,6 +529,12 @@ func validateLocalLoginRedirectURI(rawRedirectURI string) (*url.URL, error) {
 	return parsed, nil
 }
 
+// browserExitGracePeriod is how long openBrowser waits for a freshly launched
+// browser command to fail: xdg-open and open exit immediately on success, so
+// a quick non-zero exit means the handoff failed and must be reported rather
+// than logged as a successful open.
+var browserExitGracePeriod = 500 * time.Millisecond
+
 func openBrowser(ctx context.Context, targetURL string) error {
 	targetURL = strings.TrimSpace(targetURL)
 	if targetURL == "" {
@@ -530,10 +543,7 @@ func openBrowser(ctx context.Context, targetURL string) error {
 
 	var candidates [][]string
 	if browser := strings.TrimSpace(os.Getenv("BROWSER")); browser != "" {
-		parts := strings.Fields(browser)
-		if len(parts) > 0 {
-			candidates = append(candidates, append(parts, targetURL))
-		}
+		candidates = append(candidates, append(strings.Fields(browser), targetURL))
 	}
 
 	switch runtime.GOOS {
@@ -545,9 +555,6 @@ func openBrowser(ctx context.Context, targetURL string) error {
 
 	var attempted []string
 	for _, candidate := range candidates {
-		if len(candidate) == 0 {
-			continue
-		}
 		path, err := exec.LookPath(candidate[0])
 		if err != nil {
 			attempted = append(attempted, candidate[0])
@@ -557,10 +564,21 @@ func openBrowser(ctx context.Context, targetURL string) error {
 		if err := cmd.Start(); err != nil {
 			return err
 		}
-		go func() {
-			_ = cmd.Wait()
-		}()
-		return nil
+		waitErr := make(chan error, 1)
+		go func() { waitErr <- cmd.Wait() }()
+		select {
+		case err := <-waitErr:
+			if err != nil {
+				return fmt.Errorf("browser command %s: %w", candidate[0], err)
+			}
+			return nil
+		case <-time.After(browserExitGracePeriod):
+			// Still running: it is a real browser holding the window open.
+			return nil
+		case <-ctx.Done():
+			// The login context ended; the callback wait reports that error.
+			return nil
+		}
 	}
 	if len(attempted) == 0 {
 		return errors.New("automatic browser opening is not supported in this environment")

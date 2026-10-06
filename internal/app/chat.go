@@ -33,8 +33,8 @@ type MembershipSource interface {
 // reconnect. Transports without it (the mock source, fakes) still work - the
 // model simply tracks the channel locally.
 type ChannelJoiner interface {
-	JoinChannel(channel string) error
-	PartChannel(channel string) error
+	JoinChannel(ctx context.Context, channel string) error
+	PartChannel(ctx context.Context, channel string) error
 }
 
 // UserStateSource is an optional ChatClient capability exposing Twitch

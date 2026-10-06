@@ -299,9 +299,6 @@ func humanizeSystemEventID(eventID string) string {
 	}
 	for i, part := range parts {
 		part = strings.ToLower(part)
-		if part == "" {
-			continue
-		}
 		runes := []rune(part)
 		runes[0] = unicode.ToUpper(runes[0])
 		parts[i] = string(runes)

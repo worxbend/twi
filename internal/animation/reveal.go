@@ -408,10 +408,9 @@ func cloneFragments(fragments []render.Fragment) []render.Fragment {
 
 func (c Config) withDefaults() Config {
 	defaults := DefaultConfig()
-	if c.Mode == "" {
-		c.Mode = defaults.Mode
-	}
-	if c.Mode != ModeOff && c.Mode != ModeReduced && c.Mode != ModeFast {
+	switch c.Mode {
+	case ModeOff, ModeReduced, ModeFast:
+	default:
 		c.Mode = defaults.Mode
 	}
 	if c.MaxQueued <= 0 {

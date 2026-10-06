@@ -31,13 +31,7 @@ func (m EmoteMetadata) ImageURL() string {
 		out = strings.ReplaceAll(out, "{{scale}}", scale)
 		return out
 	}
-	if strings.TrimSpace(m.ImageURL2X) != "" {
-		return strings.TrimSpace(m.ImageURL2X)
-	}
-	if strings.TrimSpace(m.ImageURL1X) != "" {
-		return strings.TrimSpace(m.ImageURL1X)
-	}
-	return strings.TrimSpace(m.ImageURL4X)
+	return preferredImageURL(m.ImageURL1X, m.ImageURL2X, m.ImageURL4X)
 }
 
 // BadgeMetadata contains one Twitch badge version image.
@@ -53,13 +47,19 @@ type BadgeMetadata struct {
 
 // ImageURL returns a deterministic medium-size badge URL when present.
 func (m BadgeMetadata) ImageURL() string {
-	if strings.TrimSpace(m.ImageURL2X) != "" {
-		return strings.TrimSpace(m.ImageURL2X)
+	return preferredImageURL(m.ImageURL1X, m.ImageURL2X, m.ImageURL4X)
+}
+
+// preferredImageURL picks the medium-size image when present, falling back to
+// the small one and then the large one.
+func preferredImageURL(url1x, url2x, url4x string) string {
+	if strings.TrimSpace(url2x) != "" {
+		return strings.TrimSpace(url2x)
 	}
-	if strings.TrimSpace(m.ImageURL1X) != "" {
-		return strings.TrimSpace(m.ImageURL1X)
+	if strings.TrimSpace(url1x) != "" {
+		return strings.TrimSpace(url1x)
 	}
-	return strings.TrimSpace(m.ImageURL4X)
+	return strings.TrimSpace(url4x)
 }
 
 func preferredValue(values []string, preferred string) string {

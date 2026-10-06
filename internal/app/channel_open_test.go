@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -23,12 +24,12 @@ func newJoiningChatClient() *joiningChatClient {
 	return &joiningChatClient{FakeChatClient: NewFakeChatClient(1)}
 }
 
-func (c *joiningChatClient) JoinChannel(channel string) error {
+func (c *joiningChatClient) JoinChannel(_ context.Context, channel string) error {
 	c.joined = append(c.joined, channel)
 	return nil
 }
 
-func (c *joiningChatClient) PartChannel(channel string) error {
+func (c *joiningChatClient) PartChannel(_ context.Context, channel string) error {
 	c.departed = append(c.departed, channel)
 	return nil
 }

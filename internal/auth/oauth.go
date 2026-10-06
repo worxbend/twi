@@ -169,10 +169,10 @@ func (f *TwitchOAuthLoginFlow) CompleteLogin(ctx context.Context, callback Login
 		return LoginResult{}, errors.New("complete Twitch OAuth login: callback did not include an authorization code; restart login")
 	}
 
-	httpCtx, cancel := f.httpContext(ctx)
+	httpCtx, cancel := context.WithTimeout(ctx, f.requestTimeout)
 	defer cancel()
 
-	tokens, err := f.exchangeCode(httpCtx, attempt, callback.Code, redactor)
+	tokens, err := f.exchangeCode(httpCtx, attempt, NewSecret(code), redactor)
 	if err != nil {
 		return LoginResult{}, err
 	}
@@ -304,6 +304,7 @@ func (f *TwitchOAuthLoginFlow) newAttempt(request LoginRequest) (oauthLoginAttem
 	if !state.Present() {
 		return oauthLoginAttempt{}, errors.New("start Twitch OAuth login: OAuth state generator returned an empty state")
 	}
+	state = NewSecret(strings.TrimSpace(state.Reveal()))
 
 	return oauthLoginAttempt{
 		ClientID:     clientID,
@@ -390,13 +391,6 @@ func (f *TwitchOAuthLoginFlow) consumeAttempt(state string) (oauthLoginAttempt, 
 	delete(f.pending, state)
 	f.sweepExpiredAttempts(now)
 	return attempt, nil
-}
-
-func (f *TwitchOAuthLoginFlow) httpContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	if f.requestTimeout <= 0 {
-		return ctx, func() {}
-	}
-	return context.WithTimeout(ctx, f.requestTimeout)
 }
 
 func (f *TwitchOAuthLoginFlow) exchangeCode(ctx context.Context, attempt oauthLoginAttempt, code Secret, redactor Redactor) (oauthExchangedToken, error) {

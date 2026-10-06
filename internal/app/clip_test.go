@@ -45,6 +45,7 @@ func TestParseClipCommandRecognizesVariants(t *testing.T) {
 		{name: "bad unit", draft: "/clip T-5x", wantOK: true, wantErr: true},
 		{name: "malformed token", draft: "/clip 5m", wantOK: true, wantErr: true},
 		{name: "start not before end", draft: "/clip T-2m T-4m", wantOK: true, wantErr: true},
+		{name: "offset overflows duration", draft: "/clip T-99999999999h", wantOK: true, wantErr: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -195,5 +196,21 @@ func TestClipCreateFailureIsUserFriendlyOnNotLive(t *testing.T) {
 	model = model.applyClipCreated(msg)
 	if !strings.Contains(state.sendFeedback, "not currently live") {
 		t.Fatalf("sendFeedback = %q, want not-live hint", state.sendFeedback)
+	}
+}
+
+func TestClipCreatedAfterChannelCloseDoesNotResurrectChannel(t *testing.T) {
+	model := newMockModel("example", config.Default())
+	model, _ = model.closeChannel("example")
+	if model.channelIsOpen("example") {
+		t.Fatal("test setup: channel still open after closeChannel")
+	}
+
+	model = model.applyClipCreated(clipCreatedMsg{
+		channel: "example",
+		clip:    twitch.Clip{ID: "abc", EditURL: "https://clips.twitch.tv/abc/edit"},
+	})
+	if model.channelIsOpen("example") {
+		t.Fatal("clip completing after the channel was closed resurrected it")
 	}
 }

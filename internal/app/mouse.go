@@ -184,7 +184,19 @@ func (m shellModel) tabAtMouse(event tea.MouseEvent, layout shellLayout) (shellT
 	if layout.tabBarHeight <= 0 || event.Y != 0 {
 		return 0, false
 	}
-	compact := !strings.Contains(m.tabBarTabs(false), ":")
+	// Measure the same label run tabBarLine drew at this width, so the hit
+	// boxes cannot drift from what is on screen.
+	username, channel := m.tabBarContextParts()
+	context := strings.Join(nonEmptyStrings(username, channel), "  ")
+	drawn := m.tabBarTabsForWidth(context, layout.width)
+	if drawn == m.activeTabLabel() {
+		// Only the active tab fit; it is the whole clickable run.
+		if event.X >= 0 && event.X < uniseg.StringWidth(drawn) {
+			return m.activeTab, true
+		}
+		return 0, false
+	}
+	compact := !strings.Contains(drawn, ":")
 	// tabBarTabs starts with one leading space and joins labels with two.
 	cursor := 1
 	for i, entry := range shellTabs {

@@ -20,6 +20,11 @@ type Palette struct {
 	Success    string
 }
 
+// DefaultThemeName is the preset name of twi's default theme, so packages
+// that need the name (config defaults) and packages that need the palette
+// cannot drift apart on a rename.
+const DefaultThemeName = "claude"
+
 // DefaultPalette returns the "claude" preset, twi's default theme.
 //
 // It reads the palette straight from the variable the preset map is built

@@ -61,6 +61,7 @@ func (c *SubscriptionsClient) GetBroadcasterSubscriptions(ctx context.Context, b
 	decoded, err := getJSON[helixSubscriptionsResponse](ctx, c.transport, endpoint, errorLabels{
 		action:     "get Twitch broadcaster subscriptions",
 		readAction: "read Twitch broadcaster subscriptions response",
+		subject:    "broadcaster subscriptions",
 		endpoint:   "Get Broadcaster Subscriptions",
 
 		channelAPIReasons: map[int]twitch.ChannelAPIReason{

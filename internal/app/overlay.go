@@ -43,6 +43,11 @@ func (m *shellModel) closeOtherOverlays(keep overlayKind) {
 		m.inspectOpen = false
 	}
 	if keep != overlayTheme {
+		if m.themeSettings.open {
+			// Abandoning the picker without Enter reverts the live preview,
+			// the same as Esc; otherwise the unsaved theme would stick.
+			m.theme = m.themeSettings.originalPalette
+		}
 		m.themeSettings = themeSettingsState{}
 	}
 	if keep != overlayEmotes {

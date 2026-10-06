@@ -59,6 +59,7 @@ func (c *GamesClient) SearchCategories(ctx context.Context, query string, limit 
 	decoded, err := getJSON[helixGamesResponse](ctx, c.transport, endpoint, errorLabels{
 		action:     "search Twitch categories",
 		readAction: "read Twitch category search response",
+		subject:    "category search",
 		endpoint:   "Search Categories",
 	})
 	if err != nil {

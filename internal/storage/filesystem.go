@@ -2,9 +2,7 @@ package storage
 
 import (
 	"errors"
-	"fmt"
 	"os"
-	"path/filepath"
 )
 
 // ErrPathIsDirectory reports that a path expected to be a file is a directory.
@@ -29,19 +27,15 @@ func CheckReadableFile(path string) error {
 // ProbeWritableDir verifies that dir exists and accepts a short private file
 // write. The probe file is removed before the function returns.
 func ProbeWritableDir(dir string) error {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := os.MkdirAll(dir, CredentialDirectoryMode); err != nil {
 		return err
 	}
 
-	probePath := filepath.Join(dir, ".twi-doctor-write-test")
-	file, err := os.OpenFile(probePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if errors.Is(err, os.ErrExist) {
-		probePath = filepath.Join(dir, fmt.Sprintf(".twi-doctor-write-test-%d", os.Getpid()))
-		file, err = os.OpenFile(probePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	}
+	file, err := os.CreateTemp(dir, ".twi-doctor-write-test-*")
 	if err != nil {
 		return err
 	}
+	probePath := file.Name()
 	if _, err := file.Write([]byte("ok\n")); err != nil {
 		_ = file.Close()
 		_ = os.Remove(probePath)

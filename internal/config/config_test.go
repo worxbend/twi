@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -570,5 +571,55 @@ func TestTrimValueRemovesOneQuotePairOnly(t *testing.T) {
 	}
 	if got := trimValue(`["a", "b"]`); got != `"a", "b"` {
 		t.Fatalf("trimValue = %q, want list items to keep their quotes", got)
+	}
+}
+
+func TestWriteNonSecretFileRoundTripsEscapedValues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	cfg := Default()
+	cfg.Twitch.Username = `say "hi" \o/`
+	cfg.Twitch.ClientID = `C:\app\client`
+
+	if err := WriteNonSecretFile(path, cfg); err != nil {
+		t.Fatalf("WriteNonSecretFile error = %v", err)
+	}
+	loaded, err := Load(nil, Overrides{ConfigPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Twitch.Username != cfg.Twitch.Username {
+		t.Fatalf("Username after round-trip = %q, want %q", loaded.Twitch.Username, cfg.Twitch.Username)
+	}
+	if loaded.Twitch.ClientID != cfg.Twitch.ClientID {
+		t.Fatalf("ClientID after round-trip = %q, want %q", loaded.Twitch.ClientID, cfg.Twitch.ClientID)
+	}
+}
+
+// Regression: quote writes values with strconv.Quote, so a value containing an
+// escaped quote before a "#" lands in the file as `"a\" # still value"`. The
+// inline-comment stripper used to close the quote at the escaped `\"` and cut
+// the value at the real "#", corrupting it on every rewrite.
+func TestLoadKeepsEscapedQuoteBeforeHash(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	username := `a" # still value`
+	content := "twitch_username = " + strconv.Quote(username) + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(nil, Overrides{ConfigPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Twitch.Username != username {
+		t.Fatalf("Username = %q, want %q", cfg.Twitch.Username, username)
+	}
+}
+
+func TestSplitListKeepsEscapedQuoteAndCommaInsideQuotes(t *testing.T) {
+	got := splitList(`"a\",b", c`)
+	want := []string{`a",b`, "c"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("splitList = %q, want %q", got, want)
 	}
 }

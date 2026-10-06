@@ -94,20 +94,20 @@ func TestIRCClientJoinAndDepartTrackChannels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient error = %v", err)
 	}
-	if err := client.Join("#Beta"); err != nil {
+	if err := client.Join(context.Background(), "#Beta"); err != nil {
 		t.Fatalf("Join error = %v", err)
 	}
 	if got := client.channels; len(got) != 2 || got[1] != "beta" {
 		t.Fatalf("channels after join = %#v, want [alpha beta]", got)
 	}
 	// Joining an open channel again must not duplicate it in the list.
-	if err := client.Join("beta"); err != nil {
+	if err := client.Join(context.Background(), "beta"); err != nil {
 		t.Fatalf("second Join error = %v", err)
 	}
 	if got := client.channels; len(got) != 2 {
 		t.Fatalf("channels after duplicate join = %#v, want 2 entries", got)
 	}
-	if err := client.Depart("alpha"); err != nil {
+	if err := client.Depart(context.Background(), "alpha"); err != nil {
 		t.Fatalf("Depart error = %v", err)
 	}
 	if got := client.channels; len(got) != 1 || got[0] != "beta" {
@@ -438,10 +438,14 @@ type fakeIRCSession struct {
 	// connection ends. A fake that returns immediately makes the client tear
 	// the event channel down while the test is still delivering into it.
 	holdConnection chan struct{}
-	says           []string
-	replies        []string
-	joined         []string
-	departed       []string
+	// onConnectGate, when set, is waited on inside Connect before the
+	// registered OnConnect callback fires, letting a test land a Close in
+	// the dial window the registration guard covers.
+	onConnectGate chan struct{}
+	says          []string
+	replies       []string
+	joined        []string
+	departed      []string
 }
 
 var _ chatSession = (*fakeIRCSession)(nil)
@@ -464,8 +468,12 @@ func (s *fakeIRCSession) Connect() error {
 	err := s.connectErr
 	onConnect := s.onConnect
 	hold := s.holdConnection
+	gate := s.onConnectGate
 	s.mu.Unlock()
 	if err == nil && onConnect != nil {
+		if gate != nil {
+			<-gate
+		}
 		onConnect()
 	}
 	if err == nil && hold != nil {
@@ -1065,4 +1073,134 @@ func (s *fakeIRCSession) saidLines() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.says...)
+}
+
+func (s *fakeIRCSession) disconnectCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.disconnects
+}
+
+// TestConnectDisconnectsSessionThatRegistersAfterClose covers the dial window
+// between the connect loop's done-check and registration. A Close landing
+// there finds no open session to disconnect -- gempir reports "connection is
+// not open" and Close treats that as success -- so without the OnConnect
+// guard the session would finish connecting and stay open with no reference
+// able to close it.
+func TestConnectDisconnectsSessionThatRegistersAfterClose(t *testing.T) {
+	oldNewSession := newSession
+	t.Cleanup(func() { newSession = oldNewSession })
+	session := &fakeIRCSession{onConnectGate: make(chan struct{})}
+	newSession = func(string, string, []string) chatSession { return session }
+
+	client, err := NewClient(Config{Username: "viewer", OAuthToken: "oauth:token", Channels: []string{"example"}})
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+	events, err := client.Connect(context.Background())
+	if err != nil {
+		t.Fatalf("Connect returned error: %v", err)
+	}
+
+	deadline := time.After(time.Second)
+	for session.connectCalls() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("session Connect was not called")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	// The session is mid-dial: Close's Disconnect finds nothing open.
+	if err := client.Close(); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+	if got := session.disconnectCalls(); got != 1 {
+		t.Fatalf("disconnects after Close = %d, want 1", got)
+	}
+
+	// Registration completes after Close; the guard must tear the session
+	// down rather than leave it connected.
+	close(session.onConnectGate)
+
+	drained := false
+	for !drained {
+		select {
+		case _, ok := <-events:
+			drained = !ok
+		case <-time.After(time.Second):
+			t.Fatal("events channel did not close")
+		}
+	}
+	if got := session.disconnectCalls(); got != 2 {
+		t.Fatalf("disconnects after late registration = %d, want 2: Close's own plus the registration guard", got)
+	}
+}
+
+// TestSendDropsPastedCTCPFromPlainMessage guards the wire boundary the other
+// way from TestSendFramesAnActionAsCTCP: the CTCP delimiter is framing Send
+// adds for /me after sanitizing, so in user-typed text it is a control
+// character like any other. A pasted "\x01VERSION\x01" must not reach the
+// channel as a raw CTCP command.
+func TestSendDropsPastedCTCPFromPlainMessage(t *testing.T) {
+	oldNewSession := newSession
+	t.Cleanup(func() { newSession = oldNewSession })
+	session := &fakeIRCSession{}
+	newSession = func(string, string, []string) chatSession { return session }
+
+	client, err := NewClient(Config{Username: "viewer", OAuthToken: "oauth:token", Channels: []string{"example"}})
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+	client.connected.Store(true)
+
+	if err := client.Send(context.Background(), twitch.OutboundMessage{
+		Channel: "example", Text: "\x01VERSION\x01",
+	}); err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+
+	said := session.saidLines()
+	if len(said) != 1 {
+		t.Fatalf("said %d lines, want 1", len(said))
+	}
+	if got, want := said[0], "example\x00VERSION"; got != want {
+		t.Errorf("line = %q, want %q: a pasted CTCP delimiter must be dropped", got, want)
+	}
+}
+
+// TestSendTruncatesActionKeepingClosingDelimiter guards the /me framing under
+// truncation: dropping the closing CTCP delimiter makes every client render
+// the raw wrapper as text.
+func TestSendTruncatesActionKeepingClosingDelimiter(t *testing.T) {
+	oldNewSession := newSession
+	t.Cleanup(func() { newSession = oldNewSession })
+	session := &fakeIRCSession{}
+	newSession = func(string, string, []string) chatSession { return session }
+
+	client, err := NewClient(Config{Username: "viewer", OAuthToken: "oauth:token", Channels: []string{"example"}})
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+	client.connected.Store(true)
+
+	if err := client.Send(context.Background(), twitch.OutboundMessage{
+		Channel: "example", Text: strings.Repeat("x", 600), Action: true,
+	}); err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+
+	said := session.saidLines()
+	if len(said) != 1 {
+		t.Fatalf("said %d lines, want 1", len(said))
+	}
+	runes := []rune(strings.TrimPrefix(said[0], "example\x00"))
+	if len(runes) != twitch.MaxChatMessageRunes {
+		t.Fatalf("action line = %d runes, want %d", len(runes), twitch.MaxChatMessageRunes)
+	}
+	if runes[0] != ctcpDelimiter || runes[len(runes)-1] != ctcpDelimiter {
+		t.Fatalf("truncated action lost its CTCP wrapper: %q ... %q",
+			string(runes[0]), string(runes[len(runes)-1]))
+	}
 }

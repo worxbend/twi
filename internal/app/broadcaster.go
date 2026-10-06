@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -15,7 +16,7 @@ import (
 func resolveSelfBroadcasterID(ctx context.Context, userLookup twitch.UserLookup, username string) (string, error) {
 	username = strings.TrimSpace(username)
 	if userLookup == nil || username == "" {
-		return "", fmt.Errorf("resolve your Twitch user ID: missing username or user lookup")
+		return "", errors.New("resolve your Twitch user ID: missing username or user lookup")
 	}
 	users, err := userLookup.GetUsers(ctx, twitch.UserLookupRequest{UserLogins: []string{username}})
 	if err != nil {

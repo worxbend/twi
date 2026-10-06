@@ -218,3 +218,26 @@ func TestMockShellMouseEventsIgnoredWhenDisabled(t *testing.T) {
 		t.Fatalf("replyTo after disabled mouse events = %#v, want nil", model.activeChannelState().replyTo)
 	}
 }
+
+func TestClickTabBarWithCompactFallback(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	cfg.Features.EnableMouse = true
+	cfg.DefaultChannels = []string{"alpha", "beta"}
+	model := newMockModel("alpha", cfg)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 20, Height: 16})
+	model = updated.(shellModel)
+
+	// At 20 columns the tab bar falls back to compact "*1 2 3" labels, where
+	// tab 2's cell sits at X=5. The hit test must measure the drawn compact
+	// run, not the full "1:Chat ..." labels the bar had no room for.
+	model = leftClick(model, 5, 0)
+	if model.activeTab != tabStreamInfo {
+		t.Fatalf("tab after clicking compact tab 2 = %v, want stream info", model.activeTab)
+	}
+
+	model = leftClick(model, 8, 0)
+	if model.activeTab != tabMisc {
+		t.Fatalf("tab after clicking compact tab 3 = %v, want misc", model.activeTab)
+	}
+}

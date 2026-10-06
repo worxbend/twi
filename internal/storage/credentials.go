@@ -120,8 +120,9 @@ const (
 	// CredentialMigrationExplicitOnly means login/setup may save credentials
 	// after user action, but config/env secrets are not copied automatically.
 	CredentialMigrationExplicitOnly CredentialMigration = "explicit-only"
-	maxCredentialFileBytes                              = 1 << 20
 )
+
+const maxCredentialFileBytes = 1 << 20
 
 // DefaultCredentialFilePath returns the platform config-directory path for the
 // fallback credential file.
@@ -172,6 +173,12 @@ func (p CredentialFilePlan) Validate() error {
 		return fmt.Errorf("unsupported credential migration policy: %s", p.Migration)
 	}
 	return nil
+}
+
+// validateError wraps a plan validation failure in the standard
+// credential-file operation error shape.
+func (p CredentialFilePlan) validateError(err error, redactor auth.Redactor) error {
+	return credentialOperationError("validate credential file plan", p.Path, err, redactor)
 }
 
 // ValidateCredentialDirectoryMode rejects credential directories that do not
@@ -229,11 +236,7 @@ func ParseCredentialFile(data []byte) (CredentialRecord, error) {
 	if file.Version != CredentialFileRecordVersion {
 		return CredentialRecord{}, fmt.Errorf("%w: %d", ErrUnsupportedCredentialFileFormat, file.Version)
 	}
-	record, err := file.toRecord()
-	if err != nil {
-		return CredentialRecord{}, err
-	}
-	return record, nil
+	return file.toRecord()
 }
 
 // CredentialFileStore persists Twitch OAuth credentials to the restrictive
@@ -261,7 +264,7 @@ func NewCredentialFileStore(plan CredentialFilePlan) (*CredentialFileStore, erro
 
 func newCredentialFileStoreForPlatform(plan CredentialFilePlan, platform credentialFilePlatform) (*CredentialFileStore, error) {
 	if err := plan.Validate(); err != nil {
-		return nil, credentialOperationError("validate credential file plan", plan.Path, err, auth.Redactor{})
+		return nil, plan.validateError(err, auth.Redactor{})
 	}
 	if err := platform.validate(); err != nil {
 		return nil, credentialOperationError("prepare credential storage", plan.Path, err, auth.Redactor{})
@@ -305,40 +308,37 @@ func (s *CredentialFileStore) LoadCredentials(ctx context.Context) (CredentialRe
 		return CredentialRecord{}, false, nil
 	}
 	if err := s.plan.Validate(); err != nil {
-		return CredentialRecord{}, false, credentialOperationError("validate credential file plan", s.plan.Path, err, auth.Redactor{})
+		return CredentialRecord{}, false, s.plan.validateError(err, auth.Redactor{})
+	}
+	loadErr := func(err error) error {
+		return credentialOperationError("load credential file", s.plan.Path, err, auth.Redactor{})
 	}
 
-	info, err := os.Lstat(s.plan.Path)
-	if errors.Is(err, os.ErrNotExist) {
-		return CredentialRecord{}, false, nil
-	}
+	exists, err := s.checkCredentialFile(loadErr)
 	if err != nil {
-		return CredentialRecord{}, false, credentialOperationError("load credential file", s.plan.Path, err, auth.Redactor{})
+		return CredentialRecord{}, false, err
 	}
-	if err := validateCredentialDirectory(filepath.Dir(s.plan.Path)); err != nil {
-		return CredentialRecord{}, false, credentialOperationError("load credential file", s.plan.Path, err, auth.Redactor{})
-	}
-	if err := validateCredentialFileInfo(info); err != nil {
-		return CredentialRecord{}, false, credentialOperationError("load credential file", s.plan.Path, err, auth.Redactor{})
+	if !exists {
+		return CredentialRecord{}, false, nil
 	}
 
 	file, err := openCredentialFileNoFollow(s.plan.Path)
 	if err != nil {
-		return CredentialRecord{}, false, credentialOperationError("load credential file", s.plan.Path, err, auth.Redactor{})
+		return CredentialRecord{}, false, loadErr(err)
 	}
 	defer file.Close()
 
 	openedInfo, err := file.Stat()
 	if err != nil {
-		return CredentialRecord{}, false, credentialOperationError("load credential file", s.plan.Path, err, auth.Redactor{})
+		return CredentialRecord{}, false, loadErr(err)
 	}
 	if err := validateCredentialFileInfo(openedInfo); err != nil {
-		return CredentialRecord{}, false, credentialOperationError("load credential file", s.plan.Path, err, auth.Redactor{})
+		return CredentialRecord{}, false, loadErr(err)
 	}
 
 	data, err := io.ReadAll(io.LimitReader(file, maxCredentialFileBytes+1))
 	if err != nil {
-		return CredentialRecord{}, false, credentialOperationError("load credential file", s.plan.Path, err, auth.Redactor{})
+		return CredentialRecord{}, false, loadErr(err)
 	}
 	if len(data) > maxCredentialFileBytes {
 		return CredentialRecord{}, false, credentialMalformedPayloadError("load credential file", s.plan.Path, errors.New("credential file is too large"))
@@ -357,10 +357,10 @@ func (s *CredentialFileStore) SaveCredentials(ctx context.Context, record Creden
 		return err
 	}
 	if s == nil {
-		return nil
+		return errors.New("save credential file: credential store is not configured")
 	}
 	if err := s.plan.Validate(); err != nil {
-		return credentialOperationError("validate credential file plan", s.plan.Path, err, record.Redactor())
+		return s.plan.validateError(err, record.Redactor())
 	}
 
 	data, err := MarshalCredentialFile(record)
@@ -391,23 +391,20 @@ func (s *CredentialFileStore) DeleteCredentials(ctx context.Context) error {
 		return nil
 	}
 	if err := s.plan.Validate(); err != nil {
-		return credentialOperationError("validate credential file plan", s.plan.Path, err, auth.Redactor{})
+		return s.plan.validateError(err, auth.Redactor{})
 	}
-	info, err := os.Lstat(s.plan.Path)
-	if errors.Is(err, os.ErrNotExist) {
+	deleteErr := func(err error) error {
+		return credentialOperationError("delete credential file", s.plan.Path, err, auth.Redactor{})
+	}
+	exists, err := s.checkCredentialFile(deleteErr)
+	if err != nil {
+		return err
+	}
+	if !exists {
 		return nil
 	}
-	if err != nil {
-		return credentialOperationError("delete credential file", s.plan.Path, err, auth.Redactor{})
-	}
-	if err := validateCredentialDirectory(filepath.Dir(s.plan.Path)); err != nil {
-		return credentialOperationError("delete credential file", s.plan.Path, err, auth.Redactor{})
-	}
-	if err := validateCredentialFileInfo(info); err != nil {
-		return credentialOperationError("delete credential file", s.plan.Path, err, auth.Redactor{})
-	}
 	if err := os.Remove(s.plan.Path); err != nil {
-		return credentialOperationError("delete credential file", s.plan.Path, err, auth.Redactor{})
+		return deleteErr(err)
 	}
 	if err := syncCredentialDirectory(filepath.Dir(s.plan.Path)); err != nil {
 		return credentialOperationError("sync credential directory", filepath.Dir(s.plan.Path), err, auth.Redactor{})
@@ -485,7 +482,7 @@ func (s *MemoryCredentialStore) SaveCredentials(ctx context.Context, record Cred
 		return err
 	}
 	if s == nil {
-		return nil
+		return errors.New("save credentials: credential store is not configured")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -627,6 +624,26 @@ func parseCredentialTime(field, value string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("invalid credential %s", field)
 	}
 	return parsed, nil
+}
+
+// checkCredentialFile stats the fallback credential file and validates its
+// directory and file metadata, wrapping failures with wrapErr. It reports
+// false without an error when the credential file does not exist.
+func (s *CredentialFileStore) checkCredentialFile(wrapErr func(error) error) (bool, error) {
+	info, err := os.Lstat(s.plan.Path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, wrapErr(err)
+	}
+	if err := validateCredentialDirectory(filepath.Dir(s.plan.Path)); err != nil {
+		return false, wrapErr(err)
+	}
+	if err := validateCredentialFileInfo(info); err != nil {
+		return false, wrapErr(err)
+	}
+	return true, nil
 }
 
 func validateCredentialDirectory(dir string) error {

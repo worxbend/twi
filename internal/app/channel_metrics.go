@@ -2,10 +2,12 @@ package app
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/worxbend/twi/internal/debuglog"
 	"github.com/worxbend/twi/internal/twitch"
 )
 
@@ -72,6 +74,9 @@ func (m shellModel) applyChannelMetrics(msg channelMetricsResolvedMsg) shellMode
 	if msg.broadcasterID != "" {
 		m.selfBroadcasterID = msg.broadcasterID
 	}
+	if m.services.followerLookup != nil && msg.followersErr != nil {
+		m.debugChannelMetricsFailed("followers", msg.followersErr)
+	}
 	if m.services.followerLookup != nil && msg.followersErr == nil {
 		m.metrics.followerCount = msg.followers.Total
 		m.metrics.followerCountKnown = true
@@ -84,9 +89,19 @@ func (m shellModel) applyChannelMetrics(msg channelMetricsResolvedMsg) shellMode
 			m.activeChannelState().roster.applyFollowers(msg.followers.Followers)
 		}
 	}
+	if m.services.subscriptionLookup != nil && msg.subscriptionsErr != nil {
+		m.debugChannelMetricsFailed("subscriptions", msg.subscriptionsErr)
+	}
 	if m.services.subscriptionLookup != nil && msg.subscriptionsErr == nil {
 		m.metrics.subscriberCount = msg.subscriptions.Total
 		m.metrics.subscriberCountKnown = true
 	}
 	return m
+}
+
+func (m shellModel) debugChannelMetricsFailed(kind string, err error) {
+	m.debugLogger.Log(context.Background(), "app.channel_metrics.poll_failed",
+		slog.String("kind", kind),
+		debuglog.Err("error", err),
+	)
 }

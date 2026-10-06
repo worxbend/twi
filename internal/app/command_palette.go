@@ -73,6 +73,10 @@ type reconnectingChatClient interface {
 	Reconnect(context.Context) error
 }
 
+// debugEventReconnectCompleted is logged for every terminal outcome of a
+// manual reconnect (success and each failure flavor), hence its own const.
+const debugEventReconnectCompleted = "app.reconnect.completed"
+
 func (m *shellModel) toggleCommandPalette() {
 	if m.palette.open {
 		m.palette = commandPaletteState{}
@@ -151,11 +155,13 @@ func (m shellModel) handleCommandPaletteKey(msg tea.KeyMsg) (shellModel, tea.Cmd
 		return m.executeCommandPaletteSelection()
 	}
 	// Everything else is either a key every searchable overlay shares or one
-	// the palette ignores.
-	handleFilterListKey(msg, &m.palette.filterList, len(m.visibleCommandPaletteCommands()))
-	// The command list is rebuilt here because the key may have edited the
-	// query, which can leave the highlight past the end of a now shorter list.
-	m.palette.clamp(len(m.visibleCommandPaletteCommands()))
+	// the palette ignores. The command table is built once and only the cheap
+	// filter runs per count check.
+	commands := m.commandPaletteCommands()
+	handleFilterListKey(msg, &m.palette.filterList, len(filterCommandPaletteCommands(commands, m.palette.query)))
+	// The list is re-filtered here because the key may have edited the query,
+	// which can leave the highlight past the end of a now shorter list.
+	m.palette.clamp(len(filterCommandPaletteCommands(commands, m.palette.query)))
 	m.refreshPaletteReveal(time.Now())
 	return m, nil
 }
@@ -166,14 +172,8 @@ func (m shellModel) executeCommandPaletteSelection() (shellModel, tea.Cmd) {
 		m.palette = commandPaletteState{}
 		return m, nil
 	}
-	index := m.palette.selected
-	if index < 0 {
-		index = 0
-	}
-	if index >= len(commands) {
-		index = len(commands) - 1
-	}
-	command := commands[index]
+	m.palette.clamp(len(commands))
+	command := commands[m.palette.selected]
 	m.palette = commandPaletteState{}
 	return m.executeCommandPaletteCommand(command)
 }
@@ -249,8 +249,11 @@ func (m shellModel) executeCommandPaletteCommand(command commandPaletteCommand) 
 }
 
 func (m shellModel) visibleCommandPaletteCommands() []commandPaletteCommand {
-	commands := m.commandPaletteCommands()
-	query := strings.TrimSpace(strings.ToLower(m.palette.query))
+	return filterCommandPaletteCommands(m.commandPaletteCommands(), m.palette.query)
+}
+
+func filterCommandPaletteCommands(commands []commandPaletteCommand, query string) []commandPaletteCommand {
+	query = strings.TrimSpace(strings.ToLower(query))
 	if query == "" {
 		return commands
 	}
@@ -510,7 +513,7 @@ func (m *shellModel) completeReconnect(msg reconnectCompletedMsg) {
 			state.Err = msg.err
 			state.At = time.Now()
 			m.channels.applyConnectionState(state)
-			m.debugConnectionState("app.reconnect.completed", state)
+			m.debugConnectionState(debugEventReconnectCompleted, state)
 			return
 		}
 		if errors.Is(msg.err, ErrReconnectInProgress) {
@@ -522,7 +525,7 @@ func (m *shellModel) completeReconnect(msg reconnectCompletedMsg) {
 				At:      time.Now(),
 			}
 			m.channels.applyConnectionState(state)
-			m.debugConnectionState("app.reconnect.completed", state)
+			m.debugConnectionState(debugEventReconnectCompleted, state)
 			return
 		}
 		if errors.Is(msg.err, context.Canceled) {
@@ -534,7 +537,7 @@ func (m *shellModel) completeReconnect(msg reconnectCompletedMsg) {
 				At:      time.Now(),
 			}
 			m.channels.applyConnectionState(state)
-			m.debugConnectionState("app.reconnect.completed", state)
+			m.debugConnectionState(debugEventReconnectCompleted, state)
 			return
 		}
 		state := ConnectionState{
@@ -545,7 +548,7 @@ func (m *shellModel) completeReconnect(msg reconnectCompletedMsg) {
 			At:      time.Now(),
 		}
 		m.channels.applyConnectionState(state)
-		m.debugConnectionState("app.reconnect.completed", state)
+		m.debugConnectionState(debugEventReconnectCompleted, state)
 		return
 	}
 	state := ConnectionState{
@@ -555,5 +558,5 @@ func (m *shellModel) completeReconnect(msg reconnectCompletedMsg) {
 		At:      time.Now(),
 	}
 	m.channels.applyConnectionState(state)
-	m.debugConnectionState("app.reconnect.completed", state)
+	m.debugConnectionState(debugEventReconnectCompleted, state)
 }

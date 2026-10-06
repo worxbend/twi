@@ -11,9 +11,10 @@ import (
 // keyboard-navigable overlay list, opened with Ctrl+E for finding and
 // inserting an emote without leaving the composer.
 type emotePickerState struct {
-	open     bool
-	query    string
-	selected int
+	open bool
+	// filterList holds the typed query and the highlighted row, shared with
+	// the other searchable overlays so they cannot drift apart.
+	filterList
 }
 
 func (m *shellModel) toggleEmotePicker() {
@@ -32,62 +33,10 @@ func (m shellModel) handleEmotePickerKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
 		return m, nil
 	case tea.KeyEnter:
 		return m.executeEmotePickerSelection()
-	case tea.KeyUp:
-		m.moveEmotePickerSelection(-1)
-	case tea.KeyDown, tea.KeyTab:
-		m.moveEmotePickerSelection(1)
-	case tea.KeyBackspace, tea.KeyCtrlH:
-		m.deleteEmotePickerRune()
-	case tea.KeyCtrlU:
-		m.emotePicker.query = ""
-		m.emotePicker.selected = 0
-	case tea.KeySpace:
-		m.emotePicker.query += " "
-		m.emotePicker.selected = 0
-	case tea.KeyRunes:
-		m.emotePicker.query += string(msg.Runes)
-		m.emotePicker.selected = 0
 	}
-	m.clampEmotePickerSelection()
+	handleFilterListKey(msg, &m.emotePicker.filterList, len(m.visibleEmotePickerEntries()))
+	m.emotePicker.clamp(len(m.visibleEmotePickerEntries()))
 	return m, nil
-}
-
-func (m *shellModel) moveEmotePickerSelection(delta int) {
-	entries := m.visibleEmotePickerEntries()
-	if len(entries) == 0 {
-		m.emotePicker.selected = 0
-		return
-	}
-	m.emotePicker.selected += delta
-	if m.emotePicker.selected < 0 {
-		m.emotePicker.selected = len(entries) - 1
-	}
-	if m.emotePicker.selected >= len(entries) {
-		m.emotePicker.selected = 0
-	}
-}
-
-func (m *shellModel) deleteEmotePickerRune() {
-	if m.emotePicker.query == "" {
-		return
-	}
-	runes := []rune(m.emotePicker.query)
-	m.emotePicker.query = string(runes[:len(runes)-1])
-	m.emotePicker.selected = 0
-}
-
-func (m *shellModel) clampEmotePickerSelection() {
-	entries := m.visibleEmotePickerEntries()
-	if len(entries) == 0 {
-		m.emotePicker.selected = 0
-		return
-	}
-	if m.emotePicker.selected < 0 {
-		m.emotePicker.selected = 0
-	}
-	if m.emotePicker.selected >= len(entries) {
-		m.emotePicker.selected = len(entries) - 1
-	}
 }
 
 // visibleEmotePickerEntries filters the active channel's resolved emote set
@@ -117,14 +66,8 @@ func (m shellModel) executeEmotePickerSelection() (shellModel, tea.Cmd) {
 		m.emotePicker = emotePickerState{}
 		return m, nil
 	}
-	index := m.emotePicker.selected
-	if index < 0 {
-		index = 0
-	}
-	if index >= len(entries) {
-		index = len(entries) - 1
-	}
-	m.activeChannelState().composerText += entries[index].Name + " "
+	m.emotePicker.clamp(len(entries))
+	m.activeChannelState().composerText += entries[m.emotePicker.selected].Name + " "
 	m.emotePicker = emotePickerState{}
 	return m, nil
 }

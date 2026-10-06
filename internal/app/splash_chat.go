@@ -111,13 +111,9 @@ func (m shellModel) splashChatRow(mascot splashMascot, text string, width int, c
 		text += "▍"
 	}
 
-	// Drop the face first, then shorten the name, before touching the
-	// message: what was said matters more than who has room to be drawn.
-	for _, candidate := range []string{head, mascot.Name} {
-		if uniseg.StringWidth(candidate+": "+text) <= width {
-			head = candidate
-			break
-		}
+	// Drop the face first, before touching the message: what was said
+	// matters more than who has room to be drawn.
+	if uniseg.StringWidth(head+": "+text) > width {
 		head = mascot.Name
 	}
 

@@ -81,9 +81,9 @@ func appendWrappedFragments(rows []Row, current Row, used int, fragments []Fragm
 		// cluster-by-cluster wrapping below, so nothing becomes unrenderable.
 		for _, chunk := range wrapChunks(fragment.Text) {
 			chunkWidth := textWidth(chunk)
-			if chunkWidth > 0 && chunkWidth <= width-indentWidth &&
-				used+chunkWidth > width && used > indentWidth &&
-				strings.TrimSpace(chunk) != "" {
+			fitsBesideIndent := chunkWidth > 0 && chunkWidth <= width-indentWidth
+			overflowsRow := used+chunkWidth > width && used > indentWidth
+			if fitsBesideIndent && overflowsRow && strings.TrimSpace(chunk) != "" {
 				rows, current, used = breakToContinuation(rows, current, indentWidth)
 			}
 			rows, current, used = appendWrappedClusters(rows, current, used, fragment, chunk, width, indentWidth)
@@ -151,8 +151,14 @@ func appendWrappedClusters(rows []Row, current Row, used int, fragment Fragment,
 		}
 		if indentIsTheObstacle(used, clusterWidth, width, indentWidth) {
 			// The cluster does not fit beside the indent, so give up the
-			// indent and let it start a full-width row.
-			rows, current, used = breakToContinuation(rows, current, 0)
+			// indent and let it start a full-width row. The row being
+			// abandoned is emitted only when it holds real fragments; an
+			// indent-only row is padding, not content.
+			if rowHasContent(current) {
+				rows = append(rows, current)
+			}
+			current = Row{}
+			used = 0
 		}
 
 		next := fragment

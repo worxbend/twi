@@ -6,9 +6,8 @@ import (
 	"github.com/worxbend/twi/internal/twitch"
 )
 
-// ctcpDelimiter wraps a CTCP ACTION ("/me"). It is the one C0 control that is
-// meaningful in a chat message, so it survives sanitizing while every other
-// control character does not.
+// ctcpDelimiter wraps a CTCP ACTION ("/me"). Send adds it after sanitizing,
+// so sanitizeText itself drops it like every other C0 control.
 const ctcpDelimiter = '\x01'
 
 // sanitizeText makes text safe to put on the wire as a single IRC message.
@@ -20,13 +19,12 @@ const ctcpDelimiter = '\x01'
 // otherwise issue arbitrary IRC commands as the authenticated user. Both
 // become spaces so the visible message survives intact.
 //
-// Other C0 controls are dropped: they cannot be typed deliberately, several
-// are interpreted by terminals downstream, and none carry meaning in chat.
-// The CTCP delimiter is the exception, because /me is built from it.
+// Other C0 controls are dropped, including the CTCP delimiter: it must not
+// survive in user text, or a pasted "\x01VERSION\x01" would go out as a raw
+// CTCP command in an ordinary message. The only delimiters on the wire are
+// the pair Send wraps around an action after sanitizing.
 //
-// The result is truncated to Twitch's length limit. An ACTION keeps its
-// closing delimiter across truncation, since losing it would leave the
-// message rendered as literal CTCP text in every client that sees it.
+// The result is truncated to Twitch's length limit.
 func sanitizeText(text string) string {
 	var b strings.Builder
 	b.Grow(len(text))
@@ -34,8 +32,6 @@ func sanitizeText(text string) string {
 		switch {
 		case r == '\r' || r == '\n':
 			b.WriteRune(' ')
-		case r == ctcpDelimiter:
-			b.WriteRune(r)
 		case r < 0x20 || r == 0x7f:
 			// Dropped: not typeable, not meaningful, and interpreted by
 			// terminals that render this message later.

@@ -3,6 +3,7 @@ package app
 import (
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/worxbend/twi/internal/render"
 	"github.com/worxbend/twi/internal/twitch"
@@ -14,14 +15,10 @@ import (
 func roleGlyph(role string) string {
 	var setID string
 	switch role {
-	case "broadcaster":
-		setID = "broadcaster"
-	case "staff":
-		setID = "staff"
+	case "broadcaster", "staff", "vip":
+		setID = role
 	case "mod":
 		setID = "moderator"
-	case "vip":
-		setID = "vip"
 	case "sub":
 		setID = "subscriber"
 	default:
@@ -67,8 +64,8 @@ func composerMentionPrefix(text string) (string, bool) {
 		return "", false
 	}
 	if index > 0 {
-		previous := []rune(text[:index])
-		if last := previous[len(previous)-1]; !unicode.IsSpace(last) {
+		last, _ := utf8.DecodeLastRuneInString(text[:index])
+		if !unicode.IsSpace(last) {
 			return "", false
 		}
 	}

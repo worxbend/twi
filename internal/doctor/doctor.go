@@ -42,6 +42,13 @@ const (
 // `twi config show` have always printed.
 const redactedMarker = "[redacted]"
 
+// twitchIRCAddress is the Twitch IRC endpoint live chat connects to; the
+// reachability check probes exactly that address and names it in its output.
+const twitchIRCAddress = "irc.chat.twitch.tv:6697"
+
+// termEnvVar names the environment variable the terminal checks read.
+const termEnvVar = "TERM"
+
 type Status string
 
 type Report struct {
@@ -79,6 +86,7 @@ func RunWithOptions(ctx context.Context, cfg config.Config, opts Options) Report
 		opts.ReachabilityProbe = ProbeTwitchIRCReachability
 	}
 
+	env := envMap(opts.Environ)
 	checks := []Check{
 		configPathCheck(cfg.Path, opts.ConfigLoadError),
 		usernameCheck(cfg.Twitch.Username),
@@ -89,9 +97,9 @@ func RunWithOptions(ctx context.Context, cfg config.Config, opts Options) Report
 		channelsCheck(cfg.DefaultChannels),
 		tokenValidationCheck(ctx, cfg, opts.TokenValidator),
 		reachabilityCheck(ctx, opts.ReachabilityProbe),
-		terminalCheck(opts.Environ),
-		colorCheck(opts.Environ),
-		mouseCheck(opts.Environ),
+		terminalCheck(env),
+		colorCheck(env),
+		mouseCheck(env),
 		cacheCheck(opts.CacheDir),
 		legacyAssetCacheCheck(opts.CacheDir),
 		featureModesCheck(cfg.Features),
@@ -110,7 +118,7 @@ func ProbeTwitchIRCReachability(ctx context.Context) error {
 	defer cancel()
 
 	dialer := net.Dialer{Timeout: 800 * time.Millisecond}
-	conn, err := dialer.DialContext(ctx, "tcp", "irc.chat.twitch.tv:6697")
+	conn, err := dialer.DialContext(ctx, "tcp", twitchIRCAddress)
 	if err != nil {
 		return err
 	}
@@ -118,23 +126,24 @@ func ProbeTwitchIRCReachability(ctx context.Context) error {
 }
 
 func configPathCheck(path string, loadErr error) Check {
+	const name = "config file"
 	if strings.TrimSpace(path) == "" {
-		return warnCheck("config file", "path unavailable")
+		return warnCheck(name, "path unavailable")
 	}
 	displayPath := config.RedactDisplayValue(path)
 	if loadErr != nil {
-		return warnCheck("config file", fmt.Sprintf("%s (load failed: %s; using env/defaults)", displayPath, config.RedactDisplayValue(loadErr.Error())))
+		return warnCheck(name, fmt.Sprintf("%s (load failed: %s; using env/defaults)", displayPath, config.RedactDisplayValue(loadErr.Error())))
 	}
 	err := storage.CheckReadableFile(path)
 	switch {
 	case err == nil:
-		return okCheck("config file", fmt.Sprintf("%s (readable)", displayPath))
+		return okCheck(name, fmt.Sprintf("%s (readable)", displayPath))
 	case errors.Is(err, storage.ErrPathIsDirectory):
-		return warnCheck("config file", fmt.Sprintf("%s is a directory", displayPath))
+		return warnCheck(name, fmt.Sprintf("%s is a directory", displayPath))
 	case errors.Is(err, os.ErrNotExist):
-		return warnCheck("config file", fmt.Sprintf("%s (not found; using env/defaults)", displayPath))
+		return warnCheck(name, fmt.Sprintf("%s (not found; using env/defaults)", displayPath))
 	default:
-		return warnCheck("config file", fmt.Sprintf("%s (%s)", displayPath, config.RedactDisplayValue(err.Error())))
+		return warnCheck(name, fmt.Sprintf("%s (%s)", displayPath, config.RedactDisplayValue(err.Error())))
 	}
 }
 
@@ -162,15 +171,16 @@ func credentialCheck(name, value, missingDetail string) Check {
 }
 
 func channelsCheck(channels []string) Check {
+	const name = "channels"
 	switch len(channels) {
 	case 0:
 		// Not an error: twi starts on the empty state and /channels opens the
 		// first one. Still worth naming the persistent options.
-		return okCheck("channels", "none configured; open one with /channels, or set --channel/--channels/TWI_DEFAULT_CHANNELS")
+		return okCheck(name, "none configured; open one with /channels, or set --channel/--channels/TWI_DEFAULT_CHANNELS")
 	case 1:
-		return okCheck("channels", "one configured")
+		return okCheck(name, "one configured")
 	default:
-		return okCheck("channels", fmt.Sprintf("%d configured", len(channels)))
+		return okCheck(name, fmt.Sprintf("%d configured", len(channels)))
 	}
 }
 
@@ -263,45 +273,47 @@ func tokenValidationCheck(ctx context.Context, cfg config.Config, validator twit
 }
 
 func reachabilityCheck(ctx context.Context, probe ReachabilityProbe) Check {
+	const name = "twitch reachability"
 	if probe == nil {
-		return warnCheck("twitch reachability", "not checked")
+		return warnCheck(name, "not checked")
 	}
 	if err := probe(ctx); err != nil {
-		return warnCheck("twitch reachability", fmt.Sprintf("irc.chat.twitch.tv:6697 unreachable: %v", err))
+		return warnCheck(name, fmt.Sprintf("%s unreachable: %v", twitchIRCAddress, err))
 	}
-	return okCheck("twitch reachability", "irc.chat.twitch.tv:6697 reachable")
+	return okCheck(name, twitchIRCAddress+" reachable")
 }
 
-func terminalCheck(environ []string) Check {
-	term := envMap(environ)["TERM"]
+func terminalCheck(env map[string]string) Check {
+	const name = "terminal"
+	term := env[termEnvVar]
 	switch {
 	case term == "":
-		return warnCheck("terminal", "TERM missing; terminal capability detection is limited")
+		return warnCheck(name, "TERM missing; terminal capability detection is limited")
 	case term == "dumb":
-		return warnCheck("terminal", "TERM=dumb; rich TUI features may be unavailable")
+		return warnCheck(name, "TERM=dumb; rich TUI features may be unavailable")
 	default:
-		return okCheck("terminal", "TERM="+term)
+		return okCheck(name, "TERM="+term)
 	}
 }
 
-func colorCheck(environ []string) Check {
-	env := envMap(environ)
-	term := env["TERM"]
+func colorCheck(env map[string]string) Check {
+	const name = "terminal color"
+	term := env[termEnvVar]
 	colorTerm := strings.ToLower(env["COLORTERM"])
 	switch {
 	case strings.Contains(colorTerm, "truecolor"), strings.Contains(colorTerm, "24bit"):
-		return okCheck("terminal color", "true-color signal via COLORTERM")
+		return okCheck(name, "true-color signal via COLORTERM")
 	case strings.Contains(term, "truecolor"), strings.Contains(term, "24bit"), strings.Contains(term, "direct"):
-		return okCheck("terminal color", "true-color signal via TERM")
+		return okCheck(name, "true-color signal via TERM")
 	case strings.Contains(term, "256color"):
-		return okCheck("terminal color", "256-color signal via TERM")
+		return okCheck(name, "256-color signal via TERM")
 	default:
-		return warnCheck("terminal color", "no true-color or 256-color signal; colors will use conservative fallbacks")
+		return warnCheck(name, "no true-color or 256-color signal; colors will use conservative fallbacks")
 	}
 }
 
-func mouseCheck(environ []string) Check {
-	term := envMap(environ)["TERM"]
+func mouseCheck(env map[string]string) Check {
+	term := env[termEnvVar]
 	if term == "" || term == "dumb" {
 		return warnCheck("terminal mouse", "mouse support unknown; keyboard controls remain primary")
 	}
@@ -309,17 +321,18 @@ func mouseCheck(environ []string) Check {
 }
 
 func cacheCheck(cacheDir string) Check {
+	const name = "cache directory"
 	if strings.TrimSpace(cacheDir) == "" {
 		defaultDir, err := config.DefaultCacheDir()
 		if err != nil {
-			return warnCheck("cache directory", fmt.Sprintf("path unavailable: %v", err))
+			return warnCheck(name, fmt.Sprintf("path unavailable: %v", err))
 		}
 		cacheDir = defaultDir
 	}
 	if err := storage.ProbeWritableDir(cacheDir); err != nil {
-		return warnCheck("cache directory", fmt.Sprintf("%s not writable: %v", cacheDir, err))
+		return warnCheck(name, fmt.Sprintf("%s not writable: %v", cacheDir, err))
 	}
-	return okCheck("cache directory", cacheDir+" writable")
+	return okCheck(name, cacheDir+" writable")
 }
 
 // legacyAssetCacheCheck reports a leftover image cache from a removed feature.
@@ -335,25 +348,29 @@ func cacheCheck(cacheDir string) Check {
 // user's files as a side effect of asking for a report would be a surprise;
 // the check says what to remove and leaves the choice to the reader.
 func legacyAssetCacheCheck(cacheDir string) Check {
+	const (
+		name        = "legacy asset cache"
+		nonePresent = "none present"
+	)
 	assetDir, err := legacyAssetCacheDir(cacheDir)
 	if err != nil {
-		return okCheck("legacy asset cache", "no cache directory to check")
+		return okCheck(name, "no cache directory to check")
 	}
 	info, err := os.Stat(assetDir)
 	if errors.Is(err, os.ErrNotExist) {
-		return okCheck("legacy asset cache", "none present")
+		return okCheck(name, nonePresent)
 	}
 	if err != nil {
-		return warnCheck("legacy asset cache", fmt.Sprintf("%s could not be read: %v", assetDir, err))
+		return warnCheck(name, fmt.Sprintf("%s could not be read: %v", assetDir, err))
 	}
 	if !info.IsDir() {
-		return okCheck("legacy asset cache", "none present")
+		return okCheck(name, nonePresent)
 	}
 	bytes, files := directorySize(assetDir)
 	if files == 0 {
-		return okCheck("legacy asset cache", "none present")
+		return okCheck(name, nonePresent)
 	}
-	return warnCheck("legacy asset cache", fmt.Sprintf(
+	return warnCheck(name, fmt.Sprintf(
 		"%s holds %d file(s), %d bytes left over from the removed image renderer; "+
 			"nothing reads them and the directory can be deleted",
 		assetDir, files, bytes))
@@ -463,8 +480,9 @@ func unknownFeatureModes(features config.FeatureConfig) []string {
 // poll Twitch Helix "Get Streams" (see cli.newStreamStatusResolver): it
 // needs stream_status_mode enabled plus a Client ID and OAuth token.
 func streamStatusCheck(cfg config.Config) Check {
+	const name = "stream status polling"
 	if strings.EqualFold(strings.TrimSpace(cfg.Features.StreamStatusMode), "off") {
-		return warnCheck("stream status polling", "disabled by stream_status_mode=off; the LIVE indicator will show OFFLINE")
+		return warnCheck(name, "disabled by stream_status_mode=off; the LIVE indicator will show OFFLINE")
 	}
 	var missing []string
 	if strings.TrimSpace(cfg.Twitch.ClientID) == "" {
@@ -474,9 +492,9 @@ func streamStatusCheck(cfg config.Config) Check {
 		missing = append(missing, "twitch_oauth_token")
 	}
 	if len(missing) > 0 {
-		return warnCheck("stream status polling", "unavailable until "+strings.Join(missing, " and ")+" is set; the LIVE indicator will show OFFLINE")
+		return warnCheck(name, "unavailable until "+strings.Join(missing, " and ")+" is set; the LIVE indicator will show OFFLINE")
 	}
-	return okCheck("stream status polling", "Twitch Helix Get Streams is configured; LIVE reflects real broadcast status")
+	return okCheck(name, "Twitch Helix Get Streams is configured; LIVE reflects real broadcast status")
 }
 
 func tokenCredentialsFromConfig(cfg config.TwitchConfig) twitch.TokenCredentials {
@@ -507,13 +525,14 @@ func tokenValidationDetail(validation twitch.TokenValidationResult, fallback str
 // nothing having warned about it. That deserves a warning here rather than
 // the old "optional OAuth client-secret flow unavailable".
 func clientSecretCheck(cfg config.TwitchConfig) Check {
+	const name = "client secret"
 	if strings.TrimSpace(cfg.ClientSecret) != "" {
-		return okCheck("client secret", "set; unattended token refresh can run")
+		return okCheck(name, "set; unattended token refresh can run")
 	}
 	if strings.TrimSpace(cfg.RefreshToken) == "" {
-		return warnCheck("client secret", "not set; optional OAuth client-secret flow unavailable")
+		return warnCheck(name, "not set; optional OAuth client-secret flow unavailable")
 	}
-	return warnCheck("client secret", "not set, so the saved refresh token cannot be redeemed: "+
+	return warnCheck(name, "not set, so the saved refresh token cannot be redeemed: "+
 		"live chat will disconnect when the access token expires (about 4 hours) and will not recover on its own. "+
 		"Set TWI_TWITCH_CLIENT_SECRET to the secret from your Twitch application, or re-run `twi login` when chat drops")
 }

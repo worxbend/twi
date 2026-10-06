@@ -31,7 +31,7 @@ func (r LoginRequest) RequiredScopes() []Scope {
 	if len(r.Scopes) == 0 {
 		return RequiredChatScopes()
 	}
-	return append([]Scope(nil), r.Scopes...)
+	return cloneScopes(r.Scopes)
 }
 
 // Redactor returns a redactor configured with request secrets.

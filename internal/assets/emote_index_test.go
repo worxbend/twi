@@ -142,3 +142,39 @@ func TestZeroValueEmoteIndexIsUsable(t *testing.T) {
 		t.Fatalf("second Load returned error: %v", err)
 	}
 }
+
+func TestEmoteIndexFetchesGlobalEmotesOnceAcrossChannels(t *testing.T) {
+	lister := &fakeEmoteLister{
+		global:  []twitch.EmoteMetadata{{ID: "1", Name: "Kappa"}},
+		channel: map[string][]twitch.EmoteMetadata{"123": {{ID: "2", Name: "chanA"}}, "456": {{ID: "3", Name: "chanB"}}},
+	}
+	idx := NewEmoteIndex(lister)
+
+	for _, channelID := range []string{"123", "456"} {
+		if _, err := idx.Load(context.Background(), channelID); err != nil {
+			t.Fatalf("Load(%q) error = %v", channelID, err)
+		}
+	}
+	if lister.globalCalls != 1 {
+		t.Fatalf("globalCalls = %d, want 1 (the global list is shared across channels)", lister.globalCalls)
+	}
+}
+
+func TestEmoteIndexReturnedSliceDoesNotShareCache(t *testing.T) {
+	lister := &fakeEmoteLister{global: []twitch.EmoteMetadata{{ID: "1", Name: "Kappa"}}}
+	idx := NewEmoteIndex(lister)
+
+	first, err := idx.Load(context.Background(), "")
+	if err != nil {
+		t.Fatalf("first Load error = %v", err)
+	}
+	first[0].Name = "mutated"
+
+	second, err := idx.Load(context.Background(), "")
+	if err != nil {
+		t.Fatalf("second Load error = %v", err)
+	}
+	if second[0].Name != "Kappa" {
+		t.Fatalf("cached entry name = %q, want %q (caller mutation leaked into the cache)", second[0].Name, "Kappa")
+	}
+}

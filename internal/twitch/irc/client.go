@@ -16,11 +16,15 @@ import (
 	"github.com/worxbend/twi/internal/auth"
 	"github.com/worxbend/twi/internal/debuglog"
 	"github.com/worxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/twitch/jsonbody"
 )
 
 const (
 	defaultEventBuffer   = 128
 	defaultOAuthTokenURL = "https://id.twitch.tv/oauth2/token"
+	// eventOAuthRefreshFailed is the debug-log event every failed token
+	// refresh attempt is reported under.
+	eventOAuthRefreshFailed = "twitch.oauth_refresh.failed"
 	// oauthRefreshTimeout bounds the token-endpoint call made while
 	// recovering a dropped connection, matching the login flow's timeout.
 	oauthRefreshTimeout = 15 * time.Second
@@ -124,6 +128,9 @@ var (
 	_ twitch.ChannelJoiner    = (*Client)(nil)
 	_ twitch.EventDropCounter = (*Client)(nil)
 )
+
+// errMissingChannel rejects a send, join, or depart that names no channel.
+var errMissingChannel = errors.New("missing Twitch channel")
 
 // DroppedEvents implements EventDropCounter: the number of events discarded
 // because the consumer could not keep up.
@@ -247,7 +254,7 @@ func (c *Client) Connect(ctx context.Context) (<-chan twitch.Event, error) {
 
 	client := c.currentClient()
 
-	registerHandlers(client, emit, c.now)
+	c.registerHandlers(client, emit)
 
 	go func() {
 		defer close(events)
@@ -266,9 +273,20 @@ func (c *Client) Connect(ctx context.Context) (<-chan twitch.Event, error) {
 	return events, nil
 }
 
-func registerHandlers(client chatSession, emit func(twitch.Event), now func() time.Time) {
+func (c *Client) registerHandlers(client chatSession, emit func(twitch.Event)) {
 	client.OnConnect(func() {
-		emit(NormalizeConnect(now()))
+		// Registration is the first moment Disconnect works on this session.
+		// A Close that landed while it was still dialing found nothing open to
+		// disconnect -- gempir reports "connection is not open" and Close
+		// treats that as success -- so honor that Close now. Without this, the
+		// session would stay connected with no reference able to close it.
+		select {
+		case <-c.done:
+			_ = client.Disconnect()
+			return
+		default:
+		}
+		emit(NormalizeConnect(c.now()))
 	})
 	client.OnPrivateMessage(func(message gempir.PrivateMessage) {
 		emit(NormalizePrivateMessage(message))
@@ -292,13 +310,13 @@ func registerHandlers(client chatSession, emit func(twitch.Event), now func() ti
 		emit(NormalizeUserStateMessage(message))
 	})
 	client.OnUserJoinMessage(func(message gempir.UserJoinMessage) {
-		emit(NormalizeUserJoinMessage(message, now()))
+		emit(NormalizeUserJoinMessage(message, c.now()))
 	})
 	client.OnUserPartMessage(func(message gempir.UserPartMessage) {
-		emit(NormalizeUserPartMessage(message, now()))
+		emit(NormalizeUserPartMessage(message, c.now()))
 	})
 	client.OnReconnectMessage(func(message gempir.ReconnectMessage) {
-		emit(NormalizeReconnectMessage(message, now()))
+		emit(NormalizeReconnectMessage(message, c.now()))
 	})
 	client.OnUnsetMessage(func(message gempir.RawMessage) {
 		emit(NormalizeRawMessage(message))
@@ -386,7 +404,7 @@ func (c *Client) connectOnceWithAuthRefresh(ctx context.Context, emit func(twitc
 		c.logger.Log(ctx, "twitch.irc.auth_refresh.persistence_failed", slog.String("error", err.Error()))
 	}
 
-	registerHandlers(next, emit, c.now)
+	c.registerHandlers(next, emit)
 	// Hand the replacement session back to the loop rather than connecting it
 	// here, so a later expiry can refresh again instead of ending the session.
 	return errAuthRetryable
@@ -412,7 +430,7 @@ func (c *Client) Send(ctx context.Context, message twitch.OutboundMessage) error
 		slog.Int("text_length", len([]rune(message.Text))),
 	)
 	if channel == "" {
-		return errors.New("missing Twitch channel")
+		return errMissingChannel
 	}
 	text := strings.TrimSpace(message.Text)
 	if text == "" {
@@ -421,10 +439,13 @@ func (c *Client) Send(ctx context.Context, message twitch.OutboundMessage) error
 	if err := c.requireConnected(); err != nil {
 		return err
 	}
-	if message.Action {
-		text = actionWireText(text)
-	}
 	wire := sanitizeText(text)
+	if message.Action {
+		// Sanitize first, so a pasted CTCP delimiter in the user's text is
+		// dropped with the other controls; then wrap. Truncating here keeps
+		// the closing delimiter the wrapper just added.
+		wire = truncateChatMessage(actionWireText(wire))
+	}
 
 	if replyTo == "" {
 		if err := c.limiter.allow(channel, wire); err != nil {
@@ -468,10 +489,10 @@ func (c *Client) requireConnected() error {
 // Join subscribes to additional channels on the live connection. The channel
 // list is also recorded so a reconnect rejoins everything currently open,
 // not just the channels configured at startup.
-func (c *Client) Join(channels ...string) error {
+func (c *Client) Join(ctx context.Context, channels ...string) error {
 	normalized := normalizeChannels(channels)
 	if len(normalized) == 0 {
-		return errors.New("missing Twitch channel")
+		return errMissingChannel
 	}
 	c.mu.Lock()
 	for _, channel := range normalized {
@@ -481,15 +502,15 @@ func (c *Client) Join(channels ...string) error {
 	}
 	c.mu.Unlock()
 	c.currentClient().Join(normalized...)
-	c.logger.Log(context.Background(), "twitch.irc.join", slog.Int("channel_count", len(normalized)))
+	c.logger.Log(ctx, "twitch.irc.join", slog.Int("channel_count", len(normalized)))
 	return nil
 }
 
 // Depart leaves a channel and drops it from the reconnect list.
-func (c *Client) Depart(channel string) error {
+func (c *Client) Depart(ctx context.Context, channel string) error {
 	normalized := normalizeChannels([]string{channel})
 	if len(normalized) == 0 {
-		return errors.New("missing Twitch channel")
+		return errMissingChannel
 	}
 	target := normalized[0]
 	c.mu.Lock()
@@ -502,7 +523,7 @@ func (c *Client) Depart(channel string) error {
 	c.channels = remaining
 	c.mu.Unlock()
 	c.currentClient().Depart(target)
-	c.logger.Log(context.Background(), "twitch.irc.depart", slog.String("channel", target))
+	c.logger.Log(ctx, "twitch.irc.depart", slog.String("channel", target))
 	return nil
 }
 
@@ -644,7 +665,7 @@ func stripControlChars(value string) string {
 	var b strings.Builder
 	b.Grow(len(value))
 	for _, r := range value {
-		if r == '\r' || r == '\n' || r < 0x20 || r == 0x7f {
+		if r < 0x20 || r == 0x7f {
 			continue
 		}
 		b.WriteRune(r)
@@ -670,9 +691,11 @@ type oauthRefreshResponse struct {
 }
 
 func (c oauthRefreshConfig) available() bool {
-	return strings.TrimSpace(c.ClientID) != "" &&
-		strings.TrimSpace(c.ClientSecret) != "" &&
-		strings.TrimSpace(c.RefreshToken) != ""
+	return twitch.TokenCredentials{
+		RefreshToken: c.RefreshToken,
+		ClientID:     c.ClientID,
+		ClientSecret: c.ClientSecret,
+	}.RefreshAvailable()
 }
 
 func (c oauthRefreshConfig) refresh(ctx context.Context, refreshedAt time.Time) (OAuthRefresh, error) {
@@ -692,8 +715,9 @@ func (c oauthRefreshConfig) refresh(ctx context.Context, refreshedAt time.Time) 
 	}
 
 	form := url.Values{}
+	currentRefreshToken := strings.TrimSpace(c.RefreshToken)
 	form.Set("grant_type", "refresh_token")
-	form.Set("refresh_token", strings.TrimSpace(c.RefreshToken))
+	form.Set("refresh_token", currentRefreshToken)
 	form.Set("client_id", strings.TrimSpace(c.ClientID))
 	form.Set("client_secret", strings.TrimSpace(c.ClientSecret))
 
@@ -705,33 +729,34 @@ func (c oauthRefreshConfig) refresh(ctx context.Context, refreshedAt time.Time) 
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		c.Logger.Log(ctx, "twitch.oauth_refresh.failed", slog.String("error", redactError(err.Error())))
+		c.Logger.Log(ctx, eventOAuthRefreshFailed, slog.String("error", redactError(err.Error())))
 		return OAuthRefresh{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		c.Logger.Log(ctx, "twitch.oauth_refresh.failed", slog.Int("http_status", resp.StatusCode))
+		c.Logger.Log(ctx, eventOAuthRefreshFailed, slog.Int("http_status", resp.StatusCode))
 		return OAuthRefresh{}, fmt.Errorf("twitch OAuth refresh returned HTTP %d", resp.StatusCode)
 	}
 
 	var decoded oauthRefreshResponse
-	if err := decodeJSONBody(resp.Body, maxOAuthRefreshBodySize, &decoded); err != nil {
-		c.Logger.Log(ctx, "twitch.oauth_refresh.failed", slog.String("error", redactError(err.Error())))
+	if err := jsonbody.Decode(resp.Body, maxOAuthRefreshBodySize, &decoded); err != nil {
+		c.Logger.Log(ctx, eventOAuthRefreshFailed, slog.String("error", redactError(err.Error())))
 		return OAuthRefresh{}, err
 	}
 
 	accessToken := twitch.NormalizeIRCOAuthToken(decoded.AccessToken)
 	if accessToken == "" {
-		c.Logger.Log(ctx, "twitch.oauth_refresh.failed", slog.String("error", "missing access token"))
+		c.Logger.Log(ctx, eventOAuthRefreshFailed, slog.String("error", "missing access token"))
 		return OAuthRefresh{}, errors.New("twitch OAuth refresh response did not include an access token")
 	}
 
-	refreshToken := strings.TrimSpace(decoded.RefreshToken)
+	returnedRefreshToken := strings.TrimSpace(decoded.RefreshToken)
+	refreshToken := returnedRefreshToken
 	if refreshToken == "" {
-		refreshToken = strings.TrimSpace(c.RefreshToken)
+		refreshToken = currentRefreshToken
 	}
-	c.Logger.Log(ctx, "twitch.oauth_refresh.succeeded", slog.Bool("refresh_token_returned", strings.TrimSpace(decoded.RefreshToken) != ""))
+	c.Logger.Log(ctx, "twitch.oauth_refresh.succeeded", slog.Bool("refresh_token_returned", returnedRefreshToken != ""))
 	if refreshedAt.IsZero() {
 		refreshedAt = time.Now().UTC()
 	}
@@ -741,7 +766,7 @@ func (c oauthRefreshConfig) refresh(ctx context.Context, refreshedAt time.Time) 
 		TokenType:           strings.TrimSpace(decoded.TokenType),
 		Scopes:              auth.Scopes(decoded.Scopes...),
 		RefreshedAt:         refreshedAt,
-		RefreshTokenUpdated: strings.TrimSpace(decoded.RefreshToken) != "" && refreshToken != strings.TrimSpace(c.RefreshToken),
+		RefreshTokenUpdated: returnedRefreshToken != "" && refreshToken != currentRefreshToken,
 	}
 	if decoded.ExpiresIn > 0 {
 		result.ExpiresAt = refreshedAt.Add(time.Duration(decoded.ExpiresIn) * time.Second)

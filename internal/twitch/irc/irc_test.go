@@ -277,7 +277,7 @@ func TestNormalizeIRCProtocolEvents(t *testing.T) {
 
 func normalizeParsedFixture(t *testing.T, raw string) twitch.Event {
 	t.Helper()
-	return NormalizeMessage(gempir.ParseMessage(raw))
+	return normalizeMessage(gempir.ParseMessage(raw))
 }
 
 func TestParseFirstMessageTag(t *testing.T) {

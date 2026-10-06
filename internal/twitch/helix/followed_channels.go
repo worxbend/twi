@@ -106,6 +106,7 @@ func (c *FollowedChannelsClient) fetchPage(ctx context.Context, userID, cursor s
 	decoded, err := getJSON[helixFollowedChannelsResponse](ctx, c.transport, parsed.String(), errorLabels{
 		action:     "get Twitch followed channels",
 		readAction: "read Twitch followed channels response",
+		subject:    "followed channels",
 		endpoint:   "Get Followed Channels",
 
 		channelAPIReasons: map[int]twitch.ChannelAPIReason{

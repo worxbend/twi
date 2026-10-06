@@ -108,6 +108,7 @@ func channelErrorLabels(action, endpoint string) errorLabels {
 	return errorLabels{
 		action:     action,
 		readAction: "read Twitch channel information response",
+		subject:    "channel information",
 		endpoint:   endpoint,
 		channelAPIReasons: map[int]twitch.ChannelAPIReason{
 			http.StatusUnauthorized: twitch.ChannelAPIMissingScope,

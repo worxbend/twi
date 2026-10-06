@@ -35,7 +35,7 @@ var claudePalette = Palette{
 // Background keeps panes reading as raised above the canvas in both light and
 // dark palettes.
 var presets = map[string]Palette{
-	"claude": claudePalette,
+	DefaultThemeName: claudePalette,
 	"codex": {
 		Background: "#0d1117",
 		Foreground: "#e6edf3",

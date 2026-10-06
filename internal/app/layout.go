@@ -195,20 +195,12 @@ func (l *shellLayout) applyChatContentHeights() {
 	l.activityContentHeight = l.sidebarContentHeight
 }
 
-// bodyPane is the geometry of whatever pane occupies the body of the window
-// between the tab bar and the composer.
-type bodyPane struct {
-	height        int
-	contentHeight int
-	framed        bool
-}
-
 // takeBodyFromChat hands the chat pane's geometry to a tab that draws across
 // the full width of the body -- Stream Info and Misc -- and clears the chat
 // pane along with the sidebar and activity columns, none of which those tabs
 // show. It returns the geometry the calling tab has just taken over.
-func (l *shellLayout) takeBodyFromChat(width int) bodyPane {
-	body := bodyPane{
+func (l *shellLayout) takeBodyFromChat(width int) overlayPaneSize {
+	body := overlayPaneSize{
 		height:        l.chatHeight,
 		contentHeight: l.chatContentHeight,
 		framed:        l.chatFramed,
@@ -224,9 +216,10 @@ func (l *shellLayout) takeBodyFromChat(width int) bodyPane {
 	return body
 }
 
-// overlayPaneSize is the vertical geometry of one overlay pane: how many
-// rows it occupies, whether it is drawn with a border, and how many rows are
-// left for its contents once that border is accounted for.
+// overlayPaneSize is the vertical geometry of one pane: how many rows it
+// occupies, whether it is drawn with a border, and how many rows are left
+// for its contents once that border is accounted for. It is shared by the
+// overlay panes and by the body tabs that take over the chat pane's rows.
 type overlayPaneSize struct {
 	height        int
 	framed        bool

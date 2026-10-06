@@ -69,7 +69,12 @@ func groupedRows(msg twitch.ChatMessage, opts Options) []Row {
 	indentFragment := []Fragment{{Kind: FragmentText, Text: strings.Repeat(" ", indent)}}
 	bodyRows, current, _ := appendWrappedFragments(nil, Row{}, 0, indentFragment, opts.Width, 0)
 	bodyRows, current, _ = appendWrappedFragments(bodyRows, current, indent, content, opts.Width, indent)
-	rows = append(rows, append(bodyRows, current)...)
+	// A message with no body leaves current holding only indent padding;
+	// emitting it would draw a stray blank row in chat.
+	if rowHasContent(current) {
+		bodyRows = append(bodyRows, current)
+	}
+	rows = append(rows, bodyRows...)
 	return rows
 }
 

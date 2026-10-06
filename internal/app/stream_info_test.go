@@ -319,7 +319,7 @@ func TestCategoryPickerSearchesAndSelectsCategory(t *testing.T) {
 
 	// Entry 0 is the pinned "no category" row; move to the first real result
 	// (Fortnite, alphabetically before Fortnite Creative) and select it.
-	model.moveCategoryPickerSelection(1)
+	model.categoryPicker.move(1, len(model.categoryPickerEntries()))
 	updated, _ = model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated
 	if model.categoryPicker.open {
@@ -350,7 +350,7 @@ func TestCategoryPickerEscCancelsWithoutChangingCategory(t *testing.T) {
 	model := newMockModel("example", cfg)
 	model.streamInfo.category = "Old Game"
 	model.streamInfo.categoryGameID = "1"
-	model.categoryPicker = categoryPickerState{open: true, query: "fort"}
+	model.categoryPicker = categoryPickerState{open: true, filterList: filterList{query: "fort"}}
 
 	updated, _ := model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyEsc})
 	model = updated

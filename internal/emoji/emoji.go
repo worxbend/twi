@@ -60,6 +60,7 @@ func isStandardCluster(runes []rune) bool {
 
 	seenBase := false
 	expectBase := true
+	afterModifier := false
 	for _, r := range runes {
 		switch {
 		case isBase(r):
@@ -68,10 +69,14 @@ func isStandardCluster(runes []rune) bool {
 			}
 			seenBase = true
 			expectBase = false
+			afterModifier = false
 		case isModifier(r):
-			if expectBase || !seenBase {
+			// A modifier applies to the base directly before it; two in a
+			// row is not a real emoji sequence.
+			if expectBase || !seenBase || afterModifier {
 				return false
 			}
+			afterModifier = true
 		case isVariationSelector(r):
 		case r == emojiZWJ:
 			if expectBase || !seenBase {

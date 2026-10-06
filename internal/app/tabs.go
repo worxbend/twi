@@ -37,13 +37,7 @@ func (m shellModel) switchToTab(tab shellTab) (shellModel, tea.Cmd) {
 func (m shellModel) tabBarLine(width int) string {
 	username, channel := m.tabBarContextParts()
 	context := strings.Join(nonEmptyStrings(username, channel), "  ")
-	tabs := m.tabBarTabs(false)
-	if uniseg.StringWidth(tabs)+2+uniseg.StringWidth(context) > width {
-		tabs = m.tabBarTabs(true)
-	}
-	if uniseg.StringWidth(tabs)+2+uniseg.StringWidth(context) > width {
-		tabs = m.activeTabLabel()
-	}
+	tabs := m.tabBarTabsForWidth(context, width)
 
 	line := tabs
 	available := width - uniseg.StringWidth(tabs)
@@ -67,6 +61,21 @@ func (m shellModel) tabBarLine(width int) string {
 		m.gradientPhase(width),
 		true,
 	)
+}
+
+// tabBarTabsForWidth picks the tab label run tabBarLine draws at width,
+// falling back from full labels to compact numbers to just the active tab as
+// the row runs out of room. tabAtMouse measures the same run so its hit boxes
+// cannot drift from what is drawn.
+func (m shellModel) tabBarTabsForWidth(context string, width int) string {
+	tabs := m.tabBarTabs(false)
+	if uniseg.StringWidth(tabs)+2+uniseg.StringWidth(context) > width {
+		tabs = m.tabBarTabs(true)
+	}
+	if uniseg.StringWidth(tabs)+2+uniseg.StringWidth(context) > width {
+		tabs = m.activeTabLabel()
+	}
+	return tabs
 }
 
 func (m shellModel) tabBarTabs(compact bool) string {

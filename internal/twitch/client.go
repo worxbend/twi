@@ -34,8 +34,8 @@ type OutboundMessage struct {
 // join and leave channels on an already-open connection implement it, so
 // channels opened at runtime do not require a reconnect.
 type ChannelJoiner interface {
-	Join(channels ...string) error
-	Depart(channel string) error
+	Join(ctx context.Context, channels ...string) error
+	Depart(ctx context.Context, channel string) error
 }
 
 type Event struct {

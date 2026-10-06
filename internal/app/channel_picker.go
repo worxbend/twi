@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -99,12 +99,18 @@ func (m *shellModel) applyFollowedChannels(msg followedChannelsResolvedMsg) {
 		if twitch.IsMissingScope(msg.err) {
 			m.channelPicker.err = "follow list unavailable (run `twi login` to grant user:read:follows)"
 		} else {
-			m.channelPicker.err = msg.err.Error()
+			m.channelPicker.err = credentialSafeDetail(msg.err)
 		}
 		return
 	}
 	m.channelPicker.err = ""
 	m.followedChannelList = msg.channels
+	// Sorted once here rather than on every channelPickerEntries call: the
+	// list changes only when this message arrives, while the entries are
+	// rebuilt on every keystroke and render.
+	slices.SortStableFunc(m.followedChannelList, func(a, b twitch.FollowedChannel) int {
+		return strings.Compare(strings.ToLower(a.BroadcasterLogin), strings.ToLower(b.BroadcasterLogin))
+	})
 	m.clampChannelPickerSelection()
 }
 
@@ -172,14 +178,21 @@ func (m shellModel) channelPickerEntries() []channelPickerEntry {
 		entries = append(entries, entry)
 	}
 
-	for _, name := range m.channels.channelNames() {
-		add(channelPickerEntry{login: name, display: name, open: true})
+	// Open channels borrow the follow list's display name when it is known, so
+	// a query matching only the display name still surfaces the open row
+	// first (with its "open" label) instead of the lower-priority follow row.
+	displayNames := make(map[string]string, len(m.followedChannelList))
+	for _, channel := range m.followedChannelList {
+		displayNames[channelKey(channel.BroadcasterLogin)] = channel.BroadcasterName
 	}
-	followed := append([]twitch.FollowedChannel(nil), m.followedChannelList...)
-	sort.SliceStable(followed, func(i, j int) bool {
-		return strings.ToLower(followed[i].BroadcasterLogin) < strings.ToLower(followed[j].BroadcasterLogin)
-	})
-	for _, channel := range followed {
+	for _, name := range m.channels.channelNames() {
+		display := name
+		if followed := displayNames[channelKey(name)]; followed != "" {
+			display = followed
+		}
+		add(channelPickerEntry{login: name, display: display, open: true})
+	}
+	for _, channel := range m.followedChannelList {
 		add(channelPickerEntry{
 			login:    channel.BroadcasterLogin,
 			display:  channel.BroadcasterName,

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/worxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/twitch/jsonbody"
 )
 
 const defaultOAuthValidateURL = "https://id.twitch.tv/oauth2/validate"
@@ -119,7 +120,7 @@ func (v *OAuthTokenValidator) ValidateToken(ctx context.Context, credentials twi
 	}
 
 	var decoded oauthValidateResponse
-	if err := decodeJSONBody(resp.Body, maxResponseBodySize, &decoded); err != nil {
+	if err := jsonbody.Decode(resp.Body, maxResponseBodySize, &decoded); err != nil {
 		return twitch.TokenValidationResult{}, credentialSafeError("decode Twitch OAuth validation response", err, credentials)
 	}
 	return validationResultFromOAuthResponse(decoded, credentials, v.now()), nil

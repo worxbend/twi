@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -366,7 +368,7 @@ func parseChatFlags(args []string, stderr io.Writer) (opts chatOptions, code int
 	fs.SetOutput(stderr)
 	fs.Var(&opts.channels, "channel", "Twitch channel to join; repeat for multiple channels")
 	fs.Var(&opts.channels, "channels", "comma-separated Twitch channels to join (adds to --channel)")
-	fs.StringVar(&opts.configPath, "config", "", "config file path")
+	addConfigFlag(fs, &opts.configPath)
 	fs.BoolVar(&opts.mock, "mock", false, "run against the built-in mock chat source")
 	addDebugFlags(fs, &opts.debugFlags)
 
@@ -376,8 +378,8 @@ func parseChatFlags(args []string, stderr io.Writer) (opts chatOptions, code int
 	return opts, 0, true
 }
 
-// chatConfig loads the effective configuration for `twi chat`, with any
-// channels named on the command line replacing the configured defaults.
+// chatConfig loads the effective configuration for `twi chat`; config.Load
+// applies any channels named on the command line over the configured defaults.
 func chatConfig(opts chatOptions, stderr io.Writer) (config.Config, bool) {
 	overrides := config.Overrides{
 		ConfigPath: opts.configPath,
@@ -386,11 +388,8 @@ func chatConfig(opts chatOptions, stderr io.Writer) (config.Config, bool) {
 	applyDebugFlagOverrides(&overrides, opts.debugFlags)
 	cfg, err := config.Load(os.Environ(), overrides)
 	if err != nil {
-		fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
+		reportLoadConfigError(stderr, err)
 		return cfg, false
-	}
-	if len(opts.channels) > 0 {
-		cfg.DefaultChannels = []string(opts.channels)
 	}
 	return cfg, true
 }
@@ -450,35 +449,8 @@ func runLiveChatSession(cfg config.Config, stdout, stderr io.Writer) int {
 		slog.Bool("mock", false),
 		slog.Int("channel_count", len(cfg.DefaultChannels)),
 	)
-	if err := validateLiveChatConfig(cfg); err != nil {
-		fmt.Fprintln(stderr, err)
+	if !resolveLiveChatIdentity(&cfg, status, logger, stderr) {
 		return 2
-	}
-	resolvedLogin, warning, err := validateLiveChatToken(context.Background(), cfg, newLiveTokenValidator())
-	if err != nil {
-		logger.Log(context.Background(), "cli.chat.token_validation_failed", slog.String("error", err.Error()))
-		if hint := credentialPrecedenceHint(status); hint != "" {
-			err = fmt.Errorf("%w %s", err, hint)
-		}
-		fmt.Fprintln(stderr, err)
-		return 2
-	}
-	if warning != "" {
-		logger.Log(context.Background(), "cli.chat.token_validation_warning", slog.String("warning", warning))
-		fmt.Fprintln(stderr, warning)
-	}
-	// The token owns the IRC identity; the config value is only a fallback for
-	// when validation could not reach Twitch.
-	if resolvedLogin != "" {
-		cfg.Twitch.Username = resolvedLogin
-	}
-	if strings.TrimSpace(cfg.Twitch.Username) == "" {
-		fmt.Fprintln(stderr, "could not determine the Twitch login for this token; run `twi doctor`, or set TWI_TWITCH_USERNAME to the account the token belongs to")
-		return 2
-	}
-	if notice := refreshCapabilityWarning(cfg.Twitch); notice != "" {
-		logger.Log(context.Background(), "cli.chat.refresh_unavailable")
-		fmt.Fprintln(stderr, notice)
 	}
 
 	// One holder is shared by the IRC transport and every Helix client, so a
@@ -500,6 +472,44 @@ func runLiveChatSession(cfg config.Config, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// resolveLiveChatIdentity validates the configured credentials and token and
+// resolves the login IRC should authenticate as into cfg, printing any
+// warnings along the way. ok is false when live chat cannot start and the
+// caller should exit with status 2.
+func resolveLiveChatIdentity(cfg *config.Config, status credentialLoadStatus, logger debuglog.Logger, stderr io.Writer) (ok bool) {
+	if err := validateLiveChatConfig(*cfg); err != nil {
+		fmt.Fprintln(stderr, err)
+		return false
+	}
+	resolvedLogin, warning, err := validateLiveChatToken(context.Background(), *cfg, newLiveTokenValidator())
+	if err != nil {
+		logger.Log(context.Background(), "cli.chat.token_validation_failed", slog.String("error", err.Error()))
+		if hint := credentialPrecedenceHint(status); hint != "" {
+			err = fmt.Errorf("%w %s", err, hint)
+		}
+		fmt.Fprintln(stderr, err)
+		return false
+	}
+	if warning != "" {
+		logger.Log(context.Background(), "cli.chat.token_validation_warning", slog.String("warning", warning))
+		fmt.Fprintln(stderr, warning)
+	}
+	// The token owns the IRC identity; the config value is only a fallback for
+	// when validation could not reach Twitch.
+	if resolvedLogin != "" {
+		cfg.Twitch.Username = resolvedLogin
+	}
+	if strings.TrimSpace(cfg.Twitch.Username) == "" {
+		fmt.Fprintln(stderr, "could not determine the Twitch login for this token; run `twi doctor`, or set TWI_TWITCH_USERNAME to the account the token belongs to")
+		return false
+	}
+	if notice := refreshCapabilityWarning(cfg.Twitch); notice != "" {
+		logger.Log(context.Background(), "cli.chat.refresh_unavailable")
+		fmt.Fprintln(stderr, notice)
+	}
+	return true
+}
+
 // validateLiveChatConfig checks the credentials live chat cannot start
 // without. A username is deliberately not one of them: the IRC login is
 // derived from whoever the OAuth token belongs to (see validateLiveChatToken),
@@ -507,7 +517,7 @@ func runLiveChatSession(cfg config.Config, stdout, stderr io.Writer) int {
 // validation is unreachable.
 func validateLiveChatConfig(cfg config.Config) error {
 	if strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
-		return fmt.Errorf("missing Twitch credentials: set %s for live chat, or run `twi chat --mock`; OAuth token must include chat:read and chat:edit", "TWI_TWITCH_OAUTH_TOKEN or TWITCH_ACCESS_TOKEN")
+		return errors.New("missing Twitch credentials: set TWI_TWITCH_OAUTH_TOKEN or TWITCH_ACCESS_TOKEN for live chat, or run `twi chat --mock`; OAuth token must include chat:read and chat:edit")
 	}
 	return nil
 }
@@ -537,11 +547,7 @@ func validateLiveChatToken(ctx context.Context, cfg config.Config, validator twi
 		ClientSecret: cfg.Twitch.ClientSecret,
 	}
 	validation, err := validator.ValidateToken(ctx, credentials)
-	redactor := auth.NewRedactor(
-		auth.NewSecret(cfg.Twitch.OAuthToken),
-		auth.NewSecret(cfg.Twitch.RefreshToken),
-		auth.NewSecret(cfg.Twitch.ClientSecret),
-	)
+	redactor := newTwitchSecretRedactor(cfg)
 	if err != nil {
 		detail := config.RedactDisplayValue(redactor.Redact(err.Error()))
 		return "", "warning: Twitch OAuth token validation failed (" + detail + "); continuing to IRC authentication. Run `twi doctor` to verify token identity, expiry, and scopes.", nil
@@ -566,8 +572,6 @@ func validateLiveChatToken(ctx context.Context, cfg config.Config, validator twi
 		return "", "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, "malformed OAuth token"))
 	case twitch.TokenValidationExpired:
 		return "", "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, "OAuth token expired"))
-	case twitch.TokenValidationMissingScope:
-		return "", "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, "missing required IRC scope"))
 	default:
 		return "", "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, "token validation returned unknown state"))
 	}
@@ -583,6 +587,17 @@ func staleUsernameWarning(configured, resolved string) string {
 	return fmt.Sprintf(
 		"warning: configured twitch_username %q is not the OAuth token's account; connecting as %q instead. Update or remove twitch_username to silence this.",
 		configured, resolved,
+	)
+}
+
+// newTwitchSecretRedactor redacts the Twitch secrets a loaded config can
+// already carry. Login flows extend the result with With as the OAuth
+// handshake teaches them new secrets.
+func newTwitchSecretRedactor(cfg config.Config) auth.Redactor {
+	return auth.NewRedactor(
+		auth.NewSecret(cfg.Twitch.OAuthToken),
+		auth.NewSecret(cfg.Twitch.RefreshToken),
+		auth.NewSecret(cfg.Twitch.ClientSecret),
 	)
 }
 
@@ -602,6 +617,42 @@ func liveTokenValidationDetail(validation twitch.TokenValidationResult, fallback
 	return fallback
 }
 
+// configFlagUsage is the shared --config flag description, registered
+// identically by every subcommand through addConfigFlag.
+const configFlagUsage = "config file path"
+
+func addConfigFlag(fs *flag.FlagSet, dst *string) {
+	fs.StringVar(dst, "config", "", configFlagUsage)
+}
+
+// parseConfigPathFlag parses args with a flag set carrying only --config,
+// which is all the read-only config and profile subcommands accept.
+func parseConfigPathFlag(name string, args []string, stderr io.Writer) (string, bool) {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var cfgPath string
+	addConfigFlag(fs, &cfgPath)
+	if err := fs.Parse(args); err != nil {
+		return "", false
+	}
+	return cfgPath, true
+}
+
+// loadConfigOrReport loads the env-merged config for a read-only subcommand,
+// reporting a load failure to stderr.
+func loadConfigOrReport(cfgPath string, stderr io.Writer) (config.Config, bool) {
+	cfg, err := config.Load(os.Environ(), config.Overrides{ConfigPath: cfgPath})
+	if err != nil {
+		reportLoadConfigError(stderr, err)
+		return config.Config{}, false
+	}
+	return cfg, true
+}
+
+func reportLoadConfigError(stderr io.Writer, err error) {
+	fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
+}
+
 func runConfig(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, "usage: twi config show|path")
@@ -610,25 +661,41 @@ func runConfig(args []string, stdout, stderr io.Writer) int {
 
 	switch args[0] {
 	case "path":
-		path, err := config.DefaultPath()
-		if err != nil {
-			fmt.Fprintf(stderr, "config path: %s\n", config.RedactDisplayValue(err.Error()))
-			return 1
+		fs := flag.NewFlagSet("config path", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		var cfgPath string
+		addConfigFlag(fs, &cfgPath)
+		if err := fs.Parse(args[1:]); err != nil {
+			return 2
+		}
+		if fs.NArg() != 0 {
+			fmt.Fprintf(stderr, "unexpected config path argument %q\n", fs.Arg(0))
+			return 2
+		}
+		path := strings.TrimSpace(cfgPath)
+		if path == "" {
+			var err error
+			path, err = config.DefaultPath()
+			if err != nil {
+				fmt.Fprintf(stderr, "config path: %s\n", config.RedactDisplayValue(err.Error()))
+				return 1
+			}
 		}
 		fmt.Fprintln(stdout, config.RedactDisplayValue(path))
 		return 0
 	case "show":
-		fs := flag.NewFlagSet("config show", flag.ContinueOnError)
-		fs.SetOutput(stderr)
-		var cfgPath string
-		fs.StringVar(&cfgPath, "config", "", "config file path")
-		if err := fs.Parse(args[1:]); err != nil {
+		cfgPath, ok := parseConfigPathFlag("config show", args[1:], stderr)
+		if !ok {
 			return 2
 		}
-		cfg, _, err := loadConfigWithStoredCredentials(context.Background(), os.Environ(), config.Overrides{ConfigPath: cfgPath})
-		if err != nil {
-			fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
+		cfg, ok := loadConfigOrReport(cfgPath, stderr)
+		if !ok {
 			return 1
+		}
+		// A broken credential store must not hide the config itself: warn and
+		// print what loaded, mirroring doctor's tolerance for the same error.
+		if _, err := applyStoredCredentials(context.Background(), &cfg); err != nil {
+			fmt.Fprintf(stderr, "warning: load credentials: %s\n", config.RedactDisplayValue(err.Error()))
 		}
 		fmt.Fprint(stdout, cfg.RedactedString())
 		return 0
@@ -637,6 +704,10 @@ func runConfig(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 }
+
+// customProfileName is the profile that takes its colors from the
+// theme_custom_* settings rather than from a preset.
+const customProfileName = "custom"
 
 // runProfile implements `twi profile list|show|set <name>`, the theme
 // management surface documented alongside the Ctrl+T settings view.
@@ -660,20 +731,16 @@ func runProfile(args []string, stdout, stderr io.Writer) int {
 }
 
 func runProfileList(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("profile list", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	var cfgPath string
-	fs.StringVar(&cfgPath, "config", "", "config file path")
-	if err := fs.Parse(args); err != nil {
+	cfgPath, ok := parseConfigPathFlag("profile list", args, stderr)
+	if !ok {
 		return 2
 	}
-	cfg, err := config.Load(os.Environ(), config.Overrides{ConfigPath: cfgPath})
-	if err != nil {
-		fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
+	cfg, ok := loadConfigOrReport(cfgPath, stderr)
+	if !ok {
 		return 1
 	}
 	active := strings.ToLower(strings.TrimSpace(cfg.Features.ThemeName))
-	for _, name := range append(theme.PresetNames(), "custom") {
+	for _, name := range append(theme.PresetNames(), customProfileName) {
 		marker := "  "
 		if name == active {
 			marker = "> "
@@ -684,16 +751,12 @@ func runProfileList(args []string, stdout, stderr io.Writer) int {
 }
 
 func runProfileShow(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("profile show", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	var cfgPath string
-	fs.StringVar(&cfgPath, "config", "", "config file path")
-	if err := fs.Parse(args); err != nil {
+	cfgPath, ok := parseConfigPathFlag("profile show", args, stderr)
+	if !ok {
 		return 2
 	}
-	cfg, err := config.Load(os.Environ(), config.Overrides{ConfigPath: cfgPath})
-	if err != nil {
-		fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
+	cfg, ok := loadConfigOrReport(cfgPath, stderr)
+	if !ok {
 		return 1
 	}
 	palette := cfg.ResolveTheme()
@@ -711,17 +774,11 @@ func runProfileShow(args []string, stdout, stderr io.Writer) int {
 }
 
 func runProfileSet(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: twi profile set <name> [--background '#rrggbb' --foreground '#rrggbb' --accent '#rrggbb' --muted '#rrggbb' --border '#rrggbb' --surface '#rrggbb' --warning '#rrggbb' --error '#rrggbb' --success '#rrggbb']")
-		return 2
-	}
-	name := strings.ToLower(strings.TrimSpace(args[0]))
-
 	fs := flag.NewFlagSet("profile set", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var cfgPath string
 	var background, foreground, accent, muted, border, surface, warning, errorColor, success string
-	fs.StringVar(&cfgPath, "config", "", "config file path")
+	addConfigFlag(fs, &cfgPath)
 	fs.StringVar(&background, "background", "", "custom theme background hex (only used with the 'custom' profile)")
 	fs.StringVar(&foreground, "foreground", "", "custom theme foreground hex")
 	fs.StringVar(&accent, "accent", "", "custom theme accent hex")
@@ -731,11 +788,25 @@ func runProfileSet(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&warning, "warning", "", "custom theme warning hex")
 	fs.StringVar(&errorColor, "error", "", "custom theme error hex")
 	fs.StringVar(&success, "success", "", "custom theme success hex")
-	if err := fs.Parse(args[1:]); err != nil {
+	// The theme name is positional and flags may come before or after it:
+	// parse the leading flags, take the name, then parse what follows it.
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() == 0 {
+		fmt.Fprintln(stderr, "usage: twi profile set <name> [--background '#rrggbb' --foreground '#rrggbb' --accent '#rrggbb' --muted '#rrggbb' --border '#rrggbb' --surface '#rrggbb' --warning '#rrggbb' --error '#rrggbb' --success '#rrggbb']")
+		return 2
+	}
+	name := strings.ToLower(strings.TrimSpace(fs.Arg(0)))
+	if err := fs.Parse(fs.Args()[1:]); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "unexpected profile set argument %q\n", fs.Arg(0))
 		return 2
 	}
 
-	if name != "custom" {
+	if name != customProfileName {
 		if _, ok := theme.Presets()[name]; !ok {
 			fmt.Fprintf(stderr, "unknown theme %q; run `twi profile list` for available names\n", name)
 			return 2
@@ -747,11 +818,11 @@ func runProfileSet(args []string, stdout, stderr io.Writer) int {
 	// env-only values into config.toml.
 	cfg, err := config.Load(nil, config.Overrides{ConfigPath: cfgPath})
 	if err != nil {
-		fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
+		reportLoadConfigError(stderr, err)
 		return 1
 	}
 	cfg.Features.ThemeName = name
-	if name == "custom" {
+	if name == customProfileName {
 		colors := []struct {
 			flag  string
 			dst   *string
@@ -794,12 +865,12 @@ func validHexColor(value string) bool {
 	if len(value) != 7 || value[0] != '#' {
 		return false
 	}
-	for _, c := range value[1:] {
-		if !strings.ContainsRune("0123456789abcdefABCDEF", c) {
-			return false
-		}
+	// ParseUint would accept a leading '+', which is no part of a color.
+	if value[1] == '+' {
+		return false
 	}
-	return true
+	_, err := strconv.ParseUint(value[1:], 16, 32)
+	return err == nil
 }
 
 func runDoctor(args []string, stdout, stderr io.Writer) int {
@@ -807,7 +878,7 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	var cfgPath string
 	var debugFlags debugFlagOptions
-	fs.StringVar(&cfgPath, "config", "", "config file path")
+	addConfigFlag(fs, &cfgPath)
 	addDebugFlags(fs, &debugFlags)
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -820,7 +891,7 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 	if loadErr != nil {
 		fallback, err := config.LoadEnvOnly(environ, overrides)
 		if err != nil {
-			fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
+			reportLoadConfigError(stderr, err)
 			return 1
 		}
 		cfg = fallback
@@ -836,24 +907,24 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 	logger.Log(context.Background(), "cli.doctor.start")
 
 	report := buildDoctorReport(context.Background(), cfg, loadErr)
-	if credentialStatus.Path != "" || credentialStatus.Label != "" || credentialStatus.Location != "" || credentialStatus.Present || credentialStatus.Err != nil {
-		check := credentialFileDoctorCheck(credentialStatus)
-		fmt.Fprintf(stdout, "[%s] %s: %s\n", check.Status, check.Name, check.Detail)
+	if credentialStatus.reportable() {
+		printDoctorCheck(stdout, credentialFileDoctorCheck(credentialStatus))
 	}
 	for _, check := range report.Checks {
-		fmt.Fprintf(stdout, "[%s] %s: %s\n", check.Status, check.Name, check.Detail)
+		printDoctorCheck(stdout, check)
 	}
 	logger.Log(context.Background(), "cli.doctor.complete", slog.Int("check_count", len(report.Checks)))
 	return 0
 }
 
-func loadConfigWithStoredCredentials(ctx context.Context, environ []string, overrides config.Overrides) (config.Config, credentialLoadStatus, error) {
-	cfg, err := config.Load(environ, overrides)
-	if err != nil {
-		return cfg, credentialLoadStatus{}, err
-	}
-	status, err := applyStoredCredentials(ctx, &cfg)
-	return cfg, status, err
+func printDoctorCheck(stdout io.Writer, check doctor.Check) {
+	fmt.Fprintf(stdout, "[%s] %s: %s\n", check.Status, check.Name, check.Detail)
+}
+
+// reportable reports whether the credential load produced anything worth its
+// own doctor check line: a store identity, a found record, or a load error.
+func (s credentialLoadStatus) reportable() bool {
+	return s.Path != "" || s.Label != "" || s.Location != "" || s.Present || s.Err != nil
 }
 
 func applyStoredCredentials(ctx context.Context, cfg *config.Config) (credentialLoadStatus, error) {
@@ -965,6 +1036,11 @@ func applyCredentialRecord(cfg *config.Config, record storage.CredentialRecord) 
 	}
 }
 
+// credentialStoreUnavailableMsg is the shared detail for the cases where no
+// credential store can serve the process, kept identical so login, chat, and
+// doctor all name the same failure the same way.
+const credentialStoreUnavailableMsg = "credential store unavailable"
+
 func persistRefreshedIRCCredentials(ctx context.Context, cfg config.Config, status credentialLoadStatus, refreshed irc.OAuthRefresh) error {
 	redactor := auth.NewRedactor(
 		auth.NewSecret(cfg.Twitch.OAuthToken),
@@ -977,9 +1053,9 @@ func persistRefreshedIRCCredentials(ctx context.Context, cfg config.Config, stat
 	)
 	if status.Store == nil {
 		if status.Err != nil {
-			return fmt.Errorf("credential store unavailable: %s", redactor.Redact(status.Err.Error()))
+			return fmt.Errorf("%s: %s", credentialStoreUnavailableMsg, redactor.Redact(status.Err.Error()))
 		}
-		return errors.New("credential store unavailable")
+		return errors.New(credentialStoreUnavailableMsg)
 	}
 
 	record := refreshedCredentialRecord(cfg, status.Record, refreshed)
@@ -1009,7 +1085,7 @@ func refreshedCredentialRecord(cfg config.Config, base storage.CredentialRecord,
 		record.TokenType = "bearer"
 	}
 	if len(refreshed.Scopes) > 0 {
-		record.Scopes = append([]auth.Scope(nil), refreshed.Scopes...)
+		record.Scopes = slices.Clone(refreshed.Scopes)
 	} else if len(record.Scopes) == 0 {
 		record.Scopes = auth.LoginScopes()
 	}

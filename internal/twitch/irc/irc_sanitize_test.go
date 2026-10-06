@@ -37,9 +37,20 @@ func TestSanitizeIRCTextKeepsVisibleContent(t *testing.T) {
 	}
 }
 
-func TestSanitizeIRCTextDropsControlsButKeepsCTCP(t *testing.T) {
+func TestSanitizeIRCTextDropsAllControls(t *testing.T) {
 	got := sanitizeText("\x01ACTION wa\x07ves\x1b[31m\x01")
-	if want := "\x01ACTION waves[31m\x01"; got != want {
+	if want := "ACTION waves[31m"; got != want {
+		t.Fatalf("sanitizeText = %q, want %q", got, want)
+	}
+}
+
+// TestSanitizeIRCTextDropsPastedCTCPDelimiter guards the wire boundary: the
+// CTCP delimiter is framing Send adds for /me after sanitizing, so in user
+// text it must be dropped like any other control -- a pasted "\x01VERSION\x01"
+// would otherwise reach the channel as a raw CTCP command.
+func TestSanitizeIRCTextDropsPastedCTCPDelimiter(t *testing.T) {
+	got := sanitizeText("\x01VERSION\x01")
+	if want := "VERSION"; got != want {
 		t.Fatalf("sanitizeText = %q, want %q", got, want)
 	}
 }
@@ -55,21 +66,6 @@ func TestSanitizeIRCTextTruncatesToTwitchLimit(t *testing.T) {
 	got := sanitizeText(strings.Repeat("か", 600))
 	if runes := []rune(got); len(runes) != twitch.MaxChatMessageRunes {
 		t.Fatalf("len(runes) = %d, want %d", len(runes), twitch.MaxChatMessageRunes)
-	}
-}
-
-// TestSanitizeIRCTextTruncationKeepsActionClosed guards a detail that would
-// otherwise surface as a broken /me: dropping the closing CTCP delimiter makes
-// every client render the raw wrapper as text.
-func TestSanitizeIRCTextTruncationKeepsActionClosed(t *testing.T) {
-	got := sanitizeText("\x01ACTION " + strings.Repeat("x", 600) + "\x01")
-	runes := []rune(got)
-	if len(runes) != twitch.MaxChatMessageRunes {
-		t.Fatalf("len(runes) = %d, want %d", len(runes), twitch.MaxChatMessageRunes)
-	}
-	if runes[0] != ctcpDelimiter || runes[len(runes)-1] != ctcpDelimiter {
-		t.Fatalf("truncated action lost its CTCP wrapper: %q ... %q",
-			string(runes[0]), string(runes[len(runes)-1]))
 	}
 }
 

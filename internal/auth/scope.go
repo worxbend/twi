@@ -46,31 +46,31 @@ var followedChannelScopes = []Scope{ScopeUserReadFollows}
 // RequiredChatScopes returns the minimum OAuth scopes for twi's MVP chat read
 // and send behavior.
 func RequiredChatScopes() []Scope {
-	return append([]Scope(nil), requiredChatScopes...)
+	return cloneScopes(requiredChatScopes)
 }
 
 // StreamManageScopes returns the OAuth scopes required to view and edit the
 // broadcaster's own stream info (title, category, language, tags) on the
 // Stream Info tab.
 func StreamManageScopes() []Scope {
-	return append([]Scope(nil), streamManageScopes...)
+	return cloneScopes(streamManageScopes)
 }
 
 // ChannelMetricsScopes returns the OAuth scopes required to show follower
 // and subscriber counts in the chat status line.
 func ChannelMetricsScopes() []Scope {
-	return append([]Scope(nil), channelMetricsScopes...)
+	return cloneScopes(channelMetricsScopes)
 }
 
 // ClipScopes returns the OAuth scopes required for the /clip chat command.
 func ClipScopes() []Scope {
-	return append([]Scope(nil), clipScopes...)
+	return cloneScopes(clipScopes)
 }
 
 // FollowedChannelScopes returns the OAuth scopes required to autocomplete
 // the /channels picker from the channels the user follows.
 func FollowedChannelScopes() []Scope {
-	return append([]Scope(nil), followedChannelScopes...)
+	return cloneScopes(followedChannelScopes)
 }
 
 // LoginScopes returns every OAuth scope `twi login` requests: the required
@@ -122,4 +122,11 @@ func ScopeValues(scopes []Scope) []string {
 		values = append(values, string(scope))
 	}
 	return values
+}
+
+func cloneScopes(scopes []Scope) []Scope {
+	if scopes == nil {
+		return nil
+	}
+	return append([]Scope(nil), scopes...)
 }

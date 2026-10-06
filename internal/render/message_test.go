@@ -782,3 +782,30 @@ func TestChatMessageEscapeSequencesNeverReachTheTerminal(t *testing.T) {
 		}
 	}
 }
+
+func TestSplitTextFragmentsRequiresMentionLeftBoundary(t *testing.T) {
+	opts := DefaultOptions(80)
+	tests := []struct {
+		name        string
+		text        string
+		wantMention string
+	}{
+		{"at start of text", "@someone hi", "@someone"},
+		{"after a space", "hi @someone", "@someone"},
+		{"inside an email address", "user@example.com", ""},
+		{"directly after a letter", "a@b", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mention := ""
+			for _, fragment := range splitTextFragments(tt.text, opts) {
+				if fragment.Kind == FragmentMention {
+					mention = fragment.Text
+				}
+			}
+			if mention != tt.wantMention {
+				t.Fatalf("splitTextFragments(%q) mention = %q, want %q", tt.text, mention, tt.wantMention)
+			}
+		})
+	}
+}

@@ -49,6 +49,31 @@ constant in the source tree.
   confirmed the scopes.
 - The credential store now validates the opened file rather than only its
   path, and a restrictive umask can no longer make first-time setup fail.
+- **Values written by `twi profile set` read back mangled when they contained
+  quotes or backslashes,** and a `#` after an escaped quote still truncated
+  the value. Written values now round-trip exactly.
+- **Clicking the tab bar could activate the wrong tab on narrow terminals,**
+  where the bar falls back to compact labels but clicks were still matched
+  against the full-width layout.
+- **A second identical system notice (e.g. two `slow_on` messages) rendered
+  the first notice's text,** because the chat row cache keyed on Twitch's
+  reused notice IDs. Notices no longer carry those IDs into the cache.
+- **Chat-bitrate metrics leaked memory all session with animations off,**
+  because samples were only trimmed by the animation frame tick, which never
+  runs in that mode.
+- **A pasted `^A`-style control byte could send raw CTCP commands to the
+  whole channel;** it is now stripped like other control characters.
+- **Closing the client during an IRC dial could leak a session nothing could
+  close;** a close landing mid-dial now disconnects as soon as the session
+  registers.
+- Stream-status and channel-metric poll failures, desktop-notification
+  errors, and browser-open failures are no longer silently swallowed — they
+  go to the debug log. A theme preview abandoned via tab switch or palette
+  now reverts instead of sticking unsaved, `/clip` no longer resurrects a
+  channel closed while the clip was in flight or accepts durations that
+  overflow, and `twi config show` still prints when the credential store is
+  unreadable. `twi profile set --config <file> <theme>` now parses flags in
+  either order.
 
 ## [0.17.0] — 2026-08-21
 

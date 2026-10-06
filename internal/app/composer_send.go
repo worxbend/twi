@@ -49,6 +49,10 @@ func (m *shellModel) queueComposerSend() (shellModel, tea.Cmd) {
 	}
 	text, action := composerSendText(draft)
 	if text == "" {
+		if action {
+			state.sendState = composerSendFailed
+			state.sendFeedback = "usage: /me <action>"
+		}
 		return *m, nil
 	}
 	if m.services.client == nil {

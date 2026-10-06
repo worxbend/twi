@@ -16,6 +16,10 @@ type composerSegment struct {
 	italic     bool
 }
 
+// composerMetadataSeparator parts the segments of the composer footer and
+// the reply preview above it.
+const composerMetadataSeparator = " · "
+
 // composerView renders an OpenCode-inspired input surface: a quiet inset
 // panel, one focus rail, a block cursor, and a compact metadata footer. The
 // borderless shape keeps the chat hierarchy light while send/reply state stays
@@ -184,7 +188,7 @@ func (m shellModel) composerReplySegments() []composerSegment {
 	}
 	if reply.Text != "" {
 		segments = append(segments,
-			composerSegment{text: " · ", foreground: m.theme.Muted},
+			composerSegment{text: composerMetadataSeparator, foreground: m.theme.Muted},
 			composerSegment{text: redactDiagnosticText(compactReplyText(reply.Text)), foreground: m.theme.Muted, italic: true},
 		)
 	}
@@ -195,9 +199,9 @@ func (m shellModel) composerMetadataSegments() []composerSegment {
 	state, color := m.composerStateLabel()
 	return []composerSegment{
 		{text: "✉ Chat", foreground: m.theme.Accent, bold: true},
-		{text: " · ", foreground: m.theme.Muted},
+		{text: composerMetadataSeparator, foreground: m.theme.Muted},
 		{text: m.composerChannelLabel(), foreground: m.theme.Foreground, bold: true},
-		{text: " · ", foreground: m.theme.Muted},
+		{text: composerMetadataSeparator, foreground: m.theme.Muted},
 		{text: state, foreground: color, bold: state != "ready"},
 	}
 }
@@ -289,10 +293,5 @@ func composerSurfaceSpaces(width int, background string) string {
 }
 
 func composerBackgroundLine(width int, background string) string {
-	if width <= 0 {
-		return ""
-	}
-	return lipgloss.NewStyle().
-		Background(lipgloss.Color(background)).
-		Render(strings.Repeat(" ", width))
+	return composerSurfaceSpaces(width, background)
 }

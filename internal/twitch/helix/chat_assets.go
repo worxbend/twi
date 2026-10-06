@@ -100,6 +100,7 @@ func (c *ChatAssetsClient) GetChannelBadges(ctx context.Context, broadcasterID s
 var chatAssetLabels = errorLabels{
 	action:     "lookup Twitch chat assets",
 	readAction: "read Twitch chat asset response",
+	subject:    "chat asset",
 	endpoint:   "chat asset lookup",
 }
 

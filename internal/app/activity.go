@@ -195,7 +195,7 @@ func (m *shellModel) appendActivity(entry activityEntry) {
 // treating every existing follower as "new".
 func (m *shellModel) applyNewFollowerActivity(page []twitch.Follower) {
 	hadBaseline := m.activity.seenFollowerIDs != nil
-	if m.activity.seenFollowerIDs == nil {
+	if !hadBaseline {
 		m.activity.seenFollowerIDs = make(map[string]bool, len(page))
 	}
 	if len(m.activity.seenFollowerIDs) > maxSeenFollowerIDs {

@@ -63,6 +63,7 @@ func (c *FollowersClient) GetChannelFollowers(ctx context.Context, broadcasterID
 	decoded, err := getJSON[helixFollowersResponse](ctx, c.transport, endpoint, errorLabels{
 		action:     "get Twitch channel followers",
 		readAction: "read Twitch channel followers response",
+		subject:    "channel followers",
 		endpoint:   "Get Channel Followers",
 
 		channelAPIReasons: map[int]twitch.ChannelAPIReason{

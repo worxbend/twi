@@ -200,6 +200,26 @@ func urlHasCredentialMarker(parsed *url.URL) bool {
 	return false
 }
 
+// credentialMarkers are the substrings containsCredentialMarker scans for.
+// Package-level because the list is constant and the scan runs per debug-log
+// attribute value.
+var credentialMarkers = []string{
+	"oauth:",
+	"access_token",
+	"oauth_token",
+	"refresh_token",
+	"client_secret",
+	"authorization_code",
+	"code_verifier",
+	"code_challenge",
+	"authorization",
+	"bearer ",
+	"state=",
+	"state:",
+	"code=",
+	"code:",
+}
+
 // containsCredentialMarker reports whether a debug-log attribute value looks
 // like it carries a credential.
 //
@@ -212,23 +232,7 @@ func urlHasCredentialMarker(parsed *url.URL) bool {
 // or narrow all of them at once.
 func containsCredentialMarker(value string) bool {
 	lower := strings.ToLower(strings.TrimSpace(value))
-	markers := []string{
-		"oauth:",
-		"access_token",
-		"oauth_token",
-		"refresh_token",
-		"client_secret",
-		"authorization_code",
-		"code_verifier",
-		"code_challenge",
-		"authorization",
-		"bearer ",
-		"state=",
-		"state:",
-		"code=",
-		"code:",
-	}
-	for _, marker := range markers {
+	for _, marker := range credentialMarkers {
 		if strings.Contains(lower, marker) {
 			return true
 		}

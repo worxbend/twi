@@ -66,9 +66,6 @@ func newChannelStateSet(channels []string, animationConfig animation.Config, clo
 	for _, channel := range channels {
 		set.ensure(channel)
 	}
-	if len(set.order) > 0 {
-		set.active = set.order[0]
-	}
 	return set
 }
 

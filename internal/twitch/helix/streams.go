@@ -49,6 +49,7 @@ func (c *StreamsClient) GetStreams(ctx context.Context, logins []string) ([]twit
 	decoded, err := getJSON[helixStreamsResponse](ctx, c.transport, endpoint, errorLabels{
 		action:     "lookup Twitch stream status",
 		readAction: "read Twitch stream status response",
+		subject:    "stream status",
 		endpoint:   "Get Streams",
 	})
 	if err != nil {
@@ -83,16 +84,11 @@ func (c *StreamsClient) GetStreams(ctx context.Context, logins []string) ([]twit
 }
 
 func (c *StreamsClient) streamsURL(logins []string) (string, error) {
-	parsed, err := url.Parse(c.endpoint)
-	if err != nil {
-		return "", err
-	}
-	query := parsed.Query()
+	values := make(url.Values, len(logins))
 	for _, login := range logins {
-		query.Add("user_login", login)
+		values.Add("user_login", login)
 	}
-	parsed.RawQuery = query.Encode()
-	return parsed.String(), nil
+	return queryURL(c.endpoint, values)
 }
 
 type helixStreamsResponse struct {

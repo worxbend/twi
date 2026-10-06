@@ -919,14 +919,14 @@ type fakeTwitchTransport struct {
 
 // Join and Depart make the fake a twitch.ChannelJoiner, which is what
 // LiveChatClient replays runtime channel changes through after a reconnect.
-func (t *fakeTwitchTransport) Join(channels ...string) error {
+func (t *fakeTwitchTransport) Join(_ context.Context, channels ...string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.joined = append(t.joined, channels...)
 	return nil
 }
 
-func (t *fakeTwitchTransport) Depart(channel string) error {
+func (t *fakeTwitchTransport) Depart(_ context.Context, channel string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.departed = append(t.departed, channel)
@@ -1585,10 +1585,10 @@ func TestReconnectReplaysRuntimeChannelChanges(t *testing.T) {
 	defer client.Close()
 	<-client.ConnectionStates()
 
-	if err := client.JoinChannel("opened_at_runtime"); err != nil {
+	if err := client.JoinChannel(context.Background(), "opened_at_runtime"); err != nil {
 		t.Fatalf("JoinChannel returned error: %v", err)
 	}
-	if err := client.PartChannel("closed_at_runtime"); err != nil {
+	if err := client.PartChannel(context.Background(), "closed_at_runtime"); err != nil {
 		t.Fatalf("PartChannel returned error: %v", err)
 	}
 
@@ -1627,9 +1627,9 @@ func TestRuntimeChannelDeltasKeepOnlyTheLatestAction(t *testing.T) {
 
 	// Open, close, then reopen: only the reopen should be replayed.
 	for _, step := range []func() error{
-		func() error { return client.JoinChannel("flipflop") },
-		func() error { return client.PartChannel("flipflop") },
-		func() error { return client.JoinChannel("flipflop") },
+		func() error { return client.JoinChannel(context.Background(), "flipflop") },
+		func() error { return client.PartChannel(context.Background(), "flipflop") },
+		func() error { return client.JoinChannel(context.Background(), "flipflop") },
 	} {
 		if err := step(); err != nil {
 			t.Fatalf("channel change returned error: %v", err)
@@ -1644,5 +1644,50 @@ func TestRuntimeChannelDeltasKeepOnlyTheLatestAction(t *testing.T) {
 	}
 	if got := second.departedChannels(); slices.Contains(got, "flipflop") {
 		t.Errorf("departed = %v, want no part replayed for a channel left open", got)
+	}
+}
+
+func TestLiveNoticeMessageLeavesIDEmpty(t *testing.T) {
+	transport := newFakeTwitchTransport(4)
+	client, err := NewLiveChatClient(context.Background(), transport, 4)
+	if err != nil {
+		t.Fatalf("NewLiveChatClient returned error: %v", err)
+	}
+	defer client.Close()
+	<-client.ConnectionStates()
+
+	transport.emit(twitch.Event{
+		Kind: twitch.EventNotice,
+		Notice: twitch.Notice{
+			Channel: "example",
+			ID:      "slow_on",
+			Text:    "This room is now in slow mode.",
+		},
+	})
+	if got := <-client.Messages(); got.ID != "" {
+		t.Fatalf("notice message ID = %q, want empty so Twitch's reused msg-id never keys the row cache", got.ID)
+	}
+	<-client.ConnectionStates()
+}
+
+func TestLiveChatClientEmitStateDropsWhenBufferFull(t *testing.T) {
+	client := &LiveChatClient{
+		states: make(chan ConnectionState, 1),
+		done:   make(chan struct{}),
+	}
+	client.emitState(context.Background(), ConnectionState{Status: ConnectionConnecting})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		client.emitState(context.Background(), ConnectionState{Status: ConnectionFailed})
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("emitState blocked on a full states buffer")
+	}
+	if got := <-client.states; got.Status != ConnectionConnecting {
+		t.Fatalf("queued state = %#v, want the first state kept after the drop", got)
 	}
 }

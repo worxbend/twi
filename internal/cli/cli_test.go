@@ -998,6 +998,34 @@ func TestLocalLoginCallbackWaiterReceivesCallbackAndHidesSecrets(t *testing.T) {
 	}
 }
 
+func TestOpenBrowserReportsImmediateExitFailure(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "browser")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BROWSER", script)
+
+	err := openBrowser(context.Background(), "https://example.test/auth")
+	if err == nil {
+		t.Fatal("openBrowser returned nil, want an error for a browser command that exits non-zero at once")
+	}
+	if !strings.Contains(err.Error(), "browser command") {
+		t.Fatalf("openBrowser error = %q, want browser command context", err.Error())
+	}
+}
+
+func TestOpenBrowserSucceedsWhenCommandExitsZero(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "browser")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BROWSER", script)
+
+	if err := openBrowser(context.Background(), "https://example.test/auth"); err != nil {
+		t.Fatalf("openBrowser returned error: %v", err)
+	}
+}
+
 func TestMockChat(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
@@ -1668,6 +1696,23 @@ func TestProfileSetUnknownThemeRejected(t *testing.T) {
 	}
 }
 
+func TestProfileSetAcceptsFlagsBeforeName(t *testing.T) {
+	clearTWIEnv(t)
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"profile", "set", "--config", cfgPath, "nord"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `theme_name = "nord"`) {
+		t.Fatalf("persisted config missing theme_name = nord:\n%s", data)
+	}
+}
+
 func TestProfileSetRejectsMalformedHexColor(t *testing.T) {
 	clearTWIEnv(t)
 	var stdout, stderr bytes.Buffer
@@ -1800,6 +1845,31 @@ func TestConfigShowIgnoresUnsupportedCredentialFileFallback(t *testing.T) {
 			}
 			assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "secret-token", "stored-secret")
 		})
+	}
+}
+
+func TestConfigShowWarnsAndContinuesWhenCredentialStoreFails(t *testing.T) {
+	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
+
+	oldNewCredentialStore := newCredentialStore
+	t.Cleanup(func() {
+		newCredentialStore = oldNewCredentialStore
+	})
+	newCredentialStore = func() (storage.CredentialStore, error) {
+		return nil, errors.New("keyring unavailable")
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"config", "show", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `twitch_username = "viewer"`) {
+		t.Fatalf("config output missing env credentials:\n%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "warning") || !strings.Contains(stderr.String(), "keyring unavailable") {
+		t.Fatalf("stderr = %q, want credential-store warning", stderr.String())
 	}
 }
 

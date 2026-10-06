@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -69,7 +70,7 @@ func parseSetupFlags(args []string, stdout, stderr io.Writer) (opts setupFlagOpt
 	}
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.StringVar(&opts.cfgPath, "config", "", "config file path")
+	addConfigFlag(fs, &opts.cfgPath)
 	fs.BoolVar(&opts.nonInteractive, "non-interactive", false, "write config from flags and current defaults without prompts")
 	fs.Var(&opts.username, "username", "Twitch login name to write to config")
 	fs.Var(&opts.clientID, "client-id", "Twitch app client ID to write to config")
@@ -85,18 +86,13 @@ func parseSetupFlags(args []string, stdout, stderr io.Writer) (opts setupFlagOpt
 		fs.PrintDefaults()
 	}
 
-	if hasHelpArg(args) {
-		fmt.Fprint(stdout, setupUsage)
-		fs.SetOutput(stdout)
-		fs.PrintDefaults()
+	if printUsageOnHelpRequest(fs, setupUsage, args, stdout) {
 		return opts, 0, false
 	}
 	if err := fs.Parse(args); err != nil {
 		return opts, 2, false
 	}
-	if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "unexpected setup argument %q\n\n", fs.Arg(0))
-		fs.Usage()
+	if rejectPositionalArgs(fs, "setup", stderr) {
 		return opts, 2, false
 	}
 	if opts.login && opts.loginDryRun {
@@ -128,7 +124,7 @@ func runSetup(args []string, stdout, stderr io.Writer) int {
 
 	cfg, err := config.Load(os.Environ(), config.Overrides{ConfigPath: opts.cfgPath})
 	if err != nil {
-		fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
+		reportLoadConfigError(stderr, err)
 		return 1
 	}
 	applySetupFlagOptions(&cfg, opts)
@@ -186,7 +182,7 @@ func applySetupFlagOptions(cfg *config.Config, opts setupFlagOptions) {
 		cfg.Twitch.ClientID = strings.TrimSpace(opts.clientID.value)
 	}
 	if len(opts.channels) > 0 {
-		cfg.DefaultChannels = append([]string(nil), opts.channels...)
+		cfg.DefaultChannels = slices.Clone([]string(opts.channels))
 	}
 	if opts.enableMouse.set {
 		cfg.Features.EnableMouse = opts.enableMouse.value
@@ -212,7 +208,7 @@ func validateAndNormalizeSetupConfig(cfg *config.Config) error {
 
 func normalizeSetupEnum(name, value string, allowed []string) (string, error) {
 	value = strings.ToLower(strings.TrimSpace(value))
-	if stringIn(value, allowed) {
+	if slices.Contains(allowed, value) {
 		return value, nil
 	}
 	return "", fmt.Errorf("%s must be one of: %s", name, strings.Join(allowed, ", "))
@@ -322,7 +318,7 @@ func (w setupWizard) promptBool(label string, current bool) (bool, error) {
 
 func (w setupWizard) promptEnum(label, current string, allowed []string) (string, error) {
 	current = strings.ToLower(strings.TrimSpace(current))
-	currentAllowed := stringIn(current, allowed)
+	currentAllowed := slices.Contains(allowed, current)
 	for {
 		if currentAllowed {
 			fmt.Fprintf(w.stdout, "%s (%s) [%s]: ", label, strings.Join(allowed, "/"), current)
@@ -337,14 +333,14 @@ func (w setupWizard) promptEnum(label, current string, allowed []string) (string
 			if currentAllowed {
 				return current, nil
 			}
-			fmt.Fprintf(w.stdout, "Choose one of: %s.\n", strings.Join(allowed, ", "))
+			w.printChooseOneOf(allowed)
 			continue
 		}
 		value = strings.ToLower(strings.TrimSpace(value))
-		if stringIn(value, allowed) {
+		if slices.Contains(allowed, value) {
 			return value, nil
 		}
-		fmt.Fprintf(w.stdout, "Choose one of: %s.\n", strings.Join(allowed, ", "))
+		w.printChooseOneOf(allowed)
 	}
 }
 
@@ -363,11 +359,15 @@ func (w setupWizard) promptCredentialAction(current setupCredentialAction) (setu
 			return current, nil
 		}
 		value = strings.ToLower(strings.TrimSpace(value))
-		if stringIn(value, allowed) {
+		if slices.Contains(allowed, value) {
 			return setupCredentialAction(value), nil
 		}
-		fmt.Fprintf(w.stdout, "Choose one of: %s.\n", strings.Join(allowed, ", "))
+		w.printChooseOneOf(allowed)
 	}
+}
+
+func (w setupWizard) printChooseOneOf(allowed []string) {
+	fmt.Fprintf(w.stdout, "Choose one of: %s.\n", strings.Join(allowed, ", "))
 }
 
 func (w setupWizard) readLine() (string, error) {
@@ -450,7 +450,7 @@ func newEnumFlag(name string, allowed []string) enumFlag {
 
 func (f *enumFlag) Set(value string) error {
 	value = strings.ToLower(strings.TrimSpace(value))
-	if !stringIn(value, f.allowed) {
+	if !slices.Contains(f.allowed, value) {
 		return fmt.Errorf("%s must be one of: %s", f.name, strings.Join(f.allowed, ", "))
 	}
 	f.value = value
@@ -460,13 +460,4 @@ func (f *enumFlag) Set(value string) error {
 
 func (f *enumFlag) String() string {
 	return f.value
-}
-
-func stringIn(value string, allowed []string) bool {
-	for _, candidate := range allowed {
-		if value == candidate {
-			return true
-		}
-	}
-	return false
 }

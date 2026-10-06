@@ -48,6 +48,7 @@ func (c *UsersClient) GetUsers(ctx context.Context, req twitch.UserLookupRequest
 	decoded, err := getJSON[helixUsersResponse](ctx, c.transport, endpoint, errorLabels{
 		action:     "lookup Twitch users",
 		readAction: "read Twitch user lookup response",
+		subject:    "user lookup",
 		endpoint:   "Get Users",
 	})
 	if err != nil {
@@ -69,19 +70,14 @@ func (c *UsersClient) GetUsers(ctx context.Context, req twitch.UserLookupRequest
 }
 
 func (c *UsersClient) usersURL(ids, logins []string) (string, error) {
-	parsed, err := url.Parse(c.endpoint)
-	if err != nil {
-		return "", err
-	}
-	query := parsed.Query()
+	values := make(url.Values, len(ids)+1)
 	for _, id := range ids {
-		query.Add("id", id)
+		values.Add("id", id)
 	}
 	for _, login := range logins {
-		query.Add("login", login)
+		values.Add("login", login)
 	}
-	parsed.RawQuery = query.Encode()
-	return parsed.String(), nil
+	return queryURL(c.endpoint, values)
 }
 
 type helixUsersResponse struct {
@@ -96,21 +92,17 @@ type helixUser struct {
 }
 
 func uniqueNonEmpty(values []string) []string {
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" || slices.Contains(out, value) {
-			continue
-		}
-		out = append(out, value)
-	}
-	return out
+	return uniqueNormalizedNonEmpty(values, func(value string) string { return value })
 }
 
 func uniqueLowerNonEmpty(values []string) []string {
+	return uniqueNormalizedNonEmpty(values, strings.ToLower)
+}
+
+func uniqueNormalizedNonEmpty(values []string, normalize func(string) string) []string {
 	out := make([]string, 0, len(values))
 	for _, value := range values {
-		value = strings.ToLower(strings.TrimSpace(value))
+		value = normalize(strings.TrimSpace(value))
 		if value == "" || slices.Contains(out, value) {
 			continue
 		}

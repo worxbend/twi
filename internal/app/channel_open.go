@@ -68,7 +68,7 @@ func (m shellModel) joinChannelOnTransport(channel string) {
 	if !ok {
 		return
 	}
-	if err := joiner.JoinChannel(channel); err != nil {
+	if err := joiner.JoinChannel(m.lifetimeContext(), channel); err != nil {
 		m.debugChannelJoinFailed(channel, err)
 	}
 }
@@ -78,7 +78,7 @@ func (m shellModel) partChannelOnTransport(channel string) {
 	if !ok {
 		return
 	}
-	if err := joiner.PartChannel(channel); err != nil {
+	if err := joiner.PartChannel(m.lifetimeContext(), channel); err != nil {
 		m.debugChannelPartFailed(channel, err)
 	}
 }

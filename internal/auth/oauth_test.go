@@ -727,3 +727,96 @@ func (r errReadCloser) Read([]byte) (int, error) {
 func (r errReadCloser) Close() error {
 	return nil
 }
+
+func TestTwitchOAuthLoginFlowTrimsCallerSuppliedState(t *testing.T) {
+	now := time.Date(2026, 7, 3, 14, 0, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			fmt.Fprint(w, `{"access_token":"access-token","refresh_token":"refresh-token","expires_in":3600,"scope":["chat:read","chat:edit"],"token_type":"bearer"}`)
+		case "/validate":
+			fmt.Fprint(w, `{"client_id":"client-id","login":"viewer","scopes":["chat:read","chat:edit"],"user_id":"42","expires_in":3590}`)
+		default:
+			t.Fatalf("unexpected request path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	flow := NewTwitchOAuthLoginFlow(TwitchOAuthLoginFlowConfig{
+		AuthorizeEndpoint: server.URL + "/authorize",
+		TokenEndpoint:     server.URL + "/token",
+		ValidateEndpoint:  server.URL + "/validate",
+		Now:               func() time.Time { return now },
+	})
+	challenge, err := flow.BeginLogin(context.Background(), LoginRequest{
+		ClientID:     "client-id",
+		ClientSecret: NewSecret("client-secret"),
+		RedirectURI:  "http://127.0.0.1/callback",
+		Scopes:       []Scope{ScopeChatRead, ScopeChatEdit},
+		State:        NewSecret("  state-secret  "),
+	})
+	if err != nil {
+		t.Fatalf("BeginLogin error = %v", err)
+	}
+	if got := challenge.State.Reveal(); got != "state-secret" {
+		t.Fatalf("challenge state = %q, want trimmed state", got)
+	}
+	if got := mustParseQuery(t, challenge.AuthorizationURL).Get("state"); got != "state-secret" {
+		t.Fatalf("authorization URL state = %q, want trimmed state", got)
+	}
+
+	callbackRequest := httptest.NewRequest(http.MethodGet, "/callback?code=callback-code&state=state-secret", nil)
+	if _, err := flow.CompleteLogin(context.Background(), LoginCallbackFromRequest(callbackRequest, challenge.State)); err != nil {
+		t.Fatalf("CompleteLogin error = %v, want trimmed state to match pending attempt", err)
+	}
+}
+
+func TestTwitchOAuthLoginFlowTrimsCallbackCodeBeforeExchange(t *testing.T) {
+	now := time.Date(2026, 7, 3, 15, 0, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("ParseForm error = %v", err)
+			}
+			assertFormValue(t, r.Form, "code", "callback-code")
+			fmt.Fprint(w, `{"access_token":"access-token","refresh_token":"refresh-token","expires_in":3600,"scope":["chat:read","chat:edit"],"token_type":"bearer"}`)
+		case "/validate":
+			fmt.Fprint(w, `{"client_id":"client-id","login":"viewer","scopes":["chat:read","chat:edit"],"user_id":"42","expires_in":3590}`)
+		default:
+			t.Fatalf("unexpected request path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	flow := NewTwitchOAuthLoginFlow(TwitchOAuthLoginFlowConfig{
+		AuthorizeEndpoint: server.URL + "/authorize",
+		TokenEndpoint:     server.URL + "/token",
+		ValidateEndpoint:  server.URL + "/validate",
+		Now:               func() time.Time { return now },
+	})
+	challenge, err := flow.BeginLogin(context.Background(), LoginRequest{
+		ClientID:     "client-id",
+		ClientSecret: NewSecret("client-secret"),
+		RedirectURI:  "http://127.0.0.1/callback",
+		Scopes:       []Scope{ScopeChatRead, ScopeChatEdit},
+		State:        NewSecret("state-secret"),
+	})
+	if err != nil {
+		t.Fatalf("BeginLogin error = %v", err)
+	}
+
+	callbackRequest := httptest.NewRequest(http.MethodGet, "/callback?code=%20callback-code%20&state=state-secret", nil)
+	if _, err := flow.CompleteLogin(context.Background(), LoginCallbackFromRequest(callbackRequest, challenge.State)); err != nil {
+		t.Fatalf("CompleteLogin error = %v", err)
+	}
+}
+
+func mustParseQuery(t *testing.T, rawURL Secret) url.Values {
+	t.Helper()
+	parsed, err := url.Parse(rawURL.Reveal())
+	if err != nil {
+		t.Fatalf("URL parse error = %v", err)
+	}
+	return parsed.Query()
+}

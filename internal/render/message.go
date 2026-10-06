@@ -1,8 +1,9 @@
 package render
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -391,20 +392,8 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 	if decorations.badges {
 		fragments = append(fragments, badgeFragments(msg, opts)...)
 	}
-	// A first-ever message in the channel is marked before the name, where it
-	// reads as a property of the person rather than of what they said.
-	// Greeting a newcomer is one of the few things a streamer must do while
-	// it is still on screen, and Twitch's own tag is the only reliable
-	// source: a local roster cannot know about a viewer's first visit.
 	if decorations.firstMessage {
-		fragments = append(fragments, Fragment{
-			Kind: FragmentFirstMessage,
-			Text: firstMessageMark,
-			Style: FragmentStyle{
-				Foreground: opts.Palette.Success,
-				Bold:       true,
-			},
-		})
+		fragments = append(fragments, firstMessageFragment(opts))
 	}
 	if msg.Type == twitch.MessageTypeAction {
 		fragments = append(fragments, Fragment{
@@ -431,6 +420,22 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 		},
 	})
 	return fragments
+}
+
+// firstMessageFragment marks a viewer's first-ever message in the channel
+// before their name, where it reads as a property of the person rather than
+// of what they said. Greeting a newcomer is one of the few things a streamer
+// must do while it is still on screen, and Twitch's own tag is the only
+// reliable source: a local roster cannot know about a viewer's first visit.
+func firstMessageFragment(opts Options) Fragment {
+	return Fragment{
+		Kind: FragmentFirstMessage,
+		Text: firstMessageMark,
+		Style: FragmentStyle{
+			Foreground: opts.Palette.Success,
+			Bold:       true,
+		},
+	}
 }
 
 // messageContent builds everything that follows the prefix: the optional
@@ -593,10 +598,14 @@ func emojiFragment(cluster string, ref twitch.AssetRef, opts Options) Fragment {
 	}
 }
 
+// emoteAssetKind is the AssetRef kind every channel emote carries, whether it
+// arrived as a rich message fragment or as a legacy emote range.
+const emoteAssetKind = "twitch_emote"
+
 func emoteFragmentRef(fragment twitch.MessageFragment) twitch.AssetRef {
 	ref := fragment.Ref
 	if ref.Kind == "" {
-		ref.Kind = "twitch_emote"
+		ref.Kind = emoteAssetKind
 	}
 	if ref.ID == "" {
 		_, id, ok := twitch.StaticEmoteCDNURL(ref.URL)
@@ -615,11 +624,11 @@ func emoteFallbackFragments(msg twitch.ChatMessage, opts Options) []Fragment {
 
 	emotes := make([]twitch.Emote, len(msg.Emotes))
 	copy(emotes, msg.Emotes)
-	sort.SliceStable(emotes, func(i, j int) bool {
-		if emotes[i].Start == emotes[j].Start {
-			return emotes[i].End < emotes[j].End
+	slices.SortStableFunc(emotes, func(a, b twitch.Emote) int {
+		if a.Start != b.Start {
+			return cmp.Compare(a.Start, b.Start)
 		}
-		return emotes[i].Start < emotes[j].Start
+		return cmp.Compare(a.End, b.End)
 	})
 
 	fragments := make([]Fragment, 0, len(emotes)*2+1)
@@ -670,7 +679,10 @@ func splitTextFragments(text string, opts Options) []Fragment {
 	graphemes := graphemeStrings(text)
 	for i := 0; i < len(graphemes); {
 		cluster := graphemes[i]
-		if cluster == "@" && i+1 < len(graphemes) && isMentionPart(graphemes[i+1]) {
+		// A mention starts at a word boundary: "@" directly after a login
+		// character is part of something else, like an email address.
+		atBoundary := i == 0 || !isMentionPart(graphemes[i-1])
+		if cluster == "@" && atBoundary && i+1 < len(graphemes) && isMentionPart(graphemes[i+1]) {
 			flushText()
 			start := i
 			i += 2
@@ -783,12 +795,8 @@ func initials(value string) string {
 	}
 	var builder strings.Builder
 	for _, word := range words {
-		if word == "" {
-			continue
-		}
-		for _, cluster := range graphemeStrings(word) {
-			builder.WriteString(strings.ToUpper(cluster))
-			break
+		if clusters := graphemeStrings(word); len(clusters) > 0 {
+			builder.WriteString(strings.ToUpper(clusters[0]))
 		}
 		if textWidth(builder.String()) >= 2 {
 			break
@@ -838,7 +846,7 @@ func relativeMessageAge(age time.Duration) string {
 func emoteAssetRef(emote twitch.Emote) twitch.AssetRef {
 	ref := emote.Ref
 	if ref.Kind == "" {
-		ref.Kind = "twitch_emote"
+		ref.Kind = emoteAssetKind
 	}
 	if ref.ID == "" {
 		ref.ID = emote.ID

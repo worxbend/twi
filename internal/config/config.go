@@ -7,15 +7,20 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/worxbend/twi/internal/animation"
+	"github.com/worxbend/twi/internal/render"
 	"github.com/worxbend/twi/internal/theme"
 	"github.com/worxbend/twi/internal/twitch"
 )
 
 const redacted = "[redacted]"
+
+// keyValueSeparator joins a key and its value in the flat config syntax twi
+// writes to files and prints in `twi config show`.
+const keyValueSeparator = " = "
 
 // The legal values for the settings whose meaning lives here rather than in a
 // package of their own. The ones that do belong elsewhere are published by
@@ -148,12 +153,12 @@ func Default() Config {
 		Features: FeatureConfig{
 			EnableMouse:           true,
 			AvatarMode:            "initials",
-			AnimationMode:         "fast",
-			ThemeName:             "claude",
+			AnimationMode:         string(animation.ModeFast),
+			ThemeName:             theme.DefaultThemeName,
 			StreamStatusMode:      "auto",
 			EmoteAutocompleteMode: "auto",
-			MessageLayout:         "inline",
-			BadgeMode:             "glyph",
+			MessageLayout:         string(render.DefaultLayoutMode),
+			BadgeMode:             string(render.DefaultBadgeMode),
 			HighlightEmotes:       true,
 			FullUsername:          false,
 			ScrollbackLimit:       DefaultScrollbackLimit,
@@ -219,7 +224,7 @@ func writeFlatConfigUpdates(path string, order []string, updates map[string]stri
 		line := scanner.Text()
 		if key, ok := configLineKey(line); ok {
 			if value, exists := updates[key]; exists {
-				lines = append(lines, key+" = "+value)
+				lines = append(lines, key+keyValueSeparator+value)
 				seen[key] = true
 				continue
 			}
@@ -235,7 +240,7 @@ func writeFlatConfigUpdates(path string, order []string, updates map[string]stri
 	}
 	for _, key := range order {
 		if !seen[key] {
-			lines = append(lines, key+" = "+updates[key])
+			lines = append(lines, key+keyValueSeparator+updates[key])
 		}
 	}
 
@@ -299,7 +304,7 @@ func (c Config) RedactedString() string {
 	lines := make([]string, 0, len(settings)+1)
 	lines = append(lines, "path = "+quote(RedactDisplayValue(c.Path)))
 	for _, s := range settings {
-		lines = append(lines, s.key+" = "+s.displayValue(c))
+		lines = append(lines, s.key+keyValueSeparator+s.displayValue(c))
 	}
 	return strings.Join(lines, "\n") + "\n"
 }
@@ -368,13 +373,18 @@ func applyFile(cfg *Config, path string) error {
 
 // stripInlineComment removes a trailing "# ..." comment, but only when the
 // "#" sits outside quotes -- inside a quoted value it is data, so a channel
-// written "#beta" in quotes keeps its hash.
+// written "#beta" in quotes keeps its hash. Inside double quotes the byte
+// after a backslash is skipped, because quote writes escaped values with
+// strconv.Quote: without that, the `\"` in `"a\" # not a comment"` would
+// close the quote early and the real comment marker would cut the value.
 func stripInlineComment(line string) string {
 	var quote byte
 	for i := 0; i < len(line); i++ {
 		switch c := line[i]; {
 		case quote != 0:
-			if c == quote {
+			if c == '\\' && quote == '"' {
+				i++
+			} else if c == quote {
 				quote = 0
 			}
 		case c == '"' || c == '\'':
@@ -402,35 +412,27 @@ var legacyEnvAliases = map[string]func(cfg *Config, value string){
 
 // applyEnv applies every recognized environment variable to cfg.
 //
-// The variables are applied in sorted order, which is what decides the winner
-// when a setting is given both ways: "TWITCH_USERNAME" sorts before
-// "TWI_TWITCH_USERNAME", so the modern TWI_-prefixed name is applied second
-// and wins. Blank values are skipped rather than clearing a configured value.
+// The legacy aliases are applied first and the TWI_-prefixed settings second,
+// which is what decides the winner when a setting is given both ways: the
+// modern name is applied last and wins. Blank values are skipped rather than
+// clearing a configured value. Within each pass the keys are independent
+// settings, so map iteration order cannot change the outcome.
 func applyEnv(cfg *Config, environ []string) {
 	env := map[string]string{}
 	for _, entry := range environ {
 		key, value, ok := strings.Cut(entry, "=")
-		if ok {
+		if ok && strings.TrimSpace(value) != "" {
 			env[key] = value
 		}
 	}
 
-	keys := make([]string, 0, len(env))
-	for key := range env {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	for _, key := range keys {
-		value := env[key]
-		if strings.TrimSpace(value) == "" {
-			continue
-		}
-		if apply, ok := legacyEnvAliases[key]; ok {
+	for key, apply := range legacyEnvAliases {
+		if value, ok := env[key]; ok {
 			apply(cfg, value)
-			continue
 		}
-		if s, ok := settingsByEnv[key]; ok {
+	}
+	for key, s := range settingsByEnv {
+		if value, ok := env[key]; ok {
 			s.apply(cfg, value)
 		}
 	}
@@ -465,11 +467,19 @@ func trimValue(value string) string {
 
 // trimQuotePair removes one matching pair of surrounding quotes, and only
 // one: a value written '"quoted"' keeps its inner quotes, which are part of
-// the value itself.
+// the value itself. A double-quoted value is unescaped the way quote wrote
+// it (strconv.Quote), so a value containing a quote or a backslash survives a
+// WriteNonSecretFile round trip; a value that fails to unquote -- say, a
+// hand-written one with a lone backslash -- falls back to the raw strip.
 func trimQuotePair(value string) string {
 	if len(value) >= 2 {
 		first, last := value[0], value[len(value)-1]
 		if first == last && (first == '"' || first == '\'') {
+			if first == '"' {
+				if unquoted, err := strconv.Unquote(value); err == nil {
+					return unquoted
+				}
+			}
 			return value[1 : len(value)-1]
 		}
 	}
@@ -488,7 +498,9 @@ func splitList(value string) []string {
 }
 
 // splitListItems splits on the commas that separate items, not the ones
-// inside a quoted item: ["a, b", "c"] is two channels, not three.
+// inside a quoted item: ["a, b", "c"] is two channels, not three. As in
+// stripInlineComment, the byte after a backslash inside double quotes is
+// data, not syntax.
 func splitListItems(value string) []string {
 	var parts []string
 	start := 0
@@ -496,7 +508,9 @@ func splitListItems(value string) []string {
 	for i := 0; i < len(value); i++ {
 		switch c := value[i]; {
 		case quote != 0:
-			if c == quote {
+			if c == '\\' && quote == '"' {
+				i++
+			} else if c == quote {
 				quote = 0
 			}
 		case c == '"' || c == '\'':
@@ -538,6 +552,49 @@ func quote(value string) string {
 	return strconv.Quote(value)
 }
 
+// secretMarkers are the credential-shaped substrings containsSecretMarker
+// scans for. Package-level because the list is constant and the scan runs
+// once per displayed config value.
+var secretMarkers = []string{
+	"oauth:",
+	"oauth_token=",
+	"oauth-token=",
+	"oauth_token:",
+	"oauth-token:",
+	"access_token=",
+	"access-token=",
+	"access_token:",
+	"access-token:",
+	"refresh_token=",
+	"refresh-token=",
+	"refresh_token:",
+	"refresh-token:",
+	"client_secret=",
+	"client-secret=",
+	"client_secret:",
+	"client-secret:",
+	"authorization_code=",
+	"authorization-code=",
+	"authorization_code:",
+	"authorization-code:",
+	"code_verifier=",
+	"code-verifier=",
+	"code_verifier:",
+	"code-verifier:",
+	"code_challenge=",
+	"code-challenge=",
+	"code_challenge:",
+	"code-challenge:",
+	"state=",
+	"state:",
+	"code=",
+	"code:",
+	"authorization=",
+	"authorization: bearer",
+	"bearer ",
+	"bearer%20",
+}
+
 // containsSecretMarker reports whether a config value looks like it carries a
 // credential, so `twi config show` prints a marker instead of the value.
 //
@@ -548,46 +605,7 @@ func quote(value string) string {
 // "authorization" would redact a legitimate setting.
 func containsSecretMarker(value string) bool {
 	lower := strings.ToLower(value)
-	markers := []string{
-		"oauth:",
-		"oauth_token=",
-		"oauth-token=",
-		"oauth_token:",
-		"oauth-token:",
-		"access_token=",
-		"access-token=",
-		"access_token:",
-		"access-token:",
-		"refresh_token=",
-		"refresh-token=",
-		"refresh_token:",
-		"refresh-token:",
-		"client_secret=",
-		"client-secret=",
-		"client_secret:",
-		"client-secret:",
-		"authorization_code=",
-		"authorization-code=",
-		"authorization_code:",
-		"authorization-code:",
-		"code_verifier=",
-		"code-verifier=",
-		"code_verifier:",
-		"code-verifier:",
-		"code_challenge=",
-		"code-challenge=",
-		"code_challenge:",
-		"code-challenge:",
-		"state=",
-		"state:",
-		"code=",
-		"code:",
-		"authorization=",
-		"authorization: bearer",
-		"bearer ",
-		"bearer%20",
-	}
-	for _, marker := range markers {
+	for _, marker := range secretMarkers {
 		if strings.Contains(lower, marker) {
 			return true
 		}

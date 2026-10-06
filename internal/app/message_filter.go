@@ -60,9 +60,6 @@ func (s messageFilterSet) enabled(filter messageFilter) bool {
 }
 
 func (s *messageFilterSet) toggle(filter messageFilter) {
-	if s == nil {
-		return
-	}
 	if s.enabled(filter) {
 		*s &^= messageFilterSet(filter)
 		return
@@ -71,9 +68,7 @@ func (s *messageFilterSet) toggle(filter messageFilter) {
 }
 
 func (s *messageFilterSet) reset() {
-	if s != nil {
-		*s = 0
-	}
+	*s = 0
 }
 
 func (s messageFilterSet) summary() string {
@@ -215,19 +210,23 @@ func messageIsError(message twitch.ChatMessage) bool {
 	return hasErrorMarker(strings.ToLower(strings.TrimSpace(message.ID + " " + message.Text)))
 }
 
+// errorMarkers are the substrings that mark a notice or system message as an
+// error for messageFilterErrors. Package-level because hasErrorMarker runs
+// per message whenever the error filter is active.
+var errorMarkers = []string{
+	"error",
+	"failed",
+	"failure",
+	"invalid",
+	"denied",
+	"timeout",
+	"timed out",
+	"disconnect",
+	"connection closed",
+}
+
 func hasErrorMarker(value string) bool {
-	markers := []string{
-		"error",
-		"failed",
-		"failure",
-		"invalid",
-		"denied",
-		"timeout",
-		"timed out",
-		"disconnect",
-		"connection closed",
-	}
-	for _, marker := range markers {
+	for _, marker := range errorMarkers {
 		if strings.Contains(value, marker) {
 			return true
 		}

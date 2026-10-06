@@ -138,6 +138,10 @@ func BadgeModes() []string {
 	return []string{string(BadgeModeGlyph), string(BadgeModeText), string(BadgeModeOff)}
 }
 
+// badgeAssetKind is the AssetRef kind every badge carries, mirroring
+// emoteAssetKind for channel emotes.
+const badgeAssetKind = "badge"
+
 // badgeFragments renders a message's badges according to the active badge
 // mode: bracketed text labels, single-cell glyphs, or nothing.
 func badgeFragments(msg twitch.ChatMessage, opts Options) []Fragment {
@@ -148,15 +152,13 @@ func badgeFragments(msg twitch.ChatMessage, opts Options) []Fragment {
 	// Each glyph fragment reserves BadgeGlyphWidth (icon plus one trailing
 	// pad cell), so callers supply any leading separator themselves rather
 	// than getting a doubled space after an element that already ends in one.
-	fragments := make([]Fragment, 0, len(msg.Badges))
-	if mode == BadgeModeGlyph {
-		for _, badge := range msg.Badges {
-			fragments = append(fragments, badgeGlyphFragment(badge, opts))
-		}
-		return fragments
+	render := badgeGlyphFragment
+	if mode != BadgeModeGlyph {
+		render = badgeFallbackFragment
 	}
+	fragments := make([]Fragment, 0, len(msg.Badges))
 	for _, badge := range msg.Badges {
-		fragments = append(fragments, badgeFallbackFragment(badge, opts))
+		fragments = append(fragments, render(badge, opts))
 	}
 	return fragments
 }
@@ -258,7 +260,7 @@ func badgeAssetID(badge twitch.Badge) string {
 func badgeAssetRef(badge twitch.Badge) twitch.AssetRef {
 	ref := badge.Ref
 	if ref.Kind == "" {
-		ref.Kind = "badge"
+		ref.Kind = badgeAssetKind
 	}
 	if ref.ID == "" {
 		ref.ID = badgeAssetID(badge)

@@ -2,10 +2,13 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -137,6 +140,9 @@ type shellModel struct {
 	reconnectInFlight         bool
 	nextSend                  int
 	streamStatusTickScheduled bool
+	// streamStatusErrorStreak counts consecutive stream-status poll failures
+	// so only the first of a streak is logged (the poll repeats every tick).
+	streamStatusErrorStreak   int
 	lastSystemNotification    *SystemNotification
 	followedChannelList       []twitch.FollowedChannel
 	followedChannelsRequested bool
@@ -299,9 +305,9 @@ var shellTabs = []struct {
 	tab   shellTab
 	label string
 }{
-	{tabChat, "Chat"},
-	{tabStreamInfo, "Stream Info"},
-	{tabMisc, "Misc"},
+	{tab: tabChat, label: "Chat"},
+	{tab: tabStreamInfo, label: "Stream Info"},
+	{tab: tabMisc, label: "Misc"},
 }
 
 // tabForShortcutRune maps an Alt+<digit> keypress to the tab it selects.
@@ -330,7 +336,6 @@ const (
 type composerSendState string
 
 const (
-	composerSendIdle        composerSendState = ""
 	composerSendQueued      composerSendState = "queued"
 	composerSendSending     composerSendState = "sending"
 	composerSendSucceeded   composerSendState = "sent"
@@ -425,7 +430,7 @@ func RunClient(w io.Writer, cfg config.Config, client ChatClient) error {
 // asynchronous app services such as avatar metadata resolution.
 func RunClientWithOptions(w io.Writer, cfg config.Config, client ChatClient, opts ClientOptions) error {
 	if client == nil {
-		return fmt.Errorf("missing chat client")
+		return errors.New("missing chat client")
 	}
 	defer client.Close()
 
@@ -649,8 +654,14 @@ func (m *shellModel) updateTerminalEvent(msg tea.Msg) (shellModel, tea.Cmd, bool
 func (m *shellModel) updateChatStream(msg tea.Msg) (shellModel, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case mockIncomingMessageMsg:
+		// A scheduled tick whose index no longer matches is stale (the mock
+		// stream was restarted or rewound): ingesting it would duplicate the
+		// message in chat without advancing the stream, so drop it.
+		if msg.scheduled && msg.index != m.nextIncoming {
+			return *m, nil, true
+		}
 		var cmds []tea.Cmd
-		if msg.scheduled && msg.index == m.nextIncoming {
+		if msg.scheduled {
 			m.nextIncoming++
 			cmds = append(cmds, m.nextIncomingCommand())
 		}
@@ -726,6 +737,15 @@ func (m *shellModel) markStreamClosed(event, detail string) {
 	m.debugConnectionState(event, m.activeChannelState().status)
 }
 
+// debugStreamStatusResolveFailed records a failed stream-status poll. The
+// caller rate-limits it to the first failure of a consecutive streak (see the
+// streamStatusResolvedMsg handler).
+func (m shellModel) debugStreamStatusResolveFailed(err error) {
+	m.debugLogger.Log(context.Background(), "app.stream_status.resolve_failed",
+		slog.String("error", err.Error()),
+	)
+}
+
 // updateTimers handles the repeating ticks that move the shell forward on
 // their own: the animation clock, the per-character message reveal, and the
 // polls that refresh stream status and channel metrics. Each tick clears the
@@ -748,15 +768,26 @@ func (m *shellModel) updateTimers(msg tea.Msg) (shellModel, tea.Cmd, bool) {
 		return *m, cmd, true
 	case mockAnimationTickMsg:
 		m.frames.revealTickScheduled = false
-		active := m.activeChannelState()
-		result := active.revealQueue.Advance()
-		m.completeReveals(result.Completed)
+		// Every channel's queue advances, not just the active one: a reveal
+		// still in flight when the user switches channel would otherwise
+		// never complete or reschedule its tick.
+		changed := false
+		for _, state := range m.revealQueueStates() {
+			if state.revealQueue == nil || state.revealQueue.Len() == 0 {
+				continue
+			}
+			result := state.revealQueue.Advance()
+			m.completeReveals(state, result.Completed)
+			if result.Changed {
+				changed = true
+			}
+		}
 		m.clampScroll()
-		if active.revealQueue.Len() > 0 {
+		if m.hasPendingReveals() {
 			cmd := m.scheduleRevealTick()
 			return *m, cmd, true
 		}
-		if result.Changed {
+		if changed {
 			model, cmd := m.withAsyncAssetCommands(nil)
 			return model, cmd, true
 		}
@@ -779,9 +810,18 @@ func (m *shellModel) updateAsyncResults(msg tea.Msg) (shellModel, tea.Cmd, bool)
 		m.completeReconnect(msg)
 		return *m, nil, true
 	case streamStatusResolvedMsg:
-		if msg.err == nil {
-			m.applyStreamStatusResults(msg.results)
+		if msg.err != nil {
+			// Only the first failure of a consecutive streak is logged: the
+			// poll repeats every tick, so logging each one would flood the
+			// debug log with the same error until Twitch answers again.
+			if m.streamStatusErrorStreak == 0 {
+				m.debugStreamStatusResolveFailed(msg.err)
+			}
+			m.streamStatusErrorStreak++
+			return *m, nil, true
 		}
+		m.streamStatusErrorStreak = 0
+		m.applyStreamStatusResults(msg.results)
 		return *m, nil, true
 	case channelMetricsResolvedMsg:
 		return m.applyChannelMetrics(msg), nil, true
@@ -1190,51 +1230,70 @@ func (m shellModel) droppedMessageCount() uint64 {
 	return counter.DroppedMessages()
 }
 
+// Minimum status bar widths at which each optional segment earns its room.
+// Segments are dropped narrowest-first as the terminal shrinks, so every
+// threshold is the width at which that segment starts to fit without pushing
+// the channel name off the line.
+const (
+	statusWidthFullMetrics        = 96
+	statusWidthCompactMetrics     = 60
+	statusWidthChannelCount       = 26
+	statusWidthUnreadCount        = 34
+	statusWidthNotification       = 58
+	statusWidthFilterSummary      = 46
+	statusWidthFullFocusInfo      = 64
+	statusWidthFocusOnly          = 42
+	statusWidthSendFeedback       = 50
+	statusWidthChannelDetail      = 34
+	statusWidthDetailMultiChannel = 112
+)
+
 func (m shellModel) statusLine(width int) string {
 	active := m.activeChannelState()
 	channelCount := len(m.channels.channelNames())
+	separator := " | "
 	left := fmt.Sprintf("#%s %s", active.name, active.status.Status)
 	if m.channels.empty() {
 		left = "no channel open"
 	}
-	if width >= 96 {
-		left = m.formatStatusMetrics(m.metricsNow(), m.debugRecording) + " | " + left
-	} else if width >= 60 {
-		left = m.compactStatusMetrics(m.metricsNow()) + " | " + left
+	if width >= statusWidthFullMetrics {
+		left = m.formatStatusMetrics(m.metricsNow(), m.debugRecording) + separator + left
+	} else if width >= statusWidthCompactMetrics {
+		left = m.compactStatusMetrics(m.metricsNow()) + separator + left
 	}
-	if channelCount > 1 && width >= 26 {
-		left += fmt.Sprintf(" | channels=%d", channelCount)
+	if channelCount > 1 && width >= statusWidthChannelCount {
+		left += separator + fmt.Sprintf("channels=%d", channelCount)
 	}
-	if totalUnread := m.channels.totalUnread(); totalUnread > 0 && width >= 34 {
-		left += fmt.Sprintf(" | unread=%d", totalUnread)
+	if totalUnread := m.channels.totalUnread(); totalUnread > 0 && width >= statusWidthUnreadCount {
+		left += separator + fmt.Sprintf("unread=%d", totalUnread)
 	}
 	// Dropped messages are shown unconditionally once any exist, at any width.
 	// Chat quietly losing messages is exactly the thing a moderator must not
 	// have to discover for themselves, so this outranks the decorations above
 	// it in the same line.
 	if dropped := m.droppedMessageCount(); dropped > 0 {
-		left += fmt.Sprintf(" | dropped=%d", dropped)
+		left += separator + fmt.Sprintf("dropped=%d", dropped)
 	}
 	// The prompt is the whole point of the guard: an armed confirmation the
 	// user cannot see is worse than no guard at all.
 	if m.pendingClearChat {
-		left += " | clear chat? ctrl+L again to confirm"
+		left += separator + "clear chat? ctrl+L again to confirm"
 	}
-	if m.lastSystemNotification != nil && width >= 58 {
-		left += " | notify: " + systemNotificationSummary(*m.lastSystemNotification)
+	if m.lastSystemNotification != nil && width >= statusWidthNotification {
+		left += separator + "notify: " + systemNotificationSummary(*m.lastSystemNotification)
 	}
-	if summary := active.messageFilters.summary(); summary != "" && width >= 46 {
-		left += " | filter=" + summary
+	if summary := active.messageFilters.summary(); summary != "" && width >= statusWidthFilterSummary {
+		left += separator + "filter=" + summary
 	}
 	right := ""
-	if width >= 64 {
+	if width >= statusWidthFullFocusInfo {
 		right = fmt.Sprintf(" focus=%s animation=%s", m.focusName(), m.animationMode)
-	} else if width >= 42 {
+	} else if width >= statusWidthFocusOnly {
 		right = fmt.Sprintf(" focus=%s", m.focusName())
 	}
-	if width >= 50 && active.sendFeedback != "" {
-		left += " | send: " + active.sendFeedback
-	} else if width >= 34 && active.status.Detail != "" && (channelCount == 1 || width >= 112) {
+	if width >= statusWidthSendFeedback && active.sendFeedback != "" {
+		left += separator + "send: " + active.sendFeedback
+	} else if width >= statusWidthChannelDetail && active.status.Detail != "" && (channelCount == 1 || width >= statusWidthDetailMultiChannel) {
 		left += " - " + active.status.Detail
 	}
 	line := fitLine(" "+left+right, width)
@@ -1399,8 +1458,13 @@ func (m shellModel) activeChatterLabel() string {
 	if state == nil {
 		return "👥 0"
 	}
-	count := state.roster.activeCount(m.metricsNow())
-	if state.roster != nil && state.roster.membershipSeen {
+	count := 0
+	membershipSeen := false
+	if state.roster != nil {
+		count = state.roster.activeCount(m.metricsNow())
+		membershipSeen = state.roster.membershipSeen
+	}
+	if membershipSeen {
 		return fmt.Sprintf("👥 %d", count)
 	}
 	return fmt.Sprintf("👥 ~%d", count)
@@ -1905,10 +1969,13 @@ func isInteractiveTerminal(w io.Writer) bool {
 	return ok && term.IsTerminal(int(file.Fd()))
 }
 
-func (m shellModel) activeChannelState() *channelState {
+// activeChannelState returns the state of the active channel. Tests that
+// build a shellModel directly may leave channels nil; the fallback set is
+// stored on the model so mutations through the returned state persist rather
+// than landing in a throwaway set that is rebuilt on every call.
+func (m *shellModel) activeChannelState() *channelState {
 	if m.channels == nil {
-		channels := newChannelStateSet([]string{"chat"}, animationConfigFor(m.animationMode), nil, config.DefaultScrollbackLimit)
-		return channels.activeState()
+		m.channels = newChannelStateSet([]string{"chat"}, animationConfigFor(m.animationMode), nil, config.DefaultScrollbackLimit)
 	}
 	return m.channels.activeState()
 }
@@ -2495,7 +2562,7 @@ func (m *shellModel) enqueueMessage(message twitch.ChatMessage) tea.Cmd {
 	revealID := m.nextRevealID(message)
 	options := m.messageRenderOptions(rowWidth, message, m.continuesActiveGroup(message))
 	result := state.revealQueue.Enqueue(revealID, render.Rows(message, options))
-	m.completeReveals(result.Overflow)
+	m.completeReveals(state, result.Overflow)
 	if result.Complete != nil {
 		m.appendStaticMessage(message, false)
 		return nil
@@ -2524,12 +2591,15 @@ func (m *shellModel) maybeNotifyForSystemEvent(message twitch.ChatMessage) tea.C
 		return nil
 	}
 	notifier := m.services.systemNotifier
+	logger := m.debugLogger
 	lifetime := m.lifetimeContext()
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(lifetime, twitchRequestTimeout)
 		defer cancel()
 
-		_ = notifier.Notify(ctx, notification)
+		if err := notifier.Notify(ctx, notification); err != nil {
+			logger.Log(ctx, "app.notify.failed", slog.String("error", err.Error()))
+		}
 		return nil
 	}
 }
@@ -2567,20 +2637,26 @@ func (m *shellModel) nextRevealID(message twitch.ChatMessage) string {
 	return fmt.Sprintf("%s/%d", base, m.nextReveal)
 }
 
-func (m *shellModel) completeReveals(completed []animation.CompletedReveal) {
-	state := m.activeChannelState()
+// completeReveals moves finished reveals of the given channel state from the
+// animating set into the static backlog. The scroll-preservation math only
+// applies to the active channel: it is computed from the visible row count,
+// which is the active channel's. Non-active channels already accept new
+// backlog rows without adjusting their saved scroll offset (see applyMessage),
+// so completed reveals there behave the same way.
+func (m *shellModel) completeReveals(state *channelState, completed []animation.CompletedReveal) {
+	isActive := state == m.activeChannelState()
 	for _, reveal := range completed {
 		message, ok := state.activeMessages[reveal.ID]
 		if !ok {
 			continue
 		}
-		preserveScrolledView := state.scrollOffset > 0
+		preserveScrolledView := isActive && state.scrollOffset > 0
 		beforeRows := 0
 		if preserveScrolledView {
 			beforeRows = m.chatRowCount(m.layout())
 		}
 		delete(state.activeMessages, reveal.ID)
-		m.removeActiveReveal(reveal.ID)
+		state.removeActiveRevealID(reveal.ID)
 		m.appendStaticMessage(message, false)
 		if preserveScrolledView {
 			state.scrollOffset = clampMin(state.scrollOffset+m.chatRowCount(m.layout())-beforeRows, 0)
@@ -2607,9 +2683,32 @@ func (m *shellModel) appendStaticMessage(message twitch.ChatMessage, preserveScr
 	}
 }
 
-func (m *shellModel) removeActiveReveal(id string) {
-	state := m.activeChannelState()
-	state.removeActiveRevealID(id)
+// revealQueueStates lists every channel state that can hold a reveal queue:
+// the empty-state placeholder (when it exists) plus every joined channel. The
+// reveal tick walks all of them so a reveal queued just before a channel
+// switch still completes instead of stalling until the channel is revisited.
+func (m shellModel) revealQueueStates() []*channelState {
+	if m.channels == nil {
+		return nil
+	}
+	states := make([]*channelState, 0, len(m.channels.states)+1)
+	if m.channels.placeholder != nil {
+		states = append(states, m.channels.placeholder)
+	}
+	for _, state := range m.channels.states {
+		states = append(states, state)
+	}
+	return states
+}
+
+// hasPendingReveals reports whether any channel still has reveals in flight.
+func (m shellModel) hasPendingReveals() bool {
+	for _, state := range m.revealQueueStates() {
+		if state.revealQueue != nil && state.revealQueue.Len() > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // scheduleFrameTick starts the shared animation clock. It runs continuously
@@ -2646,8 +2745,11 @@ func (m *shellModel) advanceFrame(now time.Time) {
 	}
 }
 
+// scheduleRevealTick arms the per-character reveal timer. It stays armed only
+// while some channel has reveals in flight (hasPendingReveals), and the
+// revealTickScheduled flag keeps scheduling idempotent.
 func (m *shellModel) scheduleRevealTick() tea.Cmd {
-	if m.frames.revealTickScheduled || m.activeChannelState().revealQueue.Len() == 0 {
+	if m.frames.revealTickScheduled || !m.hasPendingReveals() {
 		return nil
 	}
 	m.frames.revealTickScheduled = true
@@ -2705,8 +2807,6 @@ func animationConfigFor(mode string) animation.Config {
 		cfg.Mode = animation.ModeOff
 	case animation.ModeReduced:
 		cfg.Mode = animation.ModeReduced
-	case animation.ModeFast:
-		cfg.Mode = animation.ModeFast
 	default:
 		cfg.Mode = animation.ModeFast
 	}
@@ -2821,12 +2921,34 @@ func (m *shellModel) insertComposerText(text string) {
 	}
 
 	state := m.activeChannelState()
-	combined := []rune(state.composerText + b.String())
-	if len(combined) > twitch.MaxChatMessageRunes {
-		combined = combined[:twitch.MaxChatMessageRunes]
+	combined := state.composerText + b.String()
+	truncated, capped := truncateRunesAtClusterBoundary(combined, twitch.MaxChatMessageRunes)
+	if capped {
 		state.sendFeedback = fmt.Sprintf("message capped at %d characters", twitch.MaxChatMessageRunes)
 	}
-	state.composerText = string(combined)
+	state.composerText = truncated
+}
+
+// truncateRunesAtClusterBoundary caps text at maxRunes runes, the unit
+// Twitch's message limit counts in, without cutting through a grapheme
+// cluster: splitting a ZWJ sequence or a flag's regional indicators would
+// leave the composer holding a broken glyph. The cap lands on the last
+// cluster that still fits. capped reports whether anything was cut.
+func truncateRunesAtClusterBoundary(text string, maxRunes int) (truncated string, capped bool) {
+	runes := 0
+	cut := len(text)
+	graphemes := uniseg.NewGraphemes(text)
+	for graphemes.Next() {
+		from, to := graphemes.Positions()
+		clusterRunes := utf8.RuneCountInString(text[from:to])
+		if runes+clusterRunes > maxRunes {
+			cut = from
+			capped = true
+			break
+		}
+		runes += clusterRunes
+	}
+	return text[:cut], capped
 }
 
 func (m *shellModel) deleteComposerRune() {
@@ -3007,6 +3129,9 @@ func (m shellModel) helpLines(width, height int) []string {
 	return lines
 }
 
+// visibleRows returns the height-row window of rows ending scrollOffset rows
+// above the bottom. The window math is chatWindowStart's, shared so the
+// renderer and the mouse hit-tester cannot drift apart.
 func visibleRows(rows []string, height, scrollOffset int) []string {
 	if height <= 0 || len(rows) == 0 {
 		return nil
@@ -3015,20 +3140,8 @@ func visibleRows(rows []string, height, scrollOffset int) []string {
 		return rows
 	}
 
-	maxScroll := len(rows) - height
-	if scrollOffset > maxScroll {
-		scrollOffset = maxScroll
-	}
-	if scrollOffset < 0 {
-		scrollOffset = 0
-	}
-
-	end := len(rows) - scrollOffset
-	start := end - height
-	if start < 0 {
-		start = 0
-	}
-	return rows[start:end]
+	start := chatWindowStart(len(rows), height, scrollOffset)
+	return rows[start : start+height]
 }
 
 func fitBlock(value string, width, height int) string {

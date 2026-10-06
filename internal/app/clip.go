@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -61,7 +62,7 @@ func parseClipCommand(draft string) (offsets clipOffsets, ok bool, err error) {
 			return clipOffsets{}, true, parseErr
 		}
 		if ago >= offsets.StartAgo {
-			return clipOffsets{}, true, fmt.Errorf("start offset must be further in the past than end offset (e.g. /clip T-4m T-2m)")
+			return clipOffsets{}, true, errors.New("start offset must be further in the past than end offset (e.g. /clip T-4m T-2m)")
 		}
 		offsets.HasEnd = true
 		offsets.EndAgo = ago
@@ -93,6 +94,9 @@ func parseClipOffset(token string) (time.Duration, string, error) {
 	case 'h':
 		unitDuration = time.Hour
 	default:
+		return 0, "", invalid
+	}
+	if time.Duration(amount) > math.MaxInt64/unitDuration {
 		return 0, "", invalid
 	}
 	return time.Duration(amount) * unitDuration, body, nil
@@ -161,8 +165,14 @@ func (m *shellModel) scheduleClipCreate(state *channelState, offsets clipOffsets
 }
 
 func (m shellModel) applyClipCreated(msg clipCreatedMsg) shellModel {
-	state := m.channels.ensure(msg.channel)
-	if state == nil {
+	if m.channels == nil {
+		return m
+	}
+	// The channel may have been closed while the clip was being created;
+	// look it up rather than ensure so a late completion does not resurrect
+	// a ghost channel the transport never joined.
+	state, ok := m.channels.states[channelKey(msg.channel)]
+	if !ok || state == nil {
 		return m
 	}
 	if msg.broadcasterID != "" {

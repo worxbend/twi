@@ -98,12 +98,16 @@ func (m *shellModel) applyStreamStatusResults(results []twitch.StreamInfo) {
 // recordChatBytes tracks incoming chat message size for the derived "chat
 // bitrate" status-bar figure. Twitch does not expose stream ingest/encode
 // bitrate through any public API, so this reports actual chat-message
-// throughput instead of implying a stream encode bitrate.
+// throughput instead of implying a stream encode bitrate. It trims the
+// window itself because advanceFrame - the other trim site - never runs when
+// the animation clock is off, which would let the slice grow without bound.
 func (m *shellModel) recordChatBytes(message twitch.ChatMessage) {
+	now := time.Now()
 	m.runtime.chatByteSamples = append(m.runtime.chatByteSamples, chatByteSample{
-		at:    time.Now(),
+		at:    now,
 		bytes: len(message.Text),
 	})
+	m.trimChatByteSamples(now)
 }
 
 // sampleResourceUsage records a CPU-time delta on every animation tick and
@@ -114,7 +118,9 @@ func (m *shellModel) recordChatBytes(message twitch.ChatMessage) {
 // tick, but runtime.ReadMemStats synchronizes with the garbage collector, so
 // it's throttled to a cadence the status bar's mem=NNMB figure actually
 // needs. Unavailable on platforms without sampleProcessCPUTime support (see
-// status_metrics_unix.go / status_metrics_other.go).
+// status_metrics_unix.go / status_metrics_other.go). CPU time is a sum over
+// all threads, so the raw delta/wall ratio can exceed 1 on a multicore
+// machine; dividing by NumCPU normalizes cpuPercent to the usual 0-100 scale.
 func (m *shellModel) sampleResourceUsage(now time.Time) {
 	cpuTime, ok := sampleProcessCPUTime()
 	if !ok {
@@ -123,7 +129,7 @@ func (m *shellModel) sampleResourceUsage(now time.Time) {
 		if !m.runtime.cpuSampleAt.IsZero() {
 			wall := now.Sub(m.runtime.cpuSampleAt)
 			if wall > 0 {
-				m.runtime.cpuPercent = float64(cpuTime-m.runtime.cpuSampleTime) / float64(wall) * 100
+				m.runtime.cpuPercent = float64(cpuTime-m.runtime.cpuSampleTime) / float64(wall) * 100 / float64(runtime.NumCPU())
 				m.runtime.cpuAvailable = true
 			}
 		}
@@ -177,7 +183,7 @@ func (m shellModel) fps() float64 {
 // values instead of reading the wall clock directly from View().
 func (m shellModel) formatStatusMetrics(now time.Time, debugRecording bool) string {
 	active := m.activeChannelState()
-	pulse := now.IsZero() || (now.UnixMilli()/500)%2 == 0
+	pulse := statusPulse(now)
 
 	parts := make([]string, 0, 8)
 	if active.live {
@@ -219,11 +225,18 @@ func (m shellModel) metricsNow() time.Time {
 // for narrower terminals that don't have room for the full metrics line.
 func (m shellModel) compactStatusMetrics(now time.Time) string {
 	active := m.activeChannelState()
-	pulse := now.IsZero() || (now.UnixMilli()/500)%2 == 0
+	pulse := statusPulse(now)
 	if !active.live {
 		return "OFFLINE"
 	}
 	return pulseLabel("LIVE", pulse) + " " + formatElapsed(liveElapsed(now, active.liveSince))
+}
+
+// statusPulse reports whether a pulsing status label (LIVE, REC) is in its
+// "on" half-second. The zero time (animation clock not ticking yet) reads as
+// on so the badge renders solid instead of dimmed before the first frame.
+func statusPulse(now time.Time) bool {
+	return now.IsZero() || (now.UnixMilli()/500)%2 == 0
 }
 
 // liveElapsed returns the on-air duration as of now, or zero when now or

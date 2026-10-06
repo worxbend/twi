@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/worxbend/twi/internal/twitch"
@@ -22,10 +21,11 @@ const (
 // selecting an entry commits both its display name and its Twitch game ID -
 // there is no free-text category value, only a real Twitch category.
 type categoryPickerState struct {
-	open       bool
-	query      string
+	open bool
+	// filterList holds the typed query and the highlighted row, shared with
+	// the other searchable overlays so they cannot drift apart.
+	filterList
 	results    []twitch.Game
-	selected   int
 	loading    bool
 	err        string
 	generation int
@@ -46,59 +46,50 @@ type categoryPickerResultsMsg struct {
 func (m *shellModel) openCategoryPicker() tea.Cmd {
 	m.closeOtherOverlays(overlayCategory)
 	query := strings.TrimSpace(m.streamInfo.category)
-	m.categoryPicker = categoryPickerState{open: true, query: query}
+	// The generation carries over (bumped) rather than resetting to zero: a
+	// search still in flight from a previous open must stay stale.
+	m.categoryPicker = categoryPickerState{
+		open:       true,
+		filterList: filterList{query: query},
+		generation: m.categoryPicker.generation + 1,
+	}
 	return m.scheduleCategorySearch()
+}
+
+// closeCategoryPicker dismisses the overlay and bumps the generation, so a
+// debounce tick or search response from the closing session is discarded
+// when it lands instead of mutating a reopened picker.
+func (m *shellModel) closeCategoryPicker() {
+	m.categoryPicker = categoryPickerState{generation: m.categoryPicker.generation + 1}
 }
 
 func (m shellModel) handleCategoryPickerKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		m.categoryPicker = categoryPickerState{}
+		m.closeCategoryPicker()
 		return m, nil
 	case tea.KeyEnter:
 		return m.commitCategoryPickerSelection()
 	case tea.KeyUp:
-		m.moveCategoryPickerSelection(-1)
+		m.categoryPicker.move(-1, len(m.categoryPickerEntries()))
 		return m, nil
 	case tea.KeyDown, tea.KeyTab:
-		m.moveCategoryPickerSelection(1)
+		m.categoryPicker.move(1, len(m.categoryPickerEntries()))
 		return m, nil
 	case tea.KeyBackspace, tea.KeyCtrlH:
-		if n := len(m.categoryPicker.query); n > 0 {
-			_, size := utf8.DecodeLastRuneInString(m.categoryPicker.query)
-			m.categoryPicker.query = m.categoryPicker.query[:n-size]
-		}
-		m.categoryPicker.selected = 0
+		m.categoryPicker.deleteRune()
 		return m, m.debounceCategorySearch()
 	case tea.KeyCtrlU:
-		m.categoryPicker.query = ""
-		m.categoryPicker.selected = 0
+		m.categoryPicker.clearQuery()
 		return m, m.debounceCategorySearch()
 	case tea.KeySpace:
-		m.categoryPicker.query += " "
-		m.categoryPicker.selected = 0
+		m.categoryPicker.insert([]rune{' '})
 		return m, m.debounceCategorySearch()
 	case tea.KeyRunes:
-		m.categoryPicker.query += string(msg.Runes)
-		m.categoryPicker.selected = 0
+		m.categoryPicker.insert(msg.Runes)
 		return m, m.debounceCategorySearch()
 	}
 	return m, nil
-}
-
-func (m *shellModel) moveCategoryPickerSelection(delta int) {
-	entries := m.categoryPickerEntries()
-	if len(entries) == 0 {
-		m.categoryPicker.selected = 0
-		return
-	}
-	m.categoryPicker.selected += delta
-	if m.categoryPicker.selected < 0 {
-		m.categoryPicker.selected = len(entries) - 1
-	}
-	if m.categoryPicker.selected >= len(entries) {
-		m.categoryPicker.selected = 0
-	}
 }
 
 // commitCategoryPickerSelection applies the highlighted entry to the Stream
@@ -118,7 +109,7 @@ func (m shellModel) commitCategoryPickerSelection() (shellModel, tea.Cmd) {
 	} else {
 		m.streamInfo.category = selected.Name
 	}
-	m.categoryPicker = categoryPickerState{}
+	m.closeCategoryPicker()
 	return m, nil
 }
 

@@ -168,10 +168,3 @@ func cloneTokenSet(tokens TokenSet) TokenSet {
 	tokens.Scopes = cloneScopes(tokens.Scopes)
 	return tokens
 }
-
-func cloneScopes(scopes []Scope) []Scope {
-	if scopes == nil {
-		return nil
-	}
-	return append([]Scope(nil), scopes...)
-}

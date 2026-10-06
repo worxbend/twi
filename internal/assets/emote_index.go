@@ -60,25 +60,44 @@ func (idx *EmoteIndex) Load(ctx context.Context, channelID string) ([]EmoteEntry
 	}
 	channelID = strings.TrimSpace(channelID)
 
-	idx.mu.Lock()
-	if entry, ok := idx.entries[channelID]; ok && idx.now().Before(entry.fetchedAt.Add(idx.ttl())) {
-		idx.mu.Unlock()
-		return entry.emotes, nil
-	}
-	idx.mu.Unlock()
-
-	global, err := idx.Lister.GetGlobalEmotes(ctx)
+	// The global list is identical for every channel, so it is cached under
+	// its own key and merged at read time; caching it once per channel used
+	// to refetch the same list for every channel that was opened.
+	global, err := idx.cached(ctx, "", idx.Lister.GetGlobalEmotes)
 	if err != nil {
 		return nil, err
 	}
-	var channel []twitch.EmoteMetadata
-	if channelID != "" {
-		channel, err = idx.Lister.GetChannelEmotes(ctx, channelID)
-		if err != nil {
-			return nil, err
-		}
+	if channelID == "" {
+		// Clone: the caller shares nothing with the cache, so mutating the
+		// returned slice cannot corrupt the entries every later Load returns.
+		return slices.Clone(global), nil
 	}
-	emotes := mergeEmoteEntries(channel, global)
+	channel, err := idx.cached(ctx, channelID, func(ctx context.Context) ([]twitch.EmoteMetadata, error) {
+		return idx.Lister.GetChannelEmotes(ctx, channelID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mergeEmoteEntries(channel, global), nil
+}
+
+// cached returns the emote list stored under key, fetching and caching it on
+// a miss or once the TTL has expired. The returned slice is the cache's own;
+// callers must not mutate it.
+func (idx *EmoteIndex) cached(ctx context.Context, key string, fetch func(context.Context) ([]twitch.EmoteMetadata, error)) ([]EmoteEntry, error) {
+	idx.mu.Lock()
+	if entry, ok := idx.entries[key]; ok && idx.now().Before(entry.fetchedAt.Add(idx.ttl())) {
+		emotes := entry.emotes
+		idx.mu.Unlock()
+		return emotes, nil
+	}
+	idx.mu.Unlock()
+
+	metadata, err := fetch(ctx)
+	if err != nil {
+		return nil, err
+	}
+	emotes := emoteEntries(metadata)
 
 	idx.mu.Lock()
 	// Initialize here rather than requiring a constructor. EmoteIndex is
@@ -88,7 +107,7 @@ func (idx *EmoteIndex) Load(ctx context.Context, channelID string) ([]EmoteEntry
 	if idx.entries == nil {
 		idx.entries = make(map[string]emoteIndexEntry)
 	}
-	idx.entries[channelID] = emoteIndexEntry{fetchedAt: idx.now(), emotes: emotes}
+	idx.entries[key] = emoteIndexEntry{fetchedAt: idx.now(), emotes: emotes}
 	idx.mu.Unlock()
 	return emotes, nil
 }
@@ -107,25 +126,49 @@ func (idx *EmoteIndex) now() time.Time {
 	return time.Now()
 }
 
-// mergeEmoteEntries deduplicates by name across lists, keeping the first
-// occurrence (callers pass channel emotes before global emotes so
-// channel-specific emotes win on name collision), then sorts by name.
-func mergeEmoteEntries(lists ...[]twitch.EmoteMetadata) []EmoteEntry {
+// emoteEntries converts one fetched metadata list into name-sorted,
+// deduplicated entries.
+func emoteEntries(metadata []twitch.EmoteMetadata) []EmoteEntry {
+	seen := make(map[string]bool, len(metadata))
+	entries := make([]EmoteEntry, 0, len(metadata))
+	for _, emote := range metadata {
+		name := strings.TrimSpace(emote.Name)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		entries = append(entries, EmoteEntry{
+			Name: name,
+			Ref:  twitch.AssetRef{Kind: KindTwitchEmote, ID: strings.TrimSpace(emote.ID), URL: emote.ImageURL()},
+		})
+	}
+	sortEmoteEntries(entries)
+	return entries
+}
+
+// mergeEmoteEntries deduplicates by name across cached lists, keeping the
+// first occurrence (callers pass channel emotes before global emotes so
+// channel-specific emotes win on name collision), then sorts by name. The
+// result is a fresh slice that shares nothing with the cached inputs, so the
+// caller cannot corrupt the cache through it.
+func mergeEmoteEntries(lists ...[]EmoteEntry) []EmoteEntry {
 	seen := make(map[string]bool)
 	entries := make([]EmoteEntry, 0)
 	for _, list := range lists {
-		for _, emote := range list {
-			name := strings.TrimSpace(emote.Name)
-			if name == "" || seen[name] {
+		for _, entry := range list {
+			if entry.Name == "" || seen[entry.Name] {
 				continue
 			}
-			seen[name] = true
-			entries = append(entries, EmoteEntry{
-				Name: name,
-				Ref:  twitch.AssetRef{Kind: KindTwitchEmote, ID: strings.TrimSpace(emote.ID), URL: emote.ImageURL()},
-			})
+			seen[entry.Name] = true
+			entries = append(entries, entry)
 		}
 	}
-	slices.SortFunc(entries, func(a, b EmoteEntry) int { return strings.Compare(a.Name, b.Name) })
+	sortEmoteEntries(entries)
 	return entries
+}
+
+// sortEmoteEntries orders entries by name, the order autocomplete search and
+// the composer's quick-select row present them in.
+func sortEmoteEntries(entries []EmoteEntry) {
+	slices.SortFunc(entries, func(a, b EmoteEntry) int { return strings.Compare(a.Name, b.Name) })
 }

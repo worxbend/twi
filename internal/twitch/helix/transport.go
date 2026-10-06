@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/worxbend/twi/internal/twitch"
+	"github.com/worxbend/twi/internal/twitch/jsonbody"
 )
 
 // defaultHTTPTimeout bounds Helix and OAuth endpoint calls made without a
@@ -123,6 +124,10 @@ type errorLabels struct {
 	// readAction describes reading the error body back, e.g. "read Twitch
 	// user lookup response". It appears only when that read itself fails.
 	readAction string
+	// subject is the noun phrase shared by the endpoint's request and decode
+	// error messages, e.g. "user lookup": the read path builds "create Twitch
+	// <subject> request" and "decode Twitch <subject> response" from it.
+	subject string
 	// endpoint is Twitch's documented name for the endpoint, e.g. "Get
 	// Users", quoted verbatim so a reader can find it in the Helix docs.
 	endpoint string
@@ -209,7 +214,7 @@ type (
 func getJSON[T any](ctx context.Context, t transport, endpoint string, labels errorLabels) (T, error) {
 	var decoded T
 
-	req, err := t.newGetRequest(ctx, endpoint, "create Twitch "+labels.subject()+" request")
+	req, err := t.newGetRequest(ctx, endpoint, "create Twitch "+labels.subject+" request")
 	if err != nil {
 		return decoded, err
 	}
@@ -222,19 +227,10 @@ func getJSON[T any](ctx context.Context, t transport, endpoint string, labels er
 	if !isSuccess(resp) {
 		return decoded, t.responseError(resp, labels)
 	}
-	if err := decodeJSONBody(resp.Body, maxResponseBodySize, &decoded); err != nil {
-		return decoded, credentialSafeUserError("decode Twitch "+labels.subject()+" response", err, t.token())
+	if err := jsonbody.Decode(resp.Body, maxResponseBodySize, &decoded); err != nil {
+		return decoded, credentialSafeUserError("decode Twitch "+labels.subject+" response", err, t.token())
 	}
 	return decoded, nil
-}
-
-// subject is the noun phrase shared by an endpoint's request and decode error
-// messages, taken from readAction, which reads "read Twitch <subject>
-// response". Deriving it keeps one label per endpoint rather than three that
-// have to be kept consistent by hand.
-func (l errorLabels) subject() string {
-	subject := strings.TrimPrefix(l.readAction, "read Twitch ")
-	return strings.TrimSuffix(subject, " response")
 }
 
 // writeLabels names every message one Helix write can fail under.
@@ -278,7 +274,7 @@ func sendJSON[T any](ctx context.Context, t transport, method, endpoint string, 
 	if !isSuccess(resp) {
 		return decoded, t.responseError(resp, labels.errorLabels)
 	}
-	if err := decodeJSONBody(resp.Body, maxResponseBodySize, &decoded); err != nil {
+	if err := jsonbody.Decode(resp.Body, maxResponseBodySize, &decoded); err != nil {
 		return decoded, credentialSafeUserError(labels.decodeAction, err, t.token())
 	}
 	return decoded, nil

@@ -11,7 +11,10 @@ import (
 	"github.com/worxbend/twi/internal/twitch"
 )
 
-const miscRequestTimeout = 5 * time.Second
+const (
+	miscRequestTimeout = 5 * time.Second
+	miscPaneHeader     = " Misc: Stream Markers"
+)
 
 // miscState drives the Misc tab: a list of the broadcaster's own stream
 // markers (Twitch Helix "Get Stream Markers", most recent video first) plus
@@ -252,43 +255,48 @@ func (m shellModel) miscLines(width, height int) []string {
 	switch {
 	case m.services.markerManager == nil:
 		lines = []string{
-			" Misc: Stream Markers",
+			miscPaneHeader,
 			" Unavailable: requires Twitch API credentials (client ID + OAuth token).",
 			" Run `twi login` to grant channel:manage:broadcast, then restart twi.",
 		}
 	case m.misc.loading && !m.misc.loaded:
-		lines = []string{" Misc: Stream Markers", " Loading markers..."}
+		lines = []string{miscPaneHeader, " Loading markers..."}
 	case m.misc.loadErr != "":
-		lines = append([]string{" Misc: Stream Markers"}, wrapIndentedText("Load failed: "+m.misc.loadErr, width)...)
+		lines = append([]string{miscPaneHeader}, wrapIndentedText("Load failed: "+m.misc.loadErr, width)...)
 		lines = append(lines, " Reopen the tab (alt+3) to retry.")
 	default:
-		lines = m.miscMarkerLines(width)
+		lines = m.miscMarkerLines(width, height)
 	}
 
 	out := padPaneLines(lines, width, height)
 	return out
 }
 
-func (m shellModel) miscMarkerLines(width int) []string {
+func (m shellModel) miscMarkerLines(width, height int) []string {
 	var header string
 	switch {
 	case m.misc.editing:
 		header = " New marker description (enter=save, esc=cancel): " + m.misc.editBuffer + "█"
 	case m.misc.creating:
-		header = " Misc: Stream Markers (creating marker...)"
+		header = miscPaneHeader + " (creating marker...)"
 	case m.misc.createErr != "":
-		return append([]string{" Misc: Stream Markers"}, wrapIndentedText("Create failed: "+m.misc.createErr, width)...)
+		return append([]string{miscPaneHeader}, wrapIndentedText("Create failed: "+m.misc.createErr, width)...)
 	case m.misc.createOK:
-		header = " Misc: Stream Markers (marker created!)"
+		header = miscPaneHeader + " (marker created!)"
 	default:
-		header = " Misc: Stream Markers (enter=add marker, up/down=select)"
+		header = miscPaneHeader + " (enter=add marker, up/down=select)"
 	}
 	lines := []string{header}
 	if len(m.misc.markers) == 0 {
 		lines = append(lines, "  no markers yet for the current stream/video")
 		return lines
 	}
-	for i, marker := range m.misc.markers {
+	// The pane draws a window around the selection rather than truncating the
+	// tail, so moving the selection past the visible rows scrolls the list.
+	visible := height - len(lines)
+	start := paletteWindowStart(m.misc.selected, len(m.misc.markers), visible)
+	for i := start; i < len(m.misc.markers) && i < start+visible; i++ {
+		marker := m.misc.markers[i]
 		prefix := "  "
 		if i == m.misc.selected {
 			prefix = "> "

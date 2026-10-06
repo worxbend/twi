@@ -92,6 +92,13 @@ var (
 	ErrLiveChatDisconnected = errors.New("live chat client disconnected; reconnect with ctrl+r")
 )
 
+// retryHint tails every reconnect failure detail: ctrl+r is the way forward.
+const retryHint = "; retry with ctrl+r"
+
+// authFailedDetail is shared by the notice-driven and error-driven auth
+// failure paths so the two cannot drift apart.
+const authFailedDetail = "Twitch IRC authentication failed; verify username, OAuth token, and chat:read scope"
+
 func NewLiveChatClient(ctx context.Context, transport twitch.ChatClient, buffer int) (*LiveChatClient, error) {
 	return NewLiveChatClientWithOptions(ctx, transport, buffer, LiveChatClientOptions{})
 }
@@ -239,24 +246,24 @@ func (c *LiveChatClient) Send(ctx context.Context, req SendRequest) (SendResult,
 // joining on a live connection, so a channel opened from the /channels
 // picker starts receiving messages immediately. A transport without the
 // capability reports an error the model treats as "tracked locally only".
-func (c *LiveChatClient) JoinChannel(channel string) error {
+func (c *LiveChatClient) JoinChannel(ctx context.Context, channel string) error {
 	joiner, err := c.channelJoiner()
 	if err != nil {
 		return err
 	}
-	if err := joiner.Join(channel); err != nil {
+	if err := joiner.Join(ctx, channel); err != nil {
 		return err
 	}
 	c.recordRuntimeJoin(channel)
 	return nil
 }
 
-func (c *LiveChatClient) PartChannel(channel string) error {
+func (c *LiveChatClient) PartChannel(ctx context.Context, channel string) error {
 	joiner, err := c.channelJoiner()
 	if err != nil {
 		return err
 	}
-	if err := joiner.Depart(channel); err != nil {
+	if err := joiner.Depart(ctx, channel); err != nil {
 		return err
 	}
 	c.recordRuntimePart(channel)
@@ -292,7 +299,7 @@ func (c *LiveChatClient) recordRuntimePart(channel string) {
 // Without this, a channel opened from the /channels picker goes silently dead
 // after any reconnect: the sidebar still shows it as connected, because the
 // UI never learns that the new transport was never told to join it.
-func (c *LiveChatClient) replayRuntimeChannels(transport twitch.ChatClient) {
+func (c *LiveChatClient) replayRuntimeChannels(ctx context.Context, transport twitch.ChatClient) {
 	joiner, ok := transport.(twitch.ChannelJoiner)
 	if !ok {
 		return
@@ -313,13 +320,13 @@ func (c *LiveChatClient) replayRuntimeChannels(transport twitch.ChatClient) {
 	slices.Sort(joined)
 	slices.Sort(parted)
 	for _, channel := range joined {
-		if err := joiner.Join(channel); err != nil {
+		if err := joiner.Join(ctx, channel); err != nil {
 			c.debugLiveEvent("live_chat.reconnect.rejoin_failed",
 				slog.String("channel", channel), slog.String("error", err.Error()))
 		}
 	}
 	for _, channel := range parted {
-		if err := joiner.Depart(channel); err != nil {
+		if err := joiner.Depart(ctx, channel); err != nil {
 			c.debugLiveEvent("live_chat.reconnect.repart_failed",
 				slog.String("channel", channel), slog.String("error", err.Error()))
 		}
@@ -449,19 +456,19 @@ func (c *LiveChatClient) reconnect(ctx context.Context, kind string) error {
 		return c.logReconnectFailure(credentialSafeError(err))
 	}
 	if err := ctx.Err(); err != nil {
-		return c.failReconnect(kind+" reconnect canceled; retry with ctrl+r", err)
+		return c.failReconnect(kind+" reconnect canceled"+retryHint, err)
 	}
 
 	session, err := c.newSession(ctx, c.factory)
 	if err != nil {
 		switch {
 		case errors.Is(err, context.Canceled):
-			return c.failReconnect(kind+" reconnect canceled; retry with ctrl+r", err)
+			return c.failReconnect(kind+" reconnect canceled"+retryHint, err)
 		case errors.Is(err, context.DeadlineExceeded):
-			return c.failReconnect(kind+" reconnect timed out; retry with ctrl+r", err)
+			return c.failReconnect(kind+" reconnect timed out"+retryHint, err)
 		default:
 			safeErr := credentialSafeError(err)
-			return c.failReconnect(kind+" reconnect failed: "+safeErr.Error()+"; retry with ctrl+r", safeErr)
+			return c.failReconnect(kind+" reconnect failed: "+safeErr.Error()+retryHint, safeErr)
 		}
 	}
 	// The client can be closed while the replacement session is being built;
@@ -475,7 +482,7 @@ func (c *LiveChatClient) reconnect(ctx context.Context, kind string) error {
 	// The replacement transport joined the configured default channels on its
 	// own; anything the user opened or closed since then has to be replayed,
 	// or those channels quietly stop delivering while still looking connected.
-	c.replayRuntimeChannels(session.transport)
+	c.replayRuntimeChannels(ctx, session.transport)
 	c.debugLiveEvent("live_chat.reconnect.session_started")
 	return nil
 }
@@ -916,11 +923,15 @@ func (c *LiveChatClient) emitMembership(ctx context.Context, membership twitch.M
 	}
 }
 
+// emitState drops the state rather than blocking when the buffer is full,
+// matching the other emitters on this type: a stalled consumer must never
+// back-pressure the bridge goroutine into missing Twitch keepalives.
 func (c *LiveChatClient) emitState(ctx context.Context, state ConnectionState) {
 	select {
 	case c.states <- state:
 	case <-ctx.Done():
 	case <-c.done:
+	default:
 	}
 }
 
@@ -968,7 +979,7 @@ func stateFromNotice(notice twitch.Notice) ConnectionState {
 	status := ConnectionConnected
 	if notice.AuthFailed {
 		status = ConnectionFailed
-		detail = "Twitch IRC authentication failed; verify username, OAuth token, and chat:read scope"
+		detail = authFailedDetail
 	}
 	return ConnectionState{
 		Status:  status,
@@ -980,8 +991,12 @@ func stateFromNotice(notice twitch.Notice) ConnectionState {
 
 func messageFromNotice(notice twitch.Notice) twitch.ChatMessage {
 	text := redactCredentialText(detailOrFallback(notice.Text, "Twitch notice"))
+	// ID stays empty on purpose: notice.ID is Twitch's msg-id, which every
+	// notice of the same kind shares, and ChatMessage.ID feeds consumers that
+	// assume a stable per-message identity -- the row cache would serve a
+	// later notice an earlier one's rendered rows. The msg-id remains
+	// available under RawTags for the filters that match on it.
 	return twitch.ChatMessage{
-		ID:        notice.ID,
 		Channel:   notice.Channel,
 		Timestamp: time.Now(),
 		Text:      text,
@@ -1098,7 +1113,7 @@ func credentialSafeDetail(err error) string {
 		return ""
 	}
 	if twitch.IsAuthError(err) {
-		return "Twitch IRC authentication failed; verify username, OAuth token, and chat:read scope"
+		return authFailedDetail
 	}
 	return redactCredentialText(err.Error())
 }
