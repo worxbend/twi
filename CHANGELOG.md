@@ -11,6 +11,8 @@ constant in the source tree.
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-10-06
+
 ### Changed
 
 - **The TUI chrome was rebuilt on a semantic design-token layer.** Every
