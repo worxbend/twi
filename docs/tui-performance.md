@@ -25,10 +25,10 @@ Values are medians of three samples. MB means 1,000,000 bytes. Retained memory i
 | Case | Update+view ms | Allocated MB/op | Allocations/op | GC-live total MB | GC-live MB/channel |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | quiet-one | 1.80 | 0.80 | 22,353 | 0.0396 | 0.0396 |
-| quiet-many | 3.28 | 1.39 | 41,091 | 0.1151 | 0.0012 |
-| busy-one | 14.95 | 13.39 | 50,399 | 4.8715 | 4.8715 |
-| busy-many | 12.20 | 12.35 | 51,155 | 15.7524 | 1.5752 |
-| busy-animated | 16.74 | 17.97 | 69,865 | 15.7522 | 1.5752 |
+| quiet-many | 3.28 | 1.40 | 41,091 | 0.1151 | 0.0012 |
+| busy-one | 14.80 | 13.37 | 50,201 | 4.8717 | 4.8717 |
+| busy-many | 12.10 | 12.35 | 51,134 | 15.7523 | 1.5752 |
+| busy-animated | 17.63 | 17.95 | 69,618 | 15.7523 | 1.5752 |
 
 ## Native event-loop and renderer baseline
 
@@ -36,17 +36,17 @@ View calls and terminal writes differ because Bubble Tea coalesces screen update
 
 | Case | CPU/core % | Views/s | Terminal writes/s | View p95 ms | Allocated MB/s |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| quiet-one | 0.4 | 0.3 | 0.7 | 2.44 | 0.3 |
-| quiet-many | 5.6 | 10.3 | 7.3 | 4.54 | 14.2 |
-| busy-many | 69.0 | 100.0 | 60.1 | 5.89 | 353.4 |
-| busy-animated | 101.4 | 150.1 | 58.5 | 5.95 | 514.6 |
-| busy-many-slow-terminal | 38.9 | 54.6 | 30.0 | 6.03 | 194.2 |
+| quiet-one | 0.4 | 0.3 | 0.7 | 2.38 | 0.3 |
+| quiet-many | 5.9 | 10.3 | 8.0 | 4.63 | 14.4 |
+| busy-many | 70.1 | 100.0 | 60.5 | 6.00 | 353.6 |
+| busy-animated | 101.9 | 150.1 | 58.6 | 5.80 | 514.2 |
+| busy-many-slow-terminal | 38.9 | 54.6 | 29.9 | 6.20 | 194.2 |
 
 | Busy case | Offered | Processed | Overflow drops | Pending at shutdown | Queue peak/128 | Arrival p95 ms |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| busy-many | 300 | 300 | 0 | 0 | 0 | 3.2 |
-| busy-animated | 300 | 300 | 0 | 0 | 11 | 75.0 |
-| busy-many-slow-terminal | 300 | 168 | 4 | 128 | 128 | 1249.9 |
+| busy-many | 300 | 300 | 0 | 0 | 0 | 3.1 |
+| busy-animated | 299 | 299 | 0 | 0 | 10 | 78.0 |
+| busy-many-slow-terminal | 299 | 169 | 4 | 126 | 128 | 1271.0 |
 
 The delayed terminal reaches the queue bound and drops events. Pending events at intentional shutdown are reported separately from overflow. This fixture has no recorder: it evaluates UI pressure, while recorder durability/slow-output evidence lives in `docs/history-performance.md`. Production capture precedes the UI queue; these numbers do not assert durable-history loss.
 
@@ -86,4 +86,4 @@ go tool pprof -alloc_space /tmp/twi-tui-performance/app.test /tmp/twi-tui-perfor
 
 The script pins `GOMAXPROCS=2`, `GOGC=100`, `GOMEMLIMIT=off` and clears inherited runtime debug instrumentation. `benchmarks.txt` contains three one-second samples per model case; `memory.txt` contains three GC-live samples. `runtime.json` contains per-scenario counters and latency, `cpu-top.txt`/`alloc-top.txt` identify hotspots, and `cpu-workloads.txt` records workload labels. `summary.json` combines the results and explicit budgets. CPU sampling and allocation sampling have overhead, so native-profile results should be compared against other profile runs with the same settings. The runtime `post_run_live_heap_delta_bytes` is a post-shutdown GC-live delta against the warmed program, so it may be negative when startup buffers are reclaimed; absolute model retention is reported by the separate memory benchmark.
 
-Recorded final cohort: `/tmp/twi-tui-performance-final-accepted`; source SHA-256 `374a21d6ceca94b52ad79d5099cac4716334c6992d05708cd7e960cc619a0b7a`. All measured budgets passed and source was unchanged during this final cohort.
+Recorded final cohort after module tidy: `/tmp/twi-tui-performance-final-module`; source SHA-256 `803a91335b31614b24891bfc15f5cd7cf3a7baae5a4c40ec2391481f6e1d7c10`. All measured budgets passed and source was unchanged during this final cohort.

@@ -64,13 +64,18 @@ def main():
     parser.add_argument('--directory',type=Path)
     parser.add_argument('--branch')
     parser.add_argument('--push',action='store_true')
+    parser.add_argument('--update',action='store_true',help='refresh a clean existing isolated validation clone on the same branch')
     parser.add_argument('--secret-account-file',type=Path,action='append',default=[],help='optional private account JSON for known-secret preflight only')
     args=parser.parse_args()
-    branch=args.branch or 'codex/plan-validation-'+datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d-%H%M%S')
+    branch=args.branch or (git('branch','--show-current',cwd=args.directory) if args.update and args.directory else None) or 'codex/plan-validation-'+datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d-%H%M%S')
     if not re.fullmatch(r'codex/plan-validation-[a-zA-Z0-9-]+',branch):raise SystemExit('branch must use dedicated codex/plan-validation- prefix')
     destination=args.directory or Path(tempfile.mkdtemp(prefix='twi-hosted-snapshot-'))/'repo'
     if destination.resolve().is_relative_to(ROOT):raise SystemExit('snapshot destination must be outside the source checkout')
-    if destination.exists():raise SystemExit('snapshot destination must not exist')
+    if args.update:
+        if not destination.is_dir() or not (destination/'.git').exists():raise SystemExit('update requires an existing isolated git clone')
+        if git('status','--porcelain=v1',cwd=destination):raise SystemExit('existing snapshot must be clean')
+        if git('branch','--show-current',cwd=destination)!=branch:raise SystemExit('existing snapshot branch mismatch')
+    elif destination.exists():raise SystemExit('snapshot destination must not exist')
     destination.parent.mkdir(parents=True,exist_ok=True)
     try:secrets=known_secret_values(args.secret_account_file)
     except (OSError,ValueError):raise SystemExit('could not validate private known-secret inputs; refusing snapshot')
@@ -78,9 +83,12 @@ def main():
     before_status=git('status','--porcelain=v1','-z')
     origin=git('remote','get-url','origin')
     if origin not in {'git@github.com:worxbend/twi.git','https://github.com/worxbend/twi.git'}:raise SystemExit('unexpected origin; refuse validation push')
-    subprocess.run(['git','clone','--no-hardlinks',str(ROOT),str(destination)],check=True)
-    git('remote','set-url','origin',origin,cwd=destination)
-    git('switch','-c',branch,cwd=destination)
+    if args.update:
+        if git('remote','get-url','origin',cwd=destination)!=origin:raise SystemExit('existing snapshot origin mismatch')
+    else:
+        subprocess.run(['git','clone','--no-hardlinks',str(ROOT),str(destination)],check=True)
+        git('remote','set-url','origin',origin,cwd=destination)
+        git('switch','-c',branch,cwd=destination)
     tracked=git('ls-files','-z').split('\0')
     untracked=git('ls-files','--others','--exclude-standard','-z').split('\0')
     for path in sorted(set(tracked+untracked)):
