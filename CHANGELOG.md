@@ -53,6 +53,8 @@ report their build revision and `development` unless an explicit version is supp
 
 ### Fixed
 
+- Explicit release versions take precedence over Go module pseudoversions in
+  `twi version`, so published binaries report their exact release tag.
 - Reconnect/shutdown races, hidden terminal connection failures, and unnecessary
   readiness timeouts when no channel is selected.
 - Recorder overflow, final-flush errors, and end-of-query coverage checks now

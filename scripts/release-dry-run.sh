@@ -188,6 +188,11 @@ fi
 if [ -n "$native_bin" ]; then
 	echo "smoking native binary $native_bin"
 	"$native_bin" --help >/dev/null
+	reported_version=$("$native_bin" version)
+	case "$reported_version" in
+		"twi $release_version ("*) ;;
+		*) echo "release binary version does not match $release_version" >&2; exit 1 ;;
+	esac
 	"$native_bin" doctor >/dev/null
 	"$native_bin" chat --mock --channel example >/dev/null
 else

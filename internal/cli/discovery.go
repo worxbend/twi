@@ -21,7 +21,7 @@ func runVersion(args []string, out, errout io.Writer) int {
 	version := buildVersion
 	revision := "unknown"
 	if info, ok := debug.ReadBuildInfo(); ok {
-		if info.Main.Version != "" && info.Main.Version != "(devel)" {
+		if (version == "development" || version == "") && info.Main.Version != "" && info.Main.Version != "(devel)" {
 			version = info.Main.Version
 		}
 		for _, s := range info.Settings {
