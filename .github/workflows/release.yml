@@ -32,10 +32,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
@@ -44,10 +44,10 @@ jobs:
         run: mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
 
       - name: Build and smoke release artifacts
-        run: scripts/release-dry-run.sh --out "$RUNNER_TEMP/twi-release" --targets "linux/amd64 linux/arm64" --skip-docker
+        run: scripts/release-dry-run.sh --out "$RUNNER_TEMP/twi-release" --skip-docker
 
       - name: Upload dry-run artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: twi-release-dry-run
           path: ${{ runner.temp }}/twi-release/
@@ -64,12 +64,12 @@ jobs:
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" \
               --title "twi $RELEASE_TAG" \
-              --notes "Automated release for $RELEASE_TAG with Linux amd64 and arm64 binaries."
+              --notes "Automated release for $RELEASE_TAG with Linux/macOS amd64 and arm64 binaries, CycloneDX SBOMs, provenance, and SHA-256 checksums."
           fi
           gh release upload "$RELEASE_TAG" \
-            scripts/install.sh \
-            "$release_dir/twi_linux_amd64" \
-            "$release_dir/twi_linux_amd64.sha256" \
-            "$release_dir/twi_linux_arm64" \
-            "$release_dir/twi_linux_arm64.sha256" \
+            "$release_dir/install.sh" \
+            "$release_dir/install.sh.sha256" \
+            "$release_dir"/twi_linux_* \
+            "$release_dir"/twi_darwin_* \
+            "$release_dir/SHA256SUMS" \
             --clobber

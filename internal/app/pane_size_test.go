@@ -5,15 +5,14 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/worxbend/twi/internal/config"
 )
 
 func paneTestModel(t *testing.T, width, height int) shellModel {
 	t.Helper()
-	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	cfg.DefaultChannels = []string{"alpha", "beta"}
@@ -23,12 +22,12 @@ func paneTestModel(t *testing.T, width, height int) shellModel {
 }
 
 func paneKey(model shellModel, r rune) shellModel {
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	updated, _ := model.Update(tea.KeyPressMsg{Text: string([]rune{r})})
 	return updated.(shellModel)
 }
 
 func leaderPress(model shellModel, r rune) shellModel {
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeySpace})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeySpace})
 	model = updated.(shellModel)
 	return paneKey(model, r)
 }
@@ -208,7 +207,6 @@ func TestHiddenActivityStaysHiddenAcrossResize(t *testing.T) {
 }
 
 func TestConfiguredPaneWidthsApply(t *testing.T) {
-	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	cfg.DefaultChannels = []string{"alpha", "beta"}
@@ -234,7 +232,6 @@ func TestConfiguredPaneWidthsApply(t *testing.T) {
 // for more than the terminal can give: it must degrade, not produce a layout
 // with no chat in it.
 func TestConfiguredPaneWidthsAreClampedNotHonoredBlindly(t *testing.T) {
-	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	cfg.Features.ActivityWidth = 500
@@ -280,7 +277,7 @@ func TestHiddenActivityRendersNothing(t *testing.T) {
 	if got := model.activityLogView(layout); got != "" {
 		t.Fatalf("hidden activity pane rendered %q, want empty", got)
 	}
-	view := ansi.Strip(model.View())
+	view := ansi.Strip(model.View().Content)
 	if strings.Contains(view, "Activity ·") {
 		t.Fatal("hidden activity pane still shows its title in the full view")
 	}

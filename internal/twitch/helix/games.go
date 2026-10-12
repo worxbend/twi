@@ -30,7 +30,7 @@ var _ twitch.GameLookup = (*GamesClient)(nil)
 func NewGamesClient(cfg GamesClientConfig) *GamesClient {
 	return &GamesClient{
 		endpoint:  endpointOrDefault(cfg.Endpoint, defaultHelixSearchCategoriesURL),
-		transport: newTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken),
+		transport: newTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken, cfg.RetryPolicy),
 	}
 }
 

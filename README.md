@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://worxbend.github.io/twi/"><img alt="Website" src="https://img.shields.io/badge/website-worxbend.github.io%2Ftwi-9146FF?style=for-the-badge&logo=githubpages&logoColor=white"></a>
   <a href="https://obs.worxbend.com/"><img alt="Streaming tools map" src="https://img.shields.io/badge/tools-obs.worxbend.com-0F1012?style=for-the-badge&logo=obsstudio&logoColor=white"></a>
-  <a href="https://go.dev/"><img alt="Go 1.26" src="https://img.shields.io/badge/Go-1.26-00ADD8?style=for-the-badge&logo=go&logoColor=white"></a>
+  <a href="https://go.dev/"><img alt="Go 1.27" src="https://img.shields.io/badge/Go-1.27-00ADD8?style=for-the-badge&logo=go&logoColor=white"></a>
   <a href="https://www.twitch.tv/"><img alt="Twitch chat" src="https://img.shields.io/badge/Twitch-chat-9146FF?style=for-the-badge&logo=twitch&logoColor=white"></a>
   <a href="Dockerfile"><img alt="Dockerfile" src="https://img.shields.io/badge/Dockerfile-present-2496ED?style=for-the-badge&logo=docker&logoColor=white"></a>
   <a href="docs/config.md"><img alt="Secrets redacted" src="https://img.shields.io/badge/secrets-redacted-111827?style=for-the-badge"></a>
@@ -76,6 +76,13 @@ go run ./cmd/twi chat --mock --channel demo   # 👈 no credentials, no network,
 <summary>🎨 <b>Theme picker</b> — every preset with its own swatch strip, previewed live</summary>
 <p align="center"><img src="docs/assets/screenshots/theme-picker.svg" alt="Full-screen theme picker" width="880"></p>
 </details>
+
+## Automation and recorded history
+
+Use `twi produce` (`-P`), `twi consume` (`-C`), and foreground `twi record`
+for shell workflows. History requires an earlier recorder; it never backfills
+arbitrary Twitch chat. See [Automation](docs/automation.md) for commands, schemas,
+coverage, retention, cursors, and exit codes.
 
 ## 🤔 Why It Exists
 
@@ -544,8 +551,7 @@ one as you move the selection. `up`/`down` and `home`/`end` move, `enter` saves,
 The status bar's LIVE indicator reflects the channel's real Twitch broadcast
 status (polled via Helix "Get Streams" every 60s when `stream_status_mode`
 and Twitch API credentials allow it) — not just the local IRC connection.
-REC reflects `debug_logging` (twi's own debug-log recording), since twi has
-no other "recording" concept. The "chat" throughput figure is derived from
+REC reflects `debug_logging` (twi's own debug-log recording), and is separate from the foreground `twi record` history collector. The "chat" throughput figure is derived from
 actual incoming chat-message bytes, not stream encode bitrate, which Twitch
 does not expose through any public API.
 

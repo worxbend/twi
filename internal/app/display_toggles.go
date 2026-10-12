@@ -1,7 +1,7 @@
 package app
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/render"
 )
@@ -92,15 +92,15 @@ func (m *shellModel) persistDisplayPreference(label string, mutate func(*config.
 // The chosen keys avoid the control codes terminals reserve: ctrl+h is
 // backspace, ctrl+i is tab, and ctrl+m is enter, so none of those can carry
 // a binding here.
-func (m *shellModel) handleDisplayToggleKey(msg tea.KeyMsg) bool {
-	switch msg.Type {
-	case tea.KeyCtrlG:
+func (m *shellModel) handleDisplayToggleKey(msg tea.KeyPressMsg) bool {
+	switch msg.String() {
+	case "ctrl+g":
 		m.cycleMessageLayout()
-	case tea.KeyCtrlB:
+	case "ctrl+b":
 		m.cycleBadgeMode()
-	case tea.KeyCtrlY:
+	case "ctrl+y":
 		m.toggleEmoteHighlight()
-	case tea.KeyCtrlN:
+	case "ctrl+n":
 		m.toggleFullUsername()
 	default:
 		return false

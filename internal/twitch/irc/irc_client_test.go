@@ -29,7 +29,7 @@ func TestNewIRCClientValidatesRequiredConfigWithoutLeakingToken(t *testing.T) {
 	}{
 		{
 			name: "username",
-			cfg: Config{
+			cfg: Config{ReservePermit: func(context.Context, string, string) error { return nil },
 				OAuthToken: "oauth:secret-token",
 				Channels:   []string{"example"},
 			},
@@ -37,7 +37,7 @@ func TestNewIRCClientValidatesRequiredConfigWithoutLeakingToken(t *testing.T) {
 		},
 		{
 			name: "token",
-			cfg: Config{
+			cfg: Config{ReservePermit: func(context.Context, string, string) error { return nil },
 				Username: "viewer",
 				Channels: []string{"example"},
 			},
@@ -63,7 +63,7 @@ func TestNewIRCClientValidatesRequiredConfigWithoutLeakingToken(t *testing.T) {
 // --channel/--channels connects and waits for the /channels picker to join
 // the first one.
 func TestNewIRCClientAllowsNoChannels(t *testing.T) {
-	client, err := NewClient(Config{
+	client, err := NewClient(Config{ReservePermit: func(context.Context, string, string) error { return nil },
 		Username:   "viewer",
 		OAuthToken: "oauth:secret-token",
 	})
@@ -86,7 +86,7 @@ func TestIRCClientJoinAndDepartTrackChannels(t *testing.T) {
 	}
 	defer func() { newSession = restore }()
 
-	client, err := NewClient(Config{
+	client, err := NewClient(Config{ReservePermit: func(context.Context, string, string) error { return nil },
 		Username:   "viewer",
 		OAuthToken: "oauth:secret-token",
 		Channels:   []string{"alpha"},
@@ -119,7 +119,7 @@ func TestIRCClientJoinAndDepartTrackChannels(t *testing.T) {
 }
 
 func TestNewIRCClientNormalizesChannelsAndCapabilities(t *testing.T) {
-	client, err := NewClient(Config{
+	client, err := NewClient(Config{ReservePermit: func(context.Context, string, string) error { return nil },
 		Username:   "viewer",
 		OAuthToken: "oauth:secret-token",
 		Channels:   []string{"#Example", " second "},
@@ -148,7 +148,7 @@ func TestCredentialSafeIRCErrorRedactsOAuthPattern(t *testing.T) {
 func TestIRCClientDebugLogsSendFieldsWithoutMessageTextOrCredentials(t *testing.T) {
 	var logs bytes.Buffer
 	logger := debuglog.New(&logs, debuglog.Options{Enabled: true})
-	client, err := NewClient(Config{
+	client, err := NewClient(Config{ReservePermit: func(context.Context, string, string) error { return nil },
 		Username:     "viewer",
 		OAuthToken:   "oauth:configured-token",
 		RefreshToken: "refresh-secret",
@@ -337,7 +337,7 @@ func TestIRCClientAuthRefreshPersistenceFailureWarnsAndReconnectsWithRefreshedTo
 	})}
 
 	var persisted []OAuthRefresh
-	client, err := NewClient(Config{
+	client, err := NewClient(Config{ReservePermit: func(context.Context, string, string) error { return nil },
 		Username:     "viewer",
 		OAuthToken:   "oauth:old-access-token",
 		RefreshToken: "old-refresh-token",
@@ -559,9 +559,9 @@ func (s *fakeIRCSession) connectCalls() int {
 // silently disable chat presence.
 func TestIRCClientRequestsMembershipCapability(t *testing.T) {
 	session := newSession("user", "oauth:token", []string{"alpha"})
-	real, ok := session.(*gempir.Client)
+	real, ok := session.(*managedSession)
 	if !ok {
-		t.Fatalf("newSession returned %T, want *gempir.Client", session)
+		t.Fatalf("newSession returned %T, want *managedSession", session)
 	}
 
 	want := map[string]bool{
@@ -620,7 +620,7 @@ func TestIRCClientRefreshesMoreThanOnce(t *testing.T) {
 		return responseWithStatus(http.StatusOK, body), nil
 	})}
 
-	client, err := NewClient(Config{
+	client, err := NewClient(Config{ReservePermit: func(context.Context, string, string) error { return nil },
 		Username:     "viewer",
 		OAuthToken:   "oauth:old-access-token",
 		RefreshToken: "old-refresh-token",
@@ -682,7 +682,7 @@ func TestIRCClientStopsRefreshingAfterRepeatedRejection(t *testing.T) {
 		return responseWithStatus(http.StatusOK, `{"access_token":"still-rejected","refresh_token":"r","token_type":"bearer"}`), nil
 	})}
 
-	client, err := NewClient(Config{
+	client, err := NewClient(Config{ReservePermit: func(context.Context, string, string) error { return nil },
 		Username:     "viewer",
 		OAuthToken:   "oauth:old",
 		RefreshToken: "old-refresh",
@@ -718,7 +718,7 @@ func TestIRCClientStopsRefreshingAfterRepeatedRejection(t *testing.T) {
 // showed a message as accepted while it sat in a buffer on a dead socket and
 // never reached Twitch.
 func TestIRCClientSendRefusesWhenNotConnected(t *testing.T) {
-	client, err := NewClient(Config{
+	client, err := NewClient(Config{ReservePermit: func(context.Context, string, string) error { return nil },
 		Username:   "viewer",
 		OAuthToken: "oauth:token",
 		Channels:   []string{"example"},
@@ -749,7 +749,7 @@ func TestIRCClientSendSucceedsOnceConnected(t *testing.T) {
 		return session
 	}
 
-	client, err := NewClient(Config{
+	client, err := NewClient(Config{ReservePermit: func(context.Context, string, string) error { return nil },
 		Username:   "viewer",
 		OAuthToken: "oauth:token",
 		Channels:   []string{"example"},
@@ -767,7 +767,7 @@ func TestIRCClientSendSucceedsOnceConnected(t *testing.T) {
 // TestIRCClientSendRefusesAfterDisconnect covers the state transition, which
 // is the case that actually bites: the session was live and then dropped.
 func TestIRCClientSendRefusesAfterDisconnect(t *testing.T) {
-	client, err := NewClient(Config{
+	client, err := NewClient(Config{ReservePermit: func(context.Context, string, string) error { return nil },
 		Username:   "viewer",
 		OAuthToken: "oauth:token",
 		Channels:   []string{"example"},
@@ -869,7 +869,7 @@ func TestNormalizeChannelTrimsWhitespaceBeforeTheHash(t *testing.T) {
 //
 // The loop now checks c.done before connecting anything.
 func TestConnectLoopStopsOnceClosed(t *testing.T) {
-	client, err := NewClient(Config{
+	client, err := NewClient(Config{ReservePermit: func(context.Context, string, string) error { return nil },
 		Username:   "viewer",
 		OAuthToken: "oauth:token",
 		Channels:   []string{"example"},
@@ -910,7 +910,7 @@ func TestEmitDropsOldestEventWhenTheConsumerFallsBehind(t *testing.T) {
 	session.holdOpen()
 	newSession = func(string, string, []string) chatSession { return session }
 
-	client, err := NewClient(Config{
+	client, err := NewClient(Config{ReservePermit: func(context.Context, string, string) error { return nil },
 		Username:   "viewer",
 		OAuthToken: "oauth:token",
 		Channels:   []string{"example"},
@@ -983,7 +983,7 @@ func TestEmitDoesNotDropWhenTheConsumerKeepsUp(t *testing.T) {
 	session.holdOpen()
 	newSession = func(string, string, []string) chatSession { return session }
 
-	client, err := NewClient(Config{
+	client, err := NewClient(Config{ReservePermit: func(context.Context, string, string) error { return nil },
 		Username:   "viewer",
 		OAuthToken: "oauth:token",
 		Channels:   []string{"example"},
@@ -1040,7 +1040,7 @@ func TestSendFramesAnActionAsCTCP(t *testing.T) {
 	session := &fakeIRCSession{}
 	newSession = func(string, string, []string) chatSession { return session }
 
-	client, err := NewClient(Config{Username: "viewer", OAuthToken: "oauth:token", Channels: []string{"example"}})
+	client, err := NewClient(Config{ReservePermit: func(context.Context, string, string) error { return nil }, Username: "viewer", OAuthToken: "oauth:token", Channels: []string{"example"}})
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -1093,7 +1093,7 @@ func TestConnectDisconnectsSessionThatRegistersAfterClose(t *testing.T) {
 	session := &fakeIRCSession{onConnectGate: make(chan struct{})}
 	newSession = func(string, string, []string) chatSession { return session }
 
-	client, err := NewClient(Config{Username: "viewer", OAuthToken: "oauth:token", Channels: []string{"example"}})
+	client, err := NewClient(Config{ReservePermit: func(context.Context, string, string) error { return nil }, Username: "viewer", OAuthToken: "oauth:token", Channels: []string{"example"}})
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -1149,7 +1149,7 @@ func TestSendDropsPastedCTCPFromPlainMessage(t *testing.T) {
 	session := &fakeIRCSession{}
 	newSession = func(string, string, []string) chatSession { return session }
 
-	client, err := NewClient(Config{Username: "viewer", OAuthToken: "oauth:token", Channels: []string{"example"}})
+	client, err := NewClient(Config{ReservePermit: func(context.Context, string, string) error { return nil }, Username: "viewer", OAuthToken: "oauth:token", Channels: []string{"example"}})
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -1179,7 +1179,7 @@ func TestSendTruncatesActionKeepingClosingDelimiter(t *testing.T) {
 	session := &fakeIRCSession{}
 	newSession = func(string, string, []string) chatSession { return session }
 
-	client, err := NewClient(Config{Username: "viewer", OAuthToken: "oauth:token", Channels: []string{"example"}})
+	client, err := NewClient(Config{ReservePermit: func(context.Context, string, string) error { return nil }, Username: "viewer", OAuthToken: "oauth:token", Channels: []string{"example"}})
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
 	}
@@ -1202,5 +1202,57 @@ func TestSendTruncatesActionKeepingClosingDelimiter(t *testing.T) {
 	if runes[0] != ctcpDelimiter || runes[len(runes)-1] != ctcpDelimiter {
 		t.Fatalf("truncated action lost its CTCP wrapper: %q ... %q",
 			string(runes[0]), string(runes[len(runes)-1]))
+	}
+}
+
+func TestOAuthRefreshDelegatesToSharedAccountOwner(t *testing.T) {
+	called := false
+	at := time.Now()
+	config := oauthRefreshConfig{RefreshOAuth: func(ctx context.Context, observed time.Time) (OAuthRefresh, error) {
+		called = true
+		if !observed.Equal(at) {
+			t.Error("refresh timestamp changed")
+		}
+		return OAuthRefresh{AccessToken: auth.NewSecret("oauth:shared-token")}, nil
+	}}
+	refreshed, err := config.refresh(context.Background(), at)
+	if err != nil || !called || refreshed.AccessToken.Reveal() != "oauth:shared-token" {
+		t.Fatalf("delegation called=%v err=%v", called, err)
+	}
+}
+
+func TestIRCPeriodicAuthFailureClosesSession(t *testing.T) {
+	original := newSession
+	t.Cleanup(func() { newSession = original })
+	session := &fakeIRCSession{}
+	session.holdOpen()
+	newSession = func(string, string, []string) chatSession { return session }
+	client, err := NewClient(Config{Username: "reader", OAuthToken: "oauth:secret", ValidationInterval: time.Millisecond, ValidateOAuth: func(context.Context) error { return errors.New("revoked token") }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	events, err := client.Connect(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	failed := false
+	for {
+		select {
+		case event, open := <-events:
+			if !open {
+				if !failed {
+					t.Fatal("auth failure was not reported")
+				}
+				return
+			}
+			if event.Kind == twitch.EventError {
+				failed = true
+			}
+		case <-ctx.Done():
+			t.Fatal("auth maintenance did not close session")
+		}
 	}
 }

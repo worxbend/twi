@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/worxbend/twi/internal/config"
 )
 
@@ -19,13 +19,13 @@ func keymapModel(t *testing.T) shellModel {
 	return updated.(shellModel)
 }
 
-func press(model shellModel, msg tea.KeyMsg) (shellModel, tea.Cmd) {
+func press(model shellModel, msg tea.KeyPressMsg) (shellModel, tea.Cmd) {
 	updated, cmd := model.Update(msg)
 	return updated.(shellModel), cmd
 }
 
 func pressRune(model shellModel, r rune) (shellModel, tea.Cmd) {
-	return press(model, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	return press(model, tea.KeyPressMsg{Text: string([]rune{r})})
 }
 
 func TestInsertKeysFocusComposerAndEscReturnsToChat(t *testing.T) {
@@ -45,7 +45,7 @@ func TestInsertKeysFocusComposerAndEscReturnsToChat(t *testing.T) {
 			t.Fatalf("composer text = %q, want %q", got, want)
 		}
 
-		model, _ = press(model, tea.KeyMsg{Type: tea.KeyEsc})
+		model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyEsc})
 		if model.focus != focusChat {
 			t.Fatalf("focus after esc = %v, want chat", model.focus)
 		}
@@ -92,7 +92,7 @@ func TestSpaceLeaderTogglesSidebarOpensPickerAndClosesChannel(t *testing.T) {
 	}
 
 	// space is only a leader outside the composer.
-	model, _ = press(model, tea.KeyMsg{Type: tea.KeySpace})
+	model, _ = press(model, tea.KeyPressMsg{Code: tea.KeySpace})
 	if !model.leaderPending {
 		t.Fatal("leaderPending after space = false, want true")
 	}
@@ -104,20 +104,20 @@ func TestSpaceLeaderTogglesSidebarOpensPickerAndClosesChannel(t *testing.T) {
 		t.Fatal("sidebar still visible after space+e, want hidden")
 	}
 
-	model, _ = press(model, tea.KeyMsg{Type: tea.KeySpace})
+	model, _ = press(model, tea.KeyPressMsg{Code: tea.KeySpace})
 	model, _ = pressRune(model, 'e')
 	if model.layout().sidebarWidth <= 0 {
 		t.Fatal("sidebar hidden after a second space+e, want visible")
 	}
 
-	model, _ = press(model, tea.KeyMsg{Type: tea.KeySpace})
+	model, _ = press(model, tea.KeyPressMsg{Code: tea.KeySpace})
 	model, _ = pressRune(model, 'c')
 	if !model.channelPicker.open {
 		t.Fatal("channelPicker.open after space+c = false, want true")
 	}
-	model, _ = press(model, tea.KeyMsg{Type: tea.KeyEsc})
+	model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyEsc})
 
-	model, _ = press(model, tea.KeyMsg{Type: tea.KeySpace})
+	model, _ = press(model, tea.KeyPressMsg{Code: tea.KeySpace})
 	model, _ = pressRune(model, 'x')
 	if got := model.channels.channelNames(); len(got) != 1 || got[0] != "beta" {
 		t.Fatalf("channels after space+x = %#v, want [beta]", got)
@@ -127,7 +127,7 @@ func TestSpaceLeaderTogglesSidebarOpensPickerAndClosesChannel(t *testing.T) {
 func TestSpaceIsLiteralInComposerAndUnboundLeaderKeysCancel(t *testing.T) {
 	model := keymapModel(t)
 	model.focus = focusComposer
-	model, _ = press(model, tea.KeyMsg{Type: tea.KeySpace})
+	model, _ = press(model, tea.KeyPressMsg{Code: tea.KeySpace})
 	if model.leaderPending {
 		t.Fatal("space armed the leader from the composer, want a literal space")
 	}
@@ -136,7 +136,7 @@ func TestSpaceIsLiteralInComposerAndUnboundLeaderKeysCancel(t *testing.T) {
 	}
 
 	model.focus = focusChat
-	model, _ = press(model, tea.KeyMsg{Type: tea.KeySpace})
+	model, _ = press(model, tea.KeyPressMsg{Code: tea.KeySpace})
 	model, _ = pressRune(model, 'z')
 	if model.leaderPending {
 		t.Fatal("leaderPending after an unbound chord key = true, want false")
@@ -161,8 +161,8 @@ func TestSidebarFocusNavigatesSwitchesAndCloses(t *testing.T) {
 	}
 
 	// The close affordance only appears on the focused, highlighted row.
-	if !strings.Contains(model.View(), sidebarCloseAffordance) {
-		t.Fatalf("focused sidebar missing the close affordance:\n%s", model.View())
+	if !strings.Contains(model.View().Content, sidebarCloseAffordance) {
+		t.Fatalf("focused sidebar missing the close affordance:\n%s", model.View().Content)
 	}
 
 	model, _ = pressRune(model, 'x')
@@ -180,14 +180,14 @@ func TestSidebarFocusNavigatesSwitchesAndCloses(t *testing.T) {
 func TestTabCycleIncludesTheSidebarOnlyWhenVisible(t *testing.T) {
 	model := keymapModel(t)
 	model.focus = focusComposer
-	model, _ = press(model, tea.KeyMsg{Type: tea.KeyTab})
+	model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyTab})
 	if model.focus != focusSidebar {
 		t.Fatalf("focus after tab from composer = %v, want the visible sidebar", model.focus)
 	}
 
 	model.panes.sidebarVisibility = sidebarHidden
 	model.focus = focusComposer
-	model, _ = press(model, tea.KeyMsg{Type: tea.KeyTab})
+	model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyTab})
 	if model.focus != focusChat {
 		t.Fatalf("focus after tab with a hidden sidebar = %v, want chat", model.focus)
 	}

@@ -6,9 +6,11 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/worxbend/twi/internal/twitch"
 )
+
+const maxPendingComposerSends = 100
 
 // This file holds the composer's send queue. Sending a chat message is not
 // instant: the request goes out to Twitch and the answer comes back later as
@@ -55,9 +57,15 @@ func (m *shellModel) queueComposerSend() (shellModel, tea.Cmd) {
 		}
 		return *m, nil
 	}
-	if m.services.client == nil {
+	if _, canSend := m.services.client.(ChatSender); !canSend {
 		state.sendState = composerSendFailed
 		state.sendFeedback = "send unavailable for this chat source"
+		return *m, nil
+	}
+
+	if len(state.sendQueue) >= maxPendingComposerSends {
+		state.sendState = composerSendFailed
+		state.sendFeedback = "send queue full; draft retained"
 		return *m, nil
 	}
 
@@ -100,7 +108,12 @@ func (m *shellModel) startNextComposerSend(state *channelState) tea.Cmd {
 		state.sendFeedback = "sending action to #" + next.Channel
 	}
 	m.debugSendStart(next)
-	client := m.services.client
+	client, canSend := m.services.client.(ChatSender)
+	if !canSend {
+		return func() tea.Msg {
+			return composerSendCompletedMsg{id: next.ID, err: fmt.Errorf("send unavailable for this chat source")}
+		}
+	}
 	req := SendRequest{
 		Channel:          next.Channel,
 		Text:             next.Text,
@@ -166,7 +179,19 @@ func (m *shellModel) appendLocalEcho(sent queuedComposerSend, result SendResult)
 		return
 	}
 	message := m.localEchoMessage(sent, result, state.name)
-	if message.ID != "" {
+	if strings.TrimSpace(result.MessageID) != "" {
+		// EventSub can observe the accepted message before the HTTP result arrives.
+		// Keep its richer observed copy instead of adding a second optimistic row.
+		for _, observed := range state.messages {
+			if observed.ID == message.ID {
+				return
+			}
+		}
+		for _, observed := range state.activeMessages {
+			if observed.ID == message.ID {
+				return
+			}
+		}
 		if state.localEchoes == nil {
 			state.localEchoes = make(map[string]struct{})
 		}
@@ -177,6 +202,9 @@ func (m *shellModel) appendLocalEcho(sent queuedComposerSend, result SendResult)
 
 func (m shellModel) localEchoMessage(sent queuedComposerSend, result SendResult, channel string) twitch.ChatMessage {
 	at := result.AcceptedAt
+	if at.IsZero() {
+		at = result.QueuedAt
+	}
 	if at.IsZero() && m.channels != nil && m.channels.clock != nil {
 		at = m.channels.clock.Now()
 	}

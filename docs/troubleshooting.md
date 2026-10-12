@@ -91,3 +91,10 @@ On Unix, the credential directory must be exactly `0700` and the credential file
 ## Mock Mode Works But Live Mode Fails
 
 Mock mode does not use Twitch credentials, network clients, or terminal image support. If mock mode works but live mode fails, check credentials, scopes, Twitch reachability, and local network access with `twi doctor`.
+
+## Automation and durable history
+
+Producer, consumer, foreground recorder, and local history commands are implemented
+through UI-independent services and explicit public DTOs. See [Automation](automation.md) for
+capabilities, examples, coverage/cursor guarantees, retention, and validation limits.
+Live Twitch observation parity requires controlled credentialed validation.

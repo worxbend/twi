@@ -7,14 +7,23 @@ import (
 	"github.com/worxbend/twi/internal/twitch"
 )
 
-// ChatClient is the app-facing boundary for chat input, connection state, and
-// outbound sends. Implementations must emit normalized Twitch messages, not
-// transport-specific IRC or API payloads.
-type ChatClient interface {
+// ChatSource is the app-facing read capability. Local history attachments can
+// display chat without implementing or claiming any outbound send capability.
+type ChatSource interface {
 	Messages() <-chan twitch.ChatMessage
 	ConnectionStates() <-chan ConnectionState
-	Send(context.Context, SendRequest) (SendResult, error)
 	Close() error
+}
+
+// ChatSender is an optional capability for acknowledged outbound requests.
+type ChatSender interface {
+	Send(context.Context, SendRequest) (SendResult, error)
+}
+
+// ChatClient combines the read and send capabilities for live transports.
+type ChatClient interface {
+	ChatSource
+	ChatSender
 }
 
 // MembershipSource is an optional ChatClient capability: a transport that can
@@ -97,6 +106,8 @@ type SendRequest struct {
 }
 
 type SendResult struct {
+	// QueuedAt marks an unconfirmed IRC enqueue, never server acceptance.
+	QueuedAt    time.Time
 	MessageID   string
 	AcceptedAt  time.Time
 	Detail      string

@@ -6,14 +6,13 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/twitch"
 )
 
 func chatModelWithMessages(t *testing.T, count int, mutate func(*config.Config)) shellModel {
 	t.Helper()
-	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	cfg.Features.ScrollbackLimit = 0
@@ -197,6 +196,15 @@ func TestAppendStaticMessageTrimsTheActiveChannel(t *testing.T) {
 	for i, want := range []string{"m9", "m10", "m11"} {
 		if got[i].ID != want {
 			t.Errorf("message %d = %q, want %q: trimming must keep the newest", i, got[i].ID, want)
+		}
+	}
+}
+func TestNonpositiveScrollbackStaysBounded(t *testing.T) {
+	for _, limit := range []int{0, -1} {
+		state := &channelState{messages: make([]twitch.ChatMessage, config.DefaultScrollbackLimit+500)}
+		state.trimScrollback(limit)
+		if len(state.messages) != config.DefaultScrollbackLimit {
+			t.Fatal(limit, len(state.messages))
 		}
 	}
 }

@@ -7,7 +7,9 @@ type Scope string
 
 const (
 	// ScopeChatRead allows Twitch IRC clients to receive chat messages.
-	ScopeChatRead Scope = "chat:read"
+	ScopeChatRead      Scope = "chat:read"
+	ScopeUserWriteChat Scope = "user:write:chat"
+	ScopeUserReadChat  Scope = "user:read:chat"
 	// ScopeChatEdit allows Twitch IRC clients to send chat messages.
 	ScopeChatEdit Scope = "chat:edit"
 	// ScopeChannelManageBroadcast allows reading and updating the
@@ -129,4 +131,35 @@ func cloneScopes(scopes []Scope) []Scope {
 		return nil
 	}
 	return append([]Scope(nil), scopes...)
+}
+
+// CapabilityScopes maps an explicit login capability to its minimal scope set.
+func CapabilityScopes(capability string) ([]Scope, bool) {
+	switch capability {
+	case "", "tui":
+		return LoginScopes(), true
+	case "read", "chat-read":
+		return []Scope{ScopeChatRead}, true
+	case "send", "chat-send":
+		return []Scope{ScopeUserWriteChat}, true
+	case "bot-send":
+		return []Scope{ScopeUserWriteChat, Scope("user:bot")}, true
+	case "channel-bot":
+		return []Scope{Scope("channel:bot")}, true
+	case "moderation-read":
+		return append([]Scope{ScopeUserReadChat, Scope("user:read:moderated_channels")}, ModerationScopes()...), true
+	case "validation":
+		return append([]Scope{ScopeChatRead, ScopeChatEdit, ScopeUserReadChat, ScopeUserWriteChat, Scope("moderator:manage:chat_messages"), Scope("user:read:moderated_channels"), Scope("user:bot"), Scope("channel:bot")}, ModerationScopes()...), true
+	case "eventsub", "eventsub-read":
+		return []Scope{ScopeUserReadChat}, true
+	default:
+		return nil, false
+	}
+}
+
+// ModerationScopes returns the documented minimal grants for channel.moderate v2.
+func ModerationScopes() []Scope {
+	return []Scope{
+		"moderator:read:blocked_terms", "moderator:read:chat_settings", "moderator:read:unban_requests", "moderator:read:banned_users", "moderator:read:chat_messages", "moderator:read:warnings", "moderator:read:moderators", "moderator:read:vips",
+	}
 }

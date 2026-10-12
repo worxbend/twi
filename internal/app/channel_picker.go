@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/worxbend/twi/internal/twitch"
 )
 
@@ -114,12 +114,12 @@ func (m *shellModel) applyFollowedChannels(msg followedChannelsResolvedMsg) {
 	m.clampChannelPickerSelection()
 }
 
-func (m shellModel) handleChannelPickerKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyEsc:
+func (m shellModel) handleChannelPickerKey(msg tea.KeyPressMsg) (shellModel, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
 		m.channelPicker = channelPickerState{}
 		return m, nil
-	case tea.KeyEnter:
+	case "enter":
 		return m.commitChannelPickerSelection()
 	}
 	// The rest are the keys every searchable overlay shares. Space is one of

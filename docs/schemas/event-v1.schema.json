@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "title": "twi message/event schema v1",
+  "required": [
+    "schema_version",
+    "type",
+    "id",
+    "channel",
+    "author",
+    "text",
+    "event_at",
+    "received_at",
+    "time_source",
+    "transport",
+    "source",
+    "cursor",
+    "reply",
+    "deleted"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "type": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "channel": {
+      "type": "object",
+      "required": [
+        "id",
+        "login"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "login": {
+          "type": "string"
+        }
+      }
+    },
+    "author": {
+      "type": "object",
+      "required": [
+        "id",
+        "login",
+        "display_name"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "login": {
+          "type": "string"
+        },
+        "display_name": {
+          "type": "string"
+        }
+      }
+    },
+    "text": {
+      "type": "string"
+    },
+    "event_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "received_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "time_source": {
+      "type": "string"
+    },
+    "transport": {
+      "enum": [
+        "irc",
+        "eventsub"
+      ]
+    },
+    "source": {
+      "enum": [
+        "live",
+        "history"
+      ]
+    },
+    "cursor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reply": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "deleted": {
+      "type": "boolean"
+    },
+    "message_kind": {
+      "type": "string"
+    },
+    "ban_duration_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "timeout_expires_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "action": {
+      "type": "string"
+    },
+    "moderator": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "system_text": {
+      "type": "string"
+    },
+    "notice_parameters": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "author_color": {
+      "type": "string"
+    },
+    "badges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "set_id",
+          "id"
+        ],
+        "properties": {
+          "set_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "info": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "bits": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "first_message": {
+      "type": "boolean"
+    },
+    "platform_message_type": {
+      "type": "string"
+    },
+    "moderation_parameters": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "source_badges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "set_id",
+          "id"
+        ],
+        "properties": {
+          "set_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "info": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

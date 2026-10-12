@@ -3,11 +3,12 @@ base: core24
 grade: stable
 confinement: classic
 adopt-info: twi
-summary: Terminal Twitch chat client
+summary: Terminal Twitch chat and automation client
 description: |
-  twi is a terminal Twitch IRC chat client built with Bubble Tea. It supports
+  twi is a terminal Twitch chat and automation client built with Bubble Tea v2. It supports
   live multi-channel chat, 57 built-in themes plus custom hex palettes, emote
-  autocomplete, and Twitch OAuth login.
+  autocomplete, Twitch OAuth login, acknowledged chat production, live reading,
+  and explicitly enabled local SQLite recording and history search.
 
   Run `twi chat --mock` for a credential-free demo, or `twi setup` for a
   guided path to live chat.
@@ -38,16 +39,24 @@ parts:
   twi:
     plugin: go
     source: .
-    # core24's golang-go apt package predates go.mod's `toolchain go1.26.4`;
+    # core24's golang-go apt package predates go.mod's `toolchain go1.27.2`;
     # with GOTOOLCHAIN=auto that mismatch makes `go version` print a
-    # "downloading go1.26.4" message instead of a parseable version string,
+    # "downloading go1.27.2" message instead of a parseable version string,
     # which fails snapcraft's go-plugin environment check. Source Go from the
-    # snap instead, tracking the matching minor release.
+    # snap instead. As of 2026-10-11, 1.27/stable still carries Go 1.27.1;
+    # candidate carries the official stable Go 1.27.2 release. Return to the
+    # stable track once it includes the pinned toolchain.
     build-snaps:
-      - go/1.26/stable
+      - go/1.27/candidate
     build-environment:
       - CGO_ENABLED: "0"
       - GOTOOLCHAIN: auto
+    override-build: |
+      craftctl default
+      expected=$(awk '$1 == "toolchain" {print $2}' go.mod)
+      actual=$(go version | awk '{print $3}')
+      test "$actual" = "$expected"
+      CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X github.com/worxbend/twi/internal/cli.buildVersion=$(craftctl get version)" -o "$CRAFT_PART_INSTALL/bin/twi" ./cmd/twi
     override-pull: |
       craftctl default
-      craftctl set version="$(git -C "$CRAFT_PART_SRC" describe --tags --always --dirty 2>/dev/null || echo 0.0.0-unknown)"
+      craftctl set version="${TWI_BUILD_VERSION:-$(git -C "$CRAFT_PART_SRC" describe --tags --always --dirty 2>/dev/null || echo 0.0.0-unknown)}"

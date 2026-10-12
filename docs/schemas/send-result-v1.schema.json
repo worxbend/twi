@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "title": "twi send receipt schema v1",
+  "required": [
+    "schema_version",
+    "type",
+    "input_index",
+    "channel",
+    "status",
+    "message_id",
+    "observed_at",
+    "drop_reason"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "type": {
+      "const": "send_result"
+    },
+    "input_index": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "client_id": {
+      "type": "string"
+    },
+    "channel": {
+      "type": "object",
+      "required": [
+        "id",
+        "login"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "login": {
+          "type": "string"
+        }
+      }
+    },
+    "status": {
+      "enum": [
+        "sent",
+        "rejected",
+        "unknown",
+        "invalid",
+        "validated",
+        "unconfirmed"
+      ]
+    },
+    "message_id": {
+      "type": "string"
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "drop_reason": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "transport": {
+      "enum": [
+        "helix",
+        "irc"
+      ]
+    },
+    "authorization": {
+      "enum": [
+        "user",
+        "app"
+      ]
+    },
+    "for_source_only": {
+      "type": "boolean"
+    }
+  }
+}

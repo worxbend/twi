@@ -25,6 +25,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
+
 	dir, err := os.MkdirTemp("", "twi-cli-test-config-")
 	if err != nil {
 		panic(err)
@@ -48,9 +49,11 @@ func TestMain(m *testing.M) {
 }
 
 func TestHelp(t *testing.T) {
+	r := newRunner()
+
 	var stdout, stderr bytes.Buffer
 
-	code := Run([]string{"--help"}, &stdout, &stderr)
+	code := r.Run([]string{"--help"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0", code)
@@ -66,13 +69,15 @@ func TestHelp(t *testing.T) {
 }
 
 func TestChatDebugLogFlagWritesRedactedMockLog(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:debug-access-secret")
 	t.Setenv("TWI_TWITCH_REFRESH_TOKEN", "debug-refresh-secret")
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "debug-client-secret")
 	logPath := filepath.Join(t.TempDir(), "debug.log")
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{
+	code := r.Run([]string{
 		"chat",
 		"--mock",
 		"--channel", "example",
@@ -97,11 +102,13 @@ func TestChatDebugLogFlagWritesRedactedMockLog(t *testing.T) {
 }
 
 func TestDebugLogFlagCanDisableEnvLogging(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_DEBUG_LOG", "true")
 	logPath := filepath.Join(t.TempDir(), "debug.log")
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{
+	code := r.Run([]string{
 		"chat",
 		"--mock",
 		"--channel", "example",
@@ -118,13 +125,15 @@ func TestDebugLogFlagCanDisableEnvLogging(t *testing.T) {
 }
 
 func TestDebugLogRejectsExistingGroupReadableFile(t *testing.T) {
+	r := newRunner()
+
 	logPath := filepath.Join(t.TempDir(), "debug.log")
 	if err := os.WriteFile(logPath, []byte("existing\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{
+	code := r.Run([]string{
 		"chat",
 		"--mock",
 		"--channel", "example",
@@ -141,9 +150,11 @@ func TestDebugLogRejectsExistingGroupReadableFile(t *testing.T) {
 }
 
 func TestSetupHelp(t *testing.T) {
+	r := newRunner()
+
 	var stdout, stderr bytes.Buffer
 
-	code := Run([]string{"setup", "--help"}, &stdout, &stderr)
+	code := r.Run([]string{"setup", "--help"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -159,6 +170,8 @@ func TestSetupHelp(t *testing.T) {
 }
 
 func TestSetupNonInteractiveWritesConfigAndRunsLoginDryRunWithoutSecrets(t *testing.T) {
+	r := newRunner()
+
 	clearTwitchCredentialEnv(t)
 	clearTWIEnv(t)
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
@@ -167,7 +180,7 @@ func TestSetupNonInteractiveWritesConfigAndRunsLoginDryRunWithoutSecrets(t *test
 	path := filepath.Join(t.TempDir(), "config.toml?state=setup-path-secret")
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{
+	code := r.Run([]string{
 		"setup",
 		"--config", path,
 		"--non-interactive",
@@ -209,11 +222,13 @@ func TestSetupNonInteractiveWritesConfigAndRunsLoginDryRunWithoutSecrets(t *test
 }
 
 func TestSetupRejectsUnsupportedAnimationMode(t *testing.T) {
+	r := newRunner()
+
 	clearTwitchCredentialEnv(t)
 	path := filepath.Join(t.TempDir(), "config.toml")
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{
+	code := r.Run([]string{
 		"setup",
 		"--config", path,
 		"--non-interactive",
@@ -234,6 +249,8 @@ func TestSetupRejectsUnsupportedAnimationMode(t *testing.T) {
 }
 
 func TestSetupNonInteractiveRejectsUnsupportedExistingMode(t *testing.T) {
+	r := newRunner()
+
 	clearTwitchCredentialEnv(t)
 	clearTWIEnv(t)
 	path := filepath.Join(t.TempDir(), "config.toml")
@@ -246,7 +263,7 @@ func TestSetupNonInteractiveRejectsUnsupportedExistingMode(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{
+	code := r.Run([]string{
 		"setup",
 		"--config", path,
 		"--non-interactive",
@@ -269,14 +286,16 @@ func TestSetupNonInteractiveRejectsUnsupportedExistingMode(t *testing.T) {
 }
 
 func TestSetupWizardPromptsAndRunsFakeLoginHandoff(t *testing.T) {
+	r := newRunner()
+
 	clearTwitchCredentialEnv(t)
 	clearTWIEnv(t)
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
 	path := filepath.Join(t.TempDir(), "config.toml")
 
-	resetLoginTestHooks(t)
-	oldSetupInput := setupInput
-	setupInput = strings.NewReader(strings.Join([]string{
+	r.resetLoginTestHooks(t)
+	oldSetupInput := r.setupInput
+	r.setupInput = strings.NewReader(strings.Join([]string{
 		"viewer",
 		"client-id",
 		"#one, two",
@@ -286,11 +305,11 @@ func TestSetupWizardPromptsAndRunsFakeLoginHandoff(t *testing.T) {
 		"login",
 	}, "\n") + "\n")
 	t.Cleanup(func() {
-		setupInput = oldSetupInput
+		r.setupInput = oldSetupInput
 	})
 
 	credentialStore := storage.NewMemoryCredentialStore()
-	newCredentialStore = func() (storage.CredentialStore, error) {
+	r.newCredentialStore = func() (storage.CredentialStore, error) {
 		return credentialStore, nil
 	}
 	fakeFlow := auth.NewFakeLoginFlow()
@@ -309,21 +328,21 @@ func TestSetupWizardPromptsAndRunsFakeLoginHandoff(t *testing.T) {
 		},
 		Scopes: auth.RequiredChatScopes(),
 	}, nil)
-	newLoginFlow = func() auth.LoginFlow {
+	r.newLoginFlow = func() auth.LoginFlow {
 		return fakeFlow
 	}
-	newLoginCallbackWaiter = func(string) (loginCallbackWaiter, error) {
+	r.newLoginCallbackWaiter = func(string) (loginCallbackWaiter, error) {
 		return &fakeLoginCallbackWaiter{callback: auth.LoginCallback{
 			Code:  auth.NewSecret("callback-code"),
 			State: auth.NewSecret("state-secret"),
 		}}, nil
 	}
-	openLoginBrowser = func(context.Context, string) error {
+	r.openLoginBrowser = func(context.Context, string) error {
 		return nil
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"setup", "--config", path}, &stdout, &stderr)
+	code := r.Run([]string{"setup", "--config", path}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q stdout=%q", code, stderr.String(), stdout.String())
@@ -359,9 +378,11 @@ func TestSetupWizardPromptsAndRunsFakeLoginHandoff(t *testing.T) {
 }
 
 func TestLoginHelp(t *testing.T) {
+	r := newRunner()
+
 	var stdout, stderr bytes.Buffer
 
-	code := Run([]string{"login", "--help"}, &stdout, &stderr)
+	code := r.Run([]string{"login", "--help"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -377,13 +398,15 @@ func TestLoginHelp(t *testing.T) {
 }
 
 func TestLoginDryRunExplainsFlowAndRedactsSecrets(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_TWITCH_CLIENT_ID", "client-id")
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:access-secret")
 	t.Setenv("TWI_TWITCH_REFRESH_TOKEN", "refresh-secret")
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{
+	code := r.Run([]string{
 		"login",
 		"--config", t.TempDir() + "/missing.toml",
 		"--redirect-uri", "http://127.0.0.1:17643/oauth/twitch/callback?state=state-secret&client_secret=client-secret&code=callback-code",
@@ -411,6 +434,8 @@ func TestLoginDryRunExplainsFlowAndRedactsSecrets(t *testing.T) {
 }
 
 func TestLoginUsesConfiguredRedirectURLWhenFlagNotExplicit(t *testing.T) {
+	r := newRunner()
+
 	clearTwitchCredentialEnv(t)
 	clearTWIEnv(t)
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
@@ -419,7 +444,7 @@ func TestLoginUsesConfiguredRedirectURLWhenFlagNotExplicit(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"login", "--config", cfgPath, "--dry-run"}, &stdout, &stderr)
+	code := r.Run([]string{"login", "--config", cfgPath, "--dry-run"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
 	}
@@ -429,6 +454,8 @@ func TestLoginUsesConfiguredRedirectURLWhenFlagNotExplicit(t *testing.T) {
 }
 
 func TestLoginExplicitRedirectURIFlagOverridesConfig(t *testing.T) {
+	r := newRunner()
+
 	clearTwitchCredentialEnv(t)
 	clearTWIEnv(t)
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
@@ -437,7 +464,7 @@ func TestLoginExplicitRedirectURIFlagOverridesConfig(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{
+	code := r.Run([]string{
 		"login", "--config", cfgPath, "--dry-run",
 		"--redirect-uri", "http://127.0.0.1:1234/flag/callback",
 	}, &stdout, &stderr)
@@ -450,12 +477,14 @@ func TestLoginExplicitRedirectURIFlagOverridesConfig(t *testing.T) {
 }
 
 func TestLoginWriteDefaultConfigCreatesFileOnlyWhenMissing(t *testing.T) {
+	r := newRunner()
+
 	clearTwitchCredentialEnv(t)
 	clearTWIEnv(t)
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"login", "--config", cfgPath, "--dry-run", "--write-default-config"}, &stdout, &stderr)
+	code := r.Run([]string{"login", "--config", cfgPath, "--dry-run", "--write-default-config"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
 	}
@@ -468,7 +497,7 @@ func TestLoginWriteDefaultConfigCreatesFileOnlyWhenMissing(t *testing.T) {
 	// The exit code is deliberately ignored: --write-default-config writes the
 	// file and reports it, but login itself still exits non-zero without a
 	// client ID/secret. This case is about the file, not the exit status.
-	Run([]string{"login", "--config", cfgPath, "--write-default-config"}, &stdout, &stderr)
+	r.Run([]string{"login", "--config", cfgPath, "--write-default-config"}, &stdout, &stderr)
 	if !strings.Contains(stdout.String(), "Default config written to") {
 		t.Fatalf("stdout missing write confirmation: %q", stdout.String())
 	}
@@ -485,7 +514,7 @@ func TestLoginWriteDefaultConfigCreatesFileOnlyWhenMissing(t *testing.T) {
 	if err := os.WriteFile(cfgPath, append(data, []byte("# user edit\n")...), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	Run([]string{"login", "--config", cfgPath, "--write-default-config"}, &stdout, &stderr)
+	r.Run([]string{"login", "--config", cfgPath, "--write-default-config"}, &stdout, &stderr)
 	if !strings.Contains(stdout.String(), "already exists") {
 		t.Fatalf("stdout missing already-exists message: %q", stdout.String())
 	}
@@ -499,12 +528,14 @@ func TestLoginWriteDefaultConfigCreatesFileOnlyWhenMissing(t *testing.T) {
 }
 
 func TestLoginDryRunIgnoresMalformedStoredCredentials(t *testing.T) {
+	r := newRunner()
+
 	clearTwitchCredentialEnv(t)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	writeRawStoredCredentialFile(t, `{"version":1,"twitch":{"access_token":"oauth:stored-secret","expires_at":"oauth:bad-time"}}`)
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"login", "--config", t.TempDir() + "/missing.toml", "--dry-run"}, &stdout, &stderr)
+	code := r.Run([]string{"login", "--config", t.TempDir() + "/missing.toml", "--dry-run"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -516,12 +547,14 @@ func TestLoginDryRunIgnoresMalformedStoredCredentials(t *testing.T) {
 }
 
 func TestLoginCompletesFakeFlowSavesCredentialsWithoutPrintingTokens(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_TWITCH_CLIENT_ID", "client-id")
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
 
-	resetLoginTestHooks(t)
+	r.resetLoginTestHooks(t)
 	credentialStore := storage.NewMemoryCredentialStore()
-	newCredentialStore = func() (storage.CredentialStore, error) {
+	r.newCredentialStore = func() (storage.CredentialStore, error) {
 		return credentialStore, nil
 	}
 
@@ -541,7 +574,7 @@ func TestLoginCompletesFakeFlowSavesCredentialsWithoutPrintingTokens(t *testing.
 		},
 		Scopes: auth.RequiredChatScopes(),
 	}, nil)
-	newLoginFlow = func() auth.LoginFlow {
+	r.newLoginFlow = func() auth.LoginFlow {
 		return fakeFlow
 	}
 
@@ -549,20 +582,20 @@ func TestLoginCompletesFakeFlowSavesCredentialsWithoutPrintingTokens(t *testing.
 		Code:  auth.NewSecret("callback-code"),
 		State: auth.NewSecret("state-secret"),
 	}}
-	newLoginCallbackWaiter = func(redirectURI string) (loginCallbackWaiter, error) {
+	r.newLoginCallbackWaiter = func(redirectURI string) (loginCallbackWaiter, error) {
 		if redirectURI != defaultLoginRedirectURI {
 			t.Fatalf("redirect URI = %q, want %q", redirectURI, defaultLoginRedirectURI)
 		}
 		return waiter, nil
 	}
 	var openedURL string
-	openLoginBrowser = func(_ context.Context, targetURL string) error {
+	r.openLoginBrowser = func(_ context.Context, targetURL string) error {
 		openedURL = targetURL
 		return nil
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"login", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+	code := r.Run([]string{"login", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -600,13 +633,15 @@ func TestLoginCompletesFakeFlowSavesCredentialsWithoutPrintingTokens(t *testing.
 }
 
 func TestLoginDebugLogRedactsOAuthFlowSecrets(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_TWITCH_CLIENT_ID", "client-id")
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
 	logPath := filepath.Join(t.TempDir(), "debug.log")
 
-	resetLoginTestHooks(t)
+	r.resetLoginTestHooks(t)
 	credentialStore := storage.NewMemoryCredentialStore()
-	newCredentialStore = func() (storage.CredentialStore, error) {
+	r.newCredentialStore = func() (storage.CredentialStore, error) {
 		return credentialStore, nil
 	}
 	fakeFlow := auth.NewFakeLoginFlow()
@@ -625,21 +660,21 @@ func TestLoginDebugLogRedactsOAuthFlowSecrets(t *testing.T) {
 		},
 		Scopes: auth.RequiredChatScopes(),
 	}, nil)
-	newLoginFlow = func() auth.LoginFlow {
+	r.newLoginFlow = func() auth.LoginFlow {
 		return fakeFlow
 	}
-	newLoginCallbackWaiter = func(string) (loginCallbackWaiter, error) {
+	r.newLoginCallbackWaiter = func(string) (loginCallbackWaiter, error) {
 		return &fakeLoginCallbackWaiter{callback: auth.LoginCallback{
 			Code:  auth.NewSecret("callback-code"),
 			State: auth.NewSecret("state-secret"),
 		}}, nil
 	}
-	openLoginBrowser = func(context.Context, string) error {
+	r.openLoginBrowser = func(context.Context, string) error {
 		return nil
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{
+	code := r.Run([]string{
 		"login",
 		"--config", t.TempDir() + "/missing.toml",
 		"--debug-log",
@@ -670,13 +705,15 @@ func TestLoginDebugLogRedactsOAuthFlowSecrets(t *testing.T) {
 }
 
 func TestLoginOverwritesMalformedStoredCredentialsWithoutPrintingTokens(t *testing.T) {
+	r := newRunner()
+
 	clearTwitchCredentialEnv(t)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("TWI_TWITCH_CLIENT_ID", "client-id")
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
 	writeRawStoredCredentialFile(t, `{"version":1,"twitch":{"access_token":"oauth:old-stored-secret","expires_at":"oauth:bad-time"}}`)
 
-	resetLoginTestHooks(t)
+	r.resetLoginTestHooks(t)
 	fakeFlow := auth.NewFakeLoginFlow()
 	fakeFlow.QueueBegin(auth.LoginChallenge{
 		AuthorizationURL: auth.NewSecret("https://auth.example/authorize?state=state-secret"),
@@ -692,21 +729,21 @@ func TestLoginOverwritesMalformedStoredCredentialsWithoutPrintingTokens(t *testi
 		},
 		Scopes: auth.RequiredChatScopes(),
 	}, nil)
-	newLoginFlow = func() auth.LoginFlow {
+	r.newLoginFlow = func() auth.LoginFlow {
 		return fakeFlow
 	}
-	newLoginCallbackWaiter = func(string) (loginCallbackWaiter, error) {
+	r.newLoginCallbackWaiter = func(string) (loginCallbackWaiter, error) {
 		return &fakeLoginCallbackWaiter{callback: auth.LoginCallback{
 			Code:  auth.NewSecret("callback-code"),
 			State: auth.NewSecret("state-secret"),
 		}}, nil
 	}
-	openLoginBrowser = func(context.Context, string) error {
+	r.openLoginBrowser = func(context.Context, string) error {
 		return nil
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"login", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+	code := r.Run([]string{"login", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -730,11 +767,13 @@ func TestLoginOverwritesMalformedStoredCredentialsWithoutPrintingTokens(t *testi
 }
 
 func TestLoginCredentialSaveFailureIsRedacted(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_TWITCH_CLIENT_ID", "client-id")
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
 
-	resetLoginTestHooks(t)
-	newCredentialStore = func() (storage.CredentialStore, error) {
+	r.resetLoginTestHooks(t)
+	r.newCredentialStore = func() (storage.CredentialStore, error) {
 		return saveFailCredentialStore{err: errors.New("cannot write oauth:access-secret refresh_token=refresh-secret client_secret=client-secret")}, nil
 	}
 
@@ -753,21 +792,21 @@ func TestLoginCredentialSaveFailureIsRedacted(t *testing.T) {
 		},
 		Scopes: auth.RequiredChatScopes(),
 	}, nil)
-	newLoginFlow = func() auth.LoginFlow {
+	r.newLoginFlow = func() auth.LoginFlow {
 		return fakeFlow
 	}
-	newLoginCallbackWaiter = func(string) (loginCallbackWaiter, error) {
+	r.newLoginCallbackWaiter = func(string) (loginCallbackWaiter, error) {
 		return &fakeLoginCallbackWaiter{callback: auth.LoginCallback{
 			Code:  auth.NewSecret("callback-code"),
 			State: auth.NewSecret("state-secret"),
 		}}, nil
 	}
-	openLoginBrowser = func(context.Context, string) error {
+	r.openLoginBrowser = func(context.Context, string) error {
 		return nil
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"login", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+	code := r.Run([]string{"login", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
 
 	if code != 1 {
 		t.Fatalf("Run returned %d, want 1; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
@@ -779,26 +818,28 @@ func TestLoginCredentialSaveFailureIsRedacted(t *testing.T) {
 }
 
 func TestLoginUnsupportedCredentialFileFallbackFailsBeforeBrowser(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_TWITCH_CLIENT_ID", "client-id")
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
 
-	resetLoginTestHooks(t)
-	newCredentialStore = func() (storage.CredentialStore, error) {
+	r.resetLoginTestHooks(t)
+	r.newCredentialStore = func() (storage.CredentialStore, error) {
 		return nil, fmt.Errorf("%w: credential-file fallback is disabled on non-Unix builds; use environment variables or a private flat config file; oauth:storage-secret state=state-secret client_secret=client-secret", storage.ErrUnsupportedCredentialFilePlatform)
 	}
 	flowStarted := false
-	newLoginFlow = func() auth.LoginFlow {
+	r.newLoginFlow = func() auth.LoginFlow {
 		flowStarted = true
 		return auth.NewFakeLoginFlow()
 	}
 	browserOpened := false
-	openLoginBrowser = func(context.Context, string) error {
+	r.openLoginBrowser = func(context.Context, string) error {
 		browserOpened = true
 		return nil
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"login", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+	code := r.Run([]string{"login", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
 
 	if code != 1 {
 		t.Fatalf("Run returned %d, want 1; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
@@ -815,26 +856,28 @@ func TestLoginUnsupportedCredentialFileFallbackFailsBeforeBrowser(t *testing.T) 
 }
 
 func TestLoginCancellationIsClearAndRedacted(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_TWITCH_CLIENT_ID", "client-id")
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
 
-	resetLoginTestHooks(t)
+	r.resetLoginTestHooks(t)
 
 	fakeFlow := auth.NewFakeLoginFlow()
-	newLoginFlow = func() auth.LoginFlow {
+	r.newLoginFlow = func() auth.LoginFlow {
 		return fakeFlow
 	}
-	newLoginCallbackWaiter = func(string) (loginCallbackWaiter, error) {
+	r.newLoginCallbackWaiter = func(string) (loginCallbackWaiter, error) {
 		return &fakeLoginCallbackWaiter{}, nil
 	}
-	newLoginContext = func(time.Duration) (context.Context, context.CancelFunc) {
+	r.newLoginContext = func(time.Duration) (context.Context, context.CancelFunc) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		return ctx, func() {}
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"login", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+	code := r.Run([]string{"login", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
 
 	if code != 1 {
 		t.Fatalf("Run returned %d, want 1; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
@@ -846,11 +889,13 @@ func TestLoginCancellationIsClearAndRedacted(t *testing.T) {
 }
 
 func TestLoginUnsupportedCallbackFailsClearly(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_TWITCH_CLIENT_ID", "client-id")
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"login", "--config", t.TempDir() + "/missing.toml", "--redirect-uri", "https://example.com/callback"}, &stdout, &stderr)
+	code := r.Run([]string{"login", "--config", t.TempDir() + "/missing.toml", "--redirect-uri", "https://example.com/callback"}, &stdout, &stderr)
 
 	if code != 2 {
 		t.Fatalf("Run returned %d, want 2; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
@@ -864,10 +909,12 @@ func TestLoginUnsupportedCallbackFailsClearly(t *testing.T) {
 }
 
 func TestLoginBrowserFailureRedactsAuthorizationURLAndState(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_TWITCH_CLIENT_ID", "client-id")
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
 
-	resetLoginTestHooks(t)
+	r.resetLoginTestHooks(t)
 
 	fakeFlow := auth.NewFakeLoginFlow()
 	fakeFlow.QueueBegin(auth.LoginChallenge{
@@ -875,18 +922,18 @@ func TestLoginBrowserFailureRedactsAuthorizationURLAndState(t *testing.T) {
 		State:            auth.NewSecret("state-secret"),
 		Scopes:           auth.RequiredChatScopes(),
 	}, nil)
-	newLoginFlow = func() auth.LoginFlow {
+	r.newLoginFlow = func() auth.LoginFlow {
 		return fakeFlow
 	}
-	newLoginCallbackWaiter = func(string) (loginCallbackWaiter, error) {
+	r.newLoginCallbackWaiter = func(string) (loginCallbackWaiter, error) {
 		return &fakeLoginCallbackWaiter{}, nil
 	}
-	openLoginBrowser = func(context.Context, string) error {
+	r.openLoginBrowser = func(context.Context, string) error {
 		return errors.New("cannot open https://auth.example/authorize?state=state-secret&client_secret=client-secret")
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"login", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+	code := r.Run([]string{"login", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
 
 	if code != 1 {
 		t.Fatalf("Run returned %d, want 1; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
@@ -898,10 +945,12 @@ func TestLoginBrowserFailureRedactsAuthorizationURLAndState(t *testing.T) {
 }
 
 func TestLoginOAuthFailureIsRedacted(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_TWITCH_CLIENT_ID", "client-id")
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
 
-	resetLoginTestHooks(t)
+	r.resetLoginTestHooks(t)
 
 	fakeFlow := auth.NewFakeLoginFlow()
 	fakeFlow.QueueBegin(auth.LoginChallenge{
@@ -910,21 +959,21 @@ func TestLoginOAuthFailureIsRedacted(t *testing.T) {
 		Scopes:           auth.RequiredChatScopes(),
 	}, nil)
 	fakeFlow.QueueComplete(auth.LoginResult{}, errors.New("provider rejected authorization_code=callback-code state=state-secret access_token=oauth:access-secret refresh_token=refresh-secret client_secret=client-secret"))
-	newLoginFlow = func() auth.LoginFlow {
+	r.newLoginFlow = func() auth.LoginFlow {
 		return fakeFlow
 	}
-	newLoginCallbackWaiter = func(string) (loginCallbackWaiter, error) {
+	r.newLoginCallbackWaiter = func(string) (loginCallbackWaiter, error) {
 		return &fakeLoginCallbackWaiter{callback: auth.LoginCallback{
 			Code:  auth.NewSecret("callback-code"),
 			State: auth.NewSecret("state-secret"),
 		}}, nil
 	}
-	openLoginBrowser = func(context.Context, string) error {
+	r.openLoginBrowser = func(context.Context, string) error {
 		return nil
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"login", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+	code := r.Run([]string{"login", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
 
 	if code != 1 {
 		t.Fatalf("Run returned %d, want 1; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
@@ -999,13 +1048,15 @@ func TestLocalLoginCallbackWaiterReceivesCallbackAndHidesSecrets(t *testing.T) {
 }
 
 func TestOpenBrowserReportsImmediateExitFailure(t *testing.T) {
+	r := newRunner()
+
 	script := filepath.Join(t.TempDir(), "browser")
 	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("BROWSER", script)
 
-	err := openBrowser(context.Background(), "https://example.test/auth")
+	err := r.openBrowser(context.Background(), "https://example.test/auth")
 	if err == nil {
 		t.Fatal("openBrowser returned nil, want an error for a browser command that exits non-zero at once")
 	}
@@ -1015,21 +1066,25 @@ func TestOpenBrowserReportsImmediateExitFailure(t *testing.T) {
 }
 
 func TestOpenBrowserSucceedsWhenCommandExitsZero(t *testing.T) {
+	r := newRunner()
+
 	script := filepath.Join(t.TempDir(), "browser")
 	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("BROWSER", script)
 
-	if err := openBrowser(context.Background(), "https://example.test/auth"); err != nil {
+	if err := r.openBrowser(context.Background(), "https://example.test/auth"); err != nil {
 		t.Fatalf("openBrowser returned error: %v", err)
 	}
 }
 
 func TestMockChat(t *testing.T) {
+	r := newRunner()
+
 	var stdout, stderr bytes.Buffer
 
-	code := Run([]string{"chat", "--mock", "--channel", "example"}, &stdout, &stderr)
+	code := r.Run([]string{"chat", "--mock", "--channel", "example"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -1040,12 +1095,14 @@ func TestMockChat(t *testing.T) {
 }
 
 func TestMockChatIgnoresMalformedStoredCredentials(t *testing.T) {
+	r := newRunner()
+
 	clearTwitchCredentialEnv(t)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	writeRawStoredCredentialFile(t, `{"version":1,"twitch":{"access_token":"oauth:stored-secret","expires_at":"oauth:bad-time"}}`)
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"chat", "--mock", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
+	code := r.Run([]string{"chat", "--mock", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -1057,11 +1114,13 @@ func TestMockChatIgnoresMalformedStoredCredentials(t *testing.T) {
 }
 
 func TestLiveChatMissingCredentialsAreActionableAndRedacted(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_TWITCH_USERNAME", "")
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "")
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
+	code := r.Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
 
 	if code != 2 {
 		t.Fatalf("Run returned %d, want 2; stderr=%q", code, stderr.String())
@@ -1079,24 +1138,26 @@ func TestLiveChatMissingCredentialsAreActionableAndRedacted(t *testing.T) {
 }
 
 func TestLiveChatConfiguredStartsClient(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
-	installValidLiveTokenValidator(t, "viewer")
+	r.installValidLiveTokenValidator(t, "viewer")
 
-	oldNewLiveChatClient := newLiveChatClient
-	oldRunLiveChat := runLiveChat
+	oldNewLiveChatClient := r.newLiveChatClient
+	oldRunLiveChat := r.runLiveChat
 	defer func() {
-		newLiveChatClient = oldNewLiveChatClient
-		runLiveChat = oldRunLiveChat
+		r.newLiveChatClient = oldNewLiveChatClient
+		r.runLiveChat = oldRunLiveChat
 	}()
 
 	var gotChannels []string
 	fake := app.NewFakeChatClient(1)
-	newLiveChatClient = func(_ context.Context, cfg config.Config, _ *credentialHolder, _ debuglog.Logger, _ credentialLoadStatus) (app.ChatClient, error) {
+	r.newLiveChatClient = func(_ context.Context, cfg config.Config, _ *credentialHolder, _ debuglog.Logger, _ credentialLoadStatus, _ app.ChatRecorder) (app.ChatSource, error) {
 		gotChannels = append([]string(nil), cfg.DefaultChannels...)
 		return fake, nil
 	}
-	runLiveChat = func(stdout io.Writer, cfg config.Config, client app.ChatClient, opts app.ClientOptions) error {
+	r.runLiveChat = func(stdout io.Writer, cfg config.Config, client app.ChatSource, opts app.ClientOptions) error {
 		if client != fake {
 			t.Fatalf("runLiveChat client = %#v, want fake", client)
 		}
@@ -1105,7 +1166,7 @@ func TestLiveChatConfiguredStartsClient(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
+	code := r.Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -1122,6 +1183,8 @@ func TestLiveChatConfiguredStartsClient(t *testing.T) {
 }
 
 func TestLiveChatTokenValidationMissingScopeStopsBeforeClient(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
 
@@ -1133,22 +1196,22 @@ func TestLiveChatTokenValidationMissingScopeStopsBeforeClient(t *testing.T) {
 			MissingScopes: []twitch.TokenScope{twitch.ScopeChatEdit},
 		},
 	})
-	oldNewLiveTokenValidator := newLiveTokenValidator
-	oldNewLiveChatClient := newLiveChatClient
+	oldNewLiveTokenValidator := r.newLiveTokenValidator
+	oldNewLiveChatClient := r.newLiveChatClient
 	t.Cleanup(func() {
-		newLiveTokenValidator = oldNewLiveTokenValidator
-		newLiveChatClient = oldNewLiveChatClient
+		r.newLiveTokenValidator = oldNewLiveTokenValidator
+		r.newLiveChatClient = oldNewLiveChatClient
 	})
-	newLiveTokenValidator = func() twitch.TokenValidator {
+	r.newLiveTokenValidator = func() twitch.TokenValidator {
 		return fakeValidator
 	}
-	newLiveChatClient = func(context.Context, config.Config, *credentialHolder, debuglog.Logger, credentialLoadStatus) (app.ChatClient, error) {
+	r.newLiveChatClient = func(context.Context, config.Config, *credentialHolder, debuglog.Logger, credentialLoadStatus, app.ChatRecorder) (app.ChatSource, error) {
 		t.Fatal("newLiveChatClient called after definitive token validation failure")
 		return nil, nil
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
+	code := r.Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
 
 	if code != 2 {
 		t.Fatalf("Run returned %d, want 2; stderr=%q", code, stderr.String())
@@ -1165,6 +1228,8 @@ func TestLiveChatTokenValidationMissingScopeStopsBeforeClient(t *testing.T) {
 }
 
 func TestLiveChatTokenValidationHintsWhenEnvTokenShadowsStoredCredentials(t *testing.T) {
+	r := newRunner()
+
 	clearTwitchCredentialEnv(t)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
@@ -1188,22 +1253,22 @@ func TestLiveChatTokenValidationHintsWhenEnvTokenShadowsStoredCredentials(t *tes
 			MissingScopes: []twitch.TokenScope{twitch.ScopeChatRead, twitch.ScopeChatEdit},
 		},
 	})
-	oldNewLiveTokenValidator := newLiveTokenValidator
-	oldNewLiveChatClient := newLiveChatClient
+	oldNewLiveTokenValidator := r.newLiveTokenValidator
+	oldNewLiveChatClient := r.newLiveChatClient
 	t.Cleanup(func() {
-		newLiveTokenValidator = oldNewLiveTokenValidator
-		newLiveChatClient = oldNewLiveChatClient
+		r.newLiveTokenValidator = oldNewLiveTokenValidator
+		r.newLiveChatClient = oldNewLiveChatClient
 	})
-	newLiveTokenValidator = func() twitch.TokenValidator {
+	r.newLiveTokenValidator = func() twitch.TokenValidator {
 		return fakeValidator
 	}
-	newLiveChatClient = func(context.Context, config.Config, *credentialHolder, debuglog.Logger, credentialLoadStatus) (app.ChatClient, error) {
+	r.newLiveChatClient = func(context.Context, config.Config, *credentialHolder, debuglog.Logger, credentialLoadStatus, app.ChatRecorder) (app.ChatSource, error) {
 		t.Fatal("newLiveChatClient called after definitive token validation failure")
 		return nil, nil
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
+	code := r.Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
 
 	if code != 2 {
 		t.Fatalf("Run returned %d, want 2; stderr=%q", code, stderr.String())
@@ -1224,6 +1289,8 @@ func TestLiveChatTokenValidationHintsWhenEnvTokenShadowsStoredCredentials(t *tes
 }
 
 func TestLiveChatUsesTokenLoginWhenConfiguredUsernameDisagrees(t *testing.T) {
+	r := newRunner()
+
 	// The account the token belongs to is the only login Twitch IRC will
 	// accept, so a stale twitch_username must not block the connection - twi
 	// connects as the token's owner and warns about the stale setting.
@@ -1238,25 +1305,25 @@ func TestLiveChatUsesTokenLoginWhenConfiguredUsernameDisagrees(t *testing.T) {
 			Detail:   `OAuth token belongs to Twitch user "recursive_escalator", not configured username "worxbend"`,
 		},
 	})
-	oldNewLiveTokenValidator := newLiveTokenValidator
-	oldNewLiveChatClient := newLiveChatClient
-	oldRunLiveChat := runLiveChat
+	oldNewLiveTokenValidator := r.newLiveTokenValidator
+	oldNewLiveChatClient := r.newLiveChatClient
+	oldRunLiveChat := r.runLiveChat
 	t.Cleanup(func() {
-		newLiveTokenValidator = oldNewLiveTokenValidator
-		newLiveChatClient = oldNewLiveChatClient
-		runLiveChat = oldRunLiveChat
+		r.newLiveTokenValidator = oldNewLiveTokenValidator
+		r.newLiveChatClient = oldNewLiveChatClient
+		r.runLiveChat = oldRunLiveChat
 	})
-	newLiveTokenValidator = func() twitch.TokenValidator { return fakeValidator }
+	r.newLiveTokenValidator = func() twitch.TokenValidator { return fakeValidator }
 
 	var connectedAs string
-	newLiveChatClient = func(_ context.Context, cfg config.Config, _ *credentialHolder, _ debuglog.Logger, _ credentialLoadStatus) (app.ChatClient, error) {
+	r.newLiveChatClient = func(_ context.Context, cfg config.Config, _ *credentialHolder, _ debuglog.Logger, _ credentialLoadStatus, _ app.ChatRecorder) (app.ChatSource, error) {
 		connectedAs = cfg.Twitch.Username
 		return app.NewFakeChatClient(1), nil
 	}
-	runLiveChat = func(io.Writer, config.Config, app.ChatClient, app.ClientOptions) error { return nil }
+	r.runLiveChat = func(io.Writer, config.Config, app.ChatSource, app.ClientOptions) error { return nil }
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "someoneelse"}, &stdout, &stderr)
+	code := r.Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "someoneelse"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -1273,6 +1340,8 @@ func TestLiveChatUsesTokenLoginWhenConfiguredUsernameDisagrees(t *testing.T) {
 }
 
 func TestLiveChatDerivesUsernameWhenNoneConfigured(t *testing.T) {
+	r := newRunner()
+
 	// With no twitch_username at all, the token alone is enough to start.
 	t.Setenv("TWI_TWITCH_USERNAME", "")
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
@@ -1284,25 +1353,25 @@ func TestLiveChatDerivesUsernameWhenNoneConfigured(t *testing.T) {
 			Scopes:   []twitch.TokenScope{twitch.ScopeChatRead, twitch.ScopeChatEdit},
 		},
 	})
-	oldNewLiveTokenValidator := newLiveTokenValidator
-	oldNewLiveChatClient := newLiveChatClient
-	oldRunLiveChat := runLiveChat
+	oldNewLiveTokenValidator := r.newLiveTokenValidator
+	oldNewLiveChatClient := r.newLiveChatClient
+	oldRunLiveChat := r.runLiveChat
 	t.Cleanup(func() {
-		newLiveTokenValidator = oldNewLiveTokenValidator
-		newLiveChatClient = oldNewLiveChatClient
-		runLiveChat = oldRunLiveChat
+		r.newLiveTokenValidator = oldNewLiveTokenValidator
+		r.newLiveChatClient = oldNewLiveChatClient
+		r.runLiveChat = oldRunLiveChat
 	})
-	newLiveTokenValidator = func() twitch.TokenValidator { return fakeValidator }
+	r.newLiveTokenValidator = func() twitch.TokenValidator { return fakeValidator }
 
 	var connectedAs string
-	newLiveChatClient = func(_ context.Context, cfg config.Config, _ *credentialHolder, _ debuglog.Logger, _ credentialLoadStatus) (app.ChatClient, error) {
+	r.newLiveChatClient = func(_ context.Context, cfg config.Config, _ *credentialHolder, _ debuglog.Logger, _ credentialLoadStatus, _ app.ChatRecorder) (app.ChatSource, error) {
 		connectedAs = cfg.Twitch.Username
 		return app.NewFakeChatClient(1), nil
 	}
-	runLiveChat = func(io.Writer, config.Config, app.ChatClient, app.ClientOptions) error { return nil }
+	r.runLiveChat = func(io.Writer, config.Config, app.ChatSource, app.ClientOptions) error { return nil }
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
+	code := r.Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -1317,6 +1386,8 @@ func TestLiveChatDerivesUsernameWhenNoneConfigured(t *testing.T) {
 }
 
 func TestLiveChatMissingScopesStillBlockStartup(t *testing.T) {
+	r := newRunner()
+
 	// Scopes are a real blocker even though the username no longer is.
 	t.Setenv("TWI_TWITCH_USERNAME", "worxbend")
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
@@ -1329,20 +1400,20 @@ func TestLiveChatMissingScopesStillBlockStartup(t *testing.T) {
 			MissingScopes: []twitch.TokenScope{twitch.ScopeChatEdit},
 		},
 	})
-	oldNewLiveTokenValidator := newLiveTokenValidator
-	oldNewLiveChatClient := newLiveChatClient
+	oldNewLiveTokenValidator := r.newLiveTokenValidator
+	oldNewLiveChatClient := r.newLiveChatClient
 	t.Cleanup(func() {
-		newLiveTokenValidator = oldNewLiveTokenValidator
-		newLiveChatClient = oldNewLiveChatClient
+		r.newLiveTokenValidator = oldNewLiveTokenValidator
+		r.newLiveChatClient = oldNewLiveChatClient
 	})
-	newLiveTokenValidator = func() twitch.TokenValidator { return fakeValidator }
-	newLiveChatClient = func(context.Context, config.Config, *credentialHolder, debuglog.Logger, credentialLoadStatus) (app.ChatClient, error) {
+	r.newLiveTokenValidator = func() twitch.TokenValidator { return fakeValidator }
+	r.newLiveChatClient = func(context.Context, config.Config, *credentialHolder, debuglog.Logger, credentialLoadStatus, app.ChatRecorder) (app.ChatSource, error) {
 		t.Fatal("newLiveChatClient called despite missing required scopes")
 		return nil, nil
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
+	code := r.Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
 
 	if code != 2 {
 		t.Fatalf("Run returned %d, want 2; stderr=%q", code, stderr.String())
@@ -1354,6 +1425,8 @@ func TestLiveChatMissingScopesStillBlockStartup(t *testing.T) {
 }
 
 func TestLiveChatTokenValidationTransientFailureWarnsAndContinues(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
@@ -1361,22 +1434,22 @@ func TestLiveChatTokenValidationTransientFailureWarnsAndContinues(t *testing.T) 
 	fakeValidator := twitch.NewFakeTokenValidator(twitch.FakeTokenValidationOutcome{
 		Err: errors.New("temporary validator failure for oauth:secret-token client_secret=client-secret"),
 	})
-	oldNewLiveTokenValidator := newLiveTokenValidator
-	oldNewLiveChatClient := newLiveChatClient
-	oldRunLiveChat := runLiveChat
+	oldNewLiveTokenValidator := r.newLiveTokenValidator
+	oldNewLiveChatClient := r.newLiveChatClient
+	oldRunLiveChat := r.runLiveChat
 	t.Cleanup(func() {
-		newLiveTokenValidator = oldNewLiveTokenValidator
-		newLiveChatClient = oldNewLiveChatClient
-		runLiveChat = oldRunLiveChat
+		r.newLiveTokenValidator = oldNewLiveTokenValidator
+		r.newLiveChatClient = oldNewLiveChatClient
+		r.runLiveChat = oldRunLiveChat
 	})
-	newLiveTokenValidator = func() twitch.TokenValidator {
+	r.newLiveTokenValidator = func() twitch.TokenValidator {
 		return fakeValidator
 	}
 	fakeClient := app.NewFakeChatClient(1)
-	newLiveChatClient = func(context.Context, config.Config, *credentialHolder, debuglog.Logger, credentialLoadStatus) (app.ChatClient, error) {
+	r.newLiveChatClient = func(context.Context, config.Config, *credentialHolder, debuglog.Logger, credentialLoadStatus, app.ChatRecorder) (app.ChatSource, error) {
 		return fakeClient, nil
 	}
-	runLiveChat = func(stdout io.Writer, _ config.Config, client app.ChatClient, _ app.ClientOptions) error {
+	r.runLiveChat = func(stdout io.Writer, _ config.Config, client app.ChatSource, _ app.ClientOptions) error {
 		if client != fakeClient {
 			t.Fatalf("runLiveChat client = %#v, want fake", client)
 		}
@@ -1385,7 +1458,7 @@ func TestLiveChatTokenValidationTransientFailureWarnsAndContinues(t *testing.T) 
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
+	code := r.Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -1400,27 +1473,29 @@ func TestLiveChatTokenValidationTransientFailureWarnsAndContinues(t *testing.T) 
 }
 
 func TestLiveChatEnvCredentialsIgnoreUnsupportedCredentialFileFallback(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
-	installValidLiveTokenValidator(t, "viewer")
+	r.installValidLiveTokenValidator(t, "viewer")
 
-	oldNewCredentialStore := newCredentialStore
-	oldNewLiveChatClient := newLiveChatClient
-	oldRunLiveChat := runLiveChat
+	oldNewCredentialStore := r.newCredentialStore
+	oldNewLiveChatClient := r.newLiveChatClient
+	oldRunLiveChat := r.runLiveChat
 	t.Cleanup(func() {
-		newCredentialStore = oldNewCredentialStore
-		newLiveChatClient = oldNewLiveChatClient
-		runLiveChat = oldRunLiveChat
+		r.newCredentialStore = oldNewCredentialStore
+		r.newLiveChatClient = oldNewLiveChatClient
+		r.runLiveChat = oldRunLiveChat
 	})
 
-	newCredentialStore = func() (storage.CredentialStore, error) {
+	r.newCredentialStore = func() (storage.CredentialStore, error) {
 		return nil, fmt.Errorf("%w: credential-file fallback is disabled on non-Unix builds; use env/config; oauth:stored-secret", storage.ErrUnsupportedCredentialFilePlatform)
 	}
 	fake := app.NewFakeChatClient(1)
-	newLiveChatClient = func(context.Context, config.Config, *credentialHolder, debuglog.Logger, credentialLoadStatus) (app.ChatClient, error) {
+	r.newLiveChatClient = func(context.Context, config.Config, *credentialHolder, debuglog.Logger, credentialLoadStatus, app.ChatRecorder) (app.ChatSource, error) {
 		return fake, nil
 	}
-	runLiveChat = func(stdout io.Writer, _ config.Config, client app.ChatClient, _ app.ClientOptions) error {
+	r.runLiveChat = func(stdout io.Writer, _ config.Config, client app.ChatSource, _ app.ClientOptions) error {
 		if client != fake {
 			t.Fatalf("runLiveChat client = %#v, want fake", client)
 		}
@@ -1429,7 +1504,7 @@ func TestLiveChatEnvCredentialsIgnoreUnsupportedCredentialFileFallback(t *testin
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
+	code := r.Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -1499,6 +1574,7 @@ func TestPersistRefreshedIRCCredentialsSavesThroughStoreWithEffectiveConfig(t *t
 }
 
 func TestPersistRefreshedIRCCredentialsUnavailableAndFailureErrorsAreRedacted(t *testing.T) {
+
 	cfg := config.Default()
 	cfg.Twitch.Username = "viewer"
 	cfg.Twitch.ClientID = "client-id"
@@ -1555,25 +1631,27 @@ func TestPersistRefreshedIRCCredentialsUnavailableAndFailureErrorsAreRedacted(t 
 }
 
 func TestLiveChatConfiguredStartsClientWithMultipleChannels(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
-	installValidLiveTokenValidator(t, "viewer")
+	r.installValidLiveTokenValidator(t, "viewer")
 
-	oldNewLiveChatClient := newLiveChatClient
-	oldRunLiveChat := runLiveChat
+	oldNewLiveChatClient := r.newLiveChatClient
+	oldRunLiveChat := r.runLiveChat
 	defer func() {
-		newLiveChatClient = oldNewLiveChatClient
-		runLiveChat = oldRunLiveChat
+		r.newLiveChatClient = oldNewLiveChatClient
+		r.runLiveChat = oldRunLiveChat
 	}()
 
 	var gotFactoryChannels []string
 	var gotRunChannels []string
 	fake := app.NewFakeChatClient(1)
-	newLiveChatClient = func(_ context.Context, cfg config.Config, _ *credentialHolder, _ debuglog.Logger, _ credentialLoadStatus) (app.ChatClient, error) {
+	r.newLiveChatClient = func(_ context.Context, cfg config.Config, _ *credentialHolder, _ debuglog.Logger, _ credentialLoadStatus, _ app.ChatRecorder) (app.ChatSource, error) {
 		gotFactoryChannels = append([]string(nil), cfg.DefaultChannels...)
 		return fake, nil
 	}
-	runLiveChat = func(_ io.Writer, cfg config.Config, client app.ChatClient, _ app.ClientOptions) error {
+	r.runLiveChat = func(_ io.Writer, cfg config.Config, client app.ChatSource, _ app.ClientOptions) error {
 		if client != fake {
 			t.Fatalf("runLiveChat client = %#v, want fake", client)
 		}
@@ -1582,7 +1660,7 @@ func TestLiveChatConfiguredStartsClientWithMultipleChannels(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "alpha", "--channel", "#Beta"}, &stdout, &stderr)
+	code := r.Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "alpha", "--channel", "#Beta"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -1599,10 +1677,12 @@ func TestLiveChatConfiguredStartsClientWithMultipleChannels(t *testing.T) {
 }
 
 func TestProfileListMarksActiveTheme(t *testing.T) {
+	r := newRunner()
+
 	clearTWIEnv(t)
 	var stdout, stderr bytes.Buffer
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
-	code := Run([]string{"profile", "list", "--config", cfgPath}, &stdout, &stderr)
+	code := r.Run([]string{"profile", "list", "--config", cfgPath}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
 	}
@@ -1615,10 +1695,12 @@ func TestProfileListMarksActiveTheme(t *testing.T) {
 }
 
 func TestProfileShowPrintsResolvedPalette(t *testing.T) {
+	r := newRunner()
+
 	clearTWIEnv(t)
 	var stdout, stderr bytes.Buffer
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
-	code := Run([]string{"profile", "show", "--config", cfgPath}, &stdout, &stderr)
+	code := r.Run([]string{"profile", "show", "--config", cfgPath}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
 	}
@@ -1630,6 +1712,8 @@ func TestProfileShowPrintsResolvedPalette(t *testing.T) {
 }
 
 func TestProfileSetPersistsThemeAndPreservesOtherSettings(t *testing.T) {
+	r := newRunner()
+
 	clearTWIEnv(t)
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(cfgPath, []byte("animation_mode = \"reduced\"\n"), 0o600); err != nil {
@@ -1637,7 +1721,7 @@ func TestProfileSetPersistsThemeAndPreservesOtherSettings(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"profile", "set", "nord", "--config", cfgPath}, &stdout, &stderr)
+	code := r.Run([]string{"profile", "set", "nord", "--config", cfgPath}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
 	}
@@ -1658,10 +1742,12 @@ func TestProfileSetPersistsThemeAndPreservesOtherSettings(t *testing.T) {
 }
 
 func TestProfileSetCustomAppliesHexFlags(t *testing.T) {
+	r := newRunner()
+
 	clearTWIEnv(t)
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{
+	code := r.Run([]string{
 		"profile", "set", "custom", "--config", cfgPath,
 		"--background", "#010101", "--foreground", "#fefefe", "--accent", "#abcdef",
 	}, &stdout, &stderr)
@@ -1685,9 +1771,11 @@ func TestProfileSetCustomAppliesHexFlags(t *testing.T) {
 }
 
 func TestProfileSetUnknownThemeRejected(t *testing.T) {
+	r := newRunner()
+
 	var stdout, stderr bytes.Buffer
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
-	code := Run([]string{"profile", "set", "not-a-theme", "--config", cfgPath}, &stdout, &stderr)
+	code := r.Run([]string{"profile", "set", "not-a-theme", "--config", cfgPath}, &stdout, &stderr)
 	if code != 2 {
 		t.Fatalf("Run returned %d, want 2; stdout=%q", code, stdout.String())
 	}
@@ -1697,10 +1785,12 @@ func TestProfileSetUnknownThemeRejected(t *testing.T) {
 }
 
 func TestProfileSetAcceptsFlagsBeforeName(t *testing.T) {
+	r := newRunner()
+
 	clearTWIEnv(t)
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"profile", "set", "--config", cfgPath, "nord"}, &stdout, &stderr)
+	code := r.Run([]string{"profile", "set", "--config", cfgPath, "nord"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
 	}
@@ -1714,10 +1804,12 @@ func TestProfileSetAcceptsFlagsBeforeName(t *testing.T) {
 }
 
 func TestProfileSetRejectsMalformedHexColor(t *testing.T) {
+	r := newRunner()
+
 	clearTWIEnv(t)
 	var stdout, stderr bytes.Buffer
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
-	code := Run([]string{
+	code := r.Run([]string{
 		"profile", "set", "custom", "--config", cfgPath,
 		"--background", "blue",
 	}, &stdout, &stderr)
@@ -1735,10 +1827,12 @@ func TestProfileSetRejectsMalformedHexColor(t *testing.T) {
 // A bare "help" only asks for usage in leading position; as a flag value it
 // is ordinary data.
 func TestSetupUsernameHelpIsNotAHelpRequest(t *testing.T) {
+	r := newRunner()
+
 	clearTWIEnv(t)
 	var stdout, stderr bytes.Buffer
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
-	code := Run([]string{
+	code := r.Run([]string{
 		"setup", "--config", cfgPath, "--non-interactive", "--username", "help",
 	}, &stdout, &stderr)
 	if code != 0 {
@@ -1754,12 +1848,14 @@ func TestSetupUsernameHelpIsNotAHelpRequest(t *testing.T) {
 }
 
 func TestConfigShowRedactsSecrets(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret")
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
 
 	var stdout, stderr bytes.Buffer
 	cfgPath := filepath.Join(t.TempDir(), "missing.toml?state=config-path-secret&code=config-code-secret")
-	code := Run([]string{"config", "show", "--config", cfgPath}, &stdout, &stderr)
+	code := r.Run([]string{"config", "show", "--config", cfgPath}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -1772,6 +1868,8 @@ func TestConfigShowRedactsSecrets(t *testing.T) {
 }
 
 func TestConfigShowLoadsStoredCredentialsAndRedactsTokens(t *testing.T) {
+	r := newRunner()
+
 	clearTwitchCredentialEnv(t)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	writeStoredCredentialFixture(t, storage.CredentialRecord{
@@ -1787,7 +1885,7 @@ func TestConfigShowLoadsStoredCredentialsAndRedactsTokens(t *testing.T) {
 	})
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"config", "show", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+	code := r.Run([]string{"config", "show", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -1806,12 +1904,14 @@ func TestConfigShowLoadsStoredCredentialsAndRedactsTokens(t *testing.T) {
 }
 
 func TestConfigShowIgnoresUnsupportedCredentialFileFallback(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
 
-	oldNewCredentialStore := newCredentialStore
+	oldNewCredentialStore := r.newCredentialStore
 	t.Cleanup(func() {
-		newCredentialStore = oldNewCredentialStore
+		r.newCredentialStore = oldNewCredentialStore
 	})
 
 	for _, tc := range []struct {
@@ -1832,10 +1932,10 @@ func TestConfigShowIgnoresUnsupportedCredentialFileFallback(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			newCredentialStore = tc.hook
+			r.newCredentialStore = tc.hook
 
 			var stdout, stderr bytes.Buffer
-			code := Run([]string{"config", "show", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+			code := r.Run([]string{"config", "show", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
 
 			if code != 0 {
 				t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -1849,18 +1949,20 @@ func TestConfigShowIgnoresUnsupportedCredentialFileFallback(t *testing.T) {
 }
 
 func TestConfigShowWarnsAndContinuesWhenCredentialStoreFails(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
 
-	oldNewCredentialStore := newCredentialStore
+	oldNewCredentialStore := r.newCredentialStore
 	t.Cleanup(func() {
-		newCredentialStore = oldNewCredentialStore
+		r.newCredentialStore = oldNewCredentialStore
 	})
-	newCredentialStore = func() (storage.CredentialStore, error) {
+	r.newCredentialStore = func() (storage.CredentialStore, error) {
 		return nil, errors.New("keyring unavailable")
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"config", "show", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+	code := r.Run([]string{"config", "show", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -1874,15 +1976,17 @@ func TestConfigShowWarnsAndContinuesWhenCredentialStoreFails(t *testing.T) {
 }
 
 func TestDoctorDoesNotPrintSecrets(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:access-token-private")
 	t.Setenv("TWI_TWITCH_REFRESH_TOKEN", "refresh-secret")
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
 
-	oldBuildDoctorReport := buildDoctorReport
+	oldBuildDoctorReport := r.buildDoctorReport
 	defer func() {
-		buildDoctorReport = oldBuildDoctorReport
+		r.buildDoctorReport = oldBuildDoctorReport
 	}()
-	buildDoctorReport = func(ctx context.Context, cfg config.Config, cfgErr error) doctor.Report {
+	r.buildDoctorReport = func(ctx context.Context, cfg config.Config, cfgErr error) doctor.Report {
 		validator := twitch.NewFakeTokenValidator(twitch.FakeTokenValidationOutcome{
 			Result: twitch.TokenValidationResult{
 				Status: twitch.TokenValidationMalformed,
@@ -1901,7 +2005,7 @@ func TestDoctorDoesNotPrintSecrets(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"doctor", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+	code := r.Run([]string{"doctor", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -1919,16 +2023,18 @@ func TestDoctorDoesNotPrintSecrets(t *testing.T) {
 }
 
 func TestDoctorDebugLogWritesRedactedCommandEvents(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:doctor-access-secret")
 	t.Setenv("TWI_TWITCH_REFRESH_TOKEN", "doctor-refresh-secret")
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "doctor-client-secret")
 	logPath := filepath.Join(t.TempDir(), "debug.log")
 
-	oldBuildDoctorReport := buildDoctorReport
+	oldBuildDoctorReport := r.buildDoctorReport
 	t.Cleanup(func() {
-		buildDoctorReport = oldBuildDoctorReport
+		r.buildDoctorReport = oldBuildDoctorReport
 	})
-	buildDoctorReport = func(context.Context, config.Config, error) doctor.Report {
+	r.buildDoctorReport = func(context.Context, config.Config, error) doctor.Report {
 		return doctor.Report{Checks: []doctor.Check{{
 			Name:   "fixture",
 			Status: doctor.StatusOK,
@@ -1937,7 +2043,7 @@ func TestDoctorDebugLogWritesRedactedCommandEvents(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{
+	code := r.Run([]string{
 		"doctor",
 		"--config", t.TempDir() + "/missing.toml",
 		"--debug-log",
@@ -1961,22 +2067,24 @@ func TestDoctorDebugLogWritesRedactedCommandEvents(t *testing.T) {
 }
 
 func TestDoctorWarnsWhenCredentialFileFallbackUnsupported(t *testing.T) {
-	oldNewCredentialStore := newCredentialStore
-	oldBuildDoctorReport := buildDoctorReport
+	r := newRunner()
+
+	oldNewCredentialStore := r.newCredentialStore
+	oldBuildDoctorReport := r.buildDoctorReport
 	t.Cleanup(func() {
-		newCredentialStore = oldNewCredentialStore
-		buildDoctorReport = oldBuildDoctorReport
+		r.newCredentialStore = oldNewCredentialStore
+		r.buildDoctorReport = oldBuildDoctorReport
 	})
 
-	newCredentialStore = func() (storage.CredentialStore, error) {
+	r.newCredentialStore = func() (storage.CredentialStore, error) {
 		return nil, fmt.Errorf("%w: credential-file fallback is disabled on non-Unix builds; use environment variables or a private flat config file", storage.ErrUnsupportedCredentialFilePlatform)
 	}
-	buildDoctorReport = func(context.Context, config.Config, error) doctor.Report {
+	r.buildDoctorReport = func(context.Context, config.Config, error) doctor.Report {
 		return doctor.Report{}
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"doctor", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+	code := r.Run([]string{"doctor", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -1989,6 +2097,8 @@ func TestDoctorWarnsWhenCredentialFileFallbackUnsupported(t *testing.T) {
 }
 
 func TestDoctorLoadsStoredCredentialsWithoutPrintingTokens(t *testing.T) {
+	r := newRunner()
+
 	clearTwitchCredentialEnv(t)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "state=credential-path-secret"))
 	writeStoredCredentialFixture(t, storage.CredentialRecord{
@@ -2011,26 +2121,26 @@ func TestDoctorLoadsStoredCredentialsWithoutPrintingTokens(t *testing.T) {
 		},
 	})
 
-	oldNewDoctorTokenValidator := newDoctorTokenValidator
-	oldDoctorReachabilityProbe := doctorReachabilityProbe
-	oldDoctorCacheDir := doctorCacheDir
+	oldNewDoctorTokenValidator := r.newDoctorTokenValidator
+	oldDoctorReachabilityProbe := r.doctorReachabilityProbe
+	oldDoctorCacheDir := r.doctorCacheDir
 	defer func() {
-		newDoctorTokenValidator = oldNewDoctorTokenValidator
-		doctorReachabilityProbe = oldDoctorReachabilityProbe
-		doctorCacheDir = oldDoctorCacheDir
+		r.newDoctorTokenValidator = oldNewDoctorTokenValidator
+		r.doctorReachabilityProbe = oldDoctorReachabilityProbe
+		r.doctorCacheDir = oldDoctorCacheDir
 	}()
-	newDoctorTokenValidator = func() twitch.TokenValidator {
+	r.newDoctorTokenValidator = func() twitch.TokenValidator {
 		return fake
 	}
-	doctorReachabilityProbe = func(context.Context) error {
+	r.doctorReachabilityProbe = func(context.Context) error {
 		return nil
 	}
-	doctorCacheDir = func() string {
+	r.doctorCacheDir = func() string {
 		return t.TempDir()
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"doctor", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+	code := r.Run([]string{"doctor", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -2051,6 +2161,8 @@ func TestDoctorLoadsStoredCredentialsWithoutPrintingTokens(t *testing.T) {
 }
 
 func TestDoctorEnvCredentialsTakePrecedenceOverStoredCredentials(t *testing.T) {
+	r := newRunner()
+
 	clearTwitchCredentialEnv(t)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("TWI_TWITCH_USERNAME", "env_viewer")
@@ -2077,26 +2189,26 @@ func TestDoctorEnvCredentialsTakePrecedenceOverStoredCredentials(t *testing.T) {
 		},
 	})
 
-	oldNewDoctorTokenValidator := newDoctorTokenValidator
-	oldDoctorReachabilityProbe := doctorReachabilityProbe
-	oldDoctorCacheDir := doctorCacheDir
+	oldNewDoctorTokenValidator := r.newDoctorTokenValidator
+	oldDoctorReachabilityProbe := r.doctorReachabilityProbe
+	oldDoctorCacheDir := r.doctorCacheDir
 	defer func() {
-		newDoctorTokenValidator = oldNewDoctorTokenValidator
-		doctorReachabilityProbe = oldDoctorReachabilityProbe
-		doctorCacheDir = oldDoctorCacheDir
+		r.newDoctorTokenValidator = oldNewDoctorTokenValidator
+		r.doctorReachabilityProbe = oldDoctorReachabilityProbe
+		r.doctorCacheDir = oldDoctorCacheDir
 	}()
-	newDoctorTokenValidator = func() twitch.TokenValidator {
+	r.newDoctorTokenValidator = func() twitch.TokenValidator {
 		return fake
 	}
-	doctorReachabilityProbe = func(context.Context) error {
+	r.doctorReachabilityProbe = func(context.Context) error {
 		return nil
 	}
-	doctorCacheDir = func() string {
+	r.doctorCacheDir = func() string {
 		return t.TempDir()
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"doctor", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+	code := r.Run([]string{"doctor", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -2113,6 +2225,8 @@ func TestDoctorEnvCredentialsTakePrecedenceOverStoredCredentials(t *testing.T) {
 }
 
 func TestDefaultDoctorReportWiresTokenValidator(t *testing.T) {
+	r := newRunner()
+
 	cfg := config.Default()
 	cfg.Path = t.TempDir() + "/missing.toml"
 	cfg.Twitch.Username = "viewer"
@@ -2126,25 +2240,25 @@ func TestDefaultDoctorReportWiresTokenValidator(t *testing.T) {
 		},
 	})
 
-	oldNewDoctorTokenValidator := newDoctorTokenValidator
-	oldDoctorReachabilityProbe := doctorReachabilityProbe
-	oldDoctorCacheDir := doctorCacheDir
+	oldNewDoctorTokenValidator := r.newDoctorTokenValidator
+	oldDoctorReachabilityProbe := r.doctorReachabilityProbe
+	oldDoctorCacheDir := r.doctorCacheDir
 	defer func() {
-		newDoctorTokenValidator = oldNewDoctorTokenValidator
-		doctorReachabilityProbe = oldDoctorReachabilityProbe
-		doctorCacheDir = oldDoctorCacheDir
+		r.newDoctorTokenValidator = oldNewDoctorTokenValidator
+		r.doctorReachabilityProbe = oldDoctorReachabilityProbe
+		r.doctorCacheDir = oldDoctorCacheDir
 	}()
-	newDoctorTokenValidator = func() twitch.TokenValidator {
+	r.newDoctorTokenValidator = func() twitch.TokenValidator {
 		return fake
 	}
-	doctorReachabilityProbe = func(context.Context) error {
+	r.doctorReachabilityProbe = func(context.Context) error {
 		return nil
 	}
-	doctorCacheDir = func() string {
+	r.doctorCacheDir = func() string {
 		return t.TempDir()
 	}
 
-	report := buildDoctorReport(context.Background(), cfg, nil)
+	report := r.buildDoctorReport(context.Background(), cfg, nil)
 
 	requests := fake.Requests()
 	if len(requests) != 1 {
@@ -2163,6 +2277,8 @@ func TestDefaultDoctorReportWiresTokenValidator(t *testing.T) {
 }
 
 func TestDoctorReportsConfigLoadErrorAndUsesEnvFallback(t *testing.T) {
+	r := newRunner()
+
 	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret")
 
@@ -2172,11 +2288,11 @@ func TestDoctorReportsConfigLoadErrorAndUsesEnvFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldBuildDoctorReport := buildDoctorReport
+	oldBuildDoctorReport := r.buildDoctorReport
 	defer func() {
-		buildDoctorReport = oldBuildDoctorReport
+		r.buildDoctorReport = oldBuildDoctorReport
 	}()
-	buildDoctorReport = func(ctx context.Context, cfg config.Config, cfgErr error) doctor.Report {
+	r.buildDoctorReport = func(ctx context.Context, cfg config.Config, cfgErr error) doctor.Report {
 		if cfgErr == nil {
 			t.Fatal("doctor report builder received nil config error, want parse error")
 		}
@@ -2194,7 +2310,7 @@ func TestDoctorReportsConfigLoadErrorAndUsesEnvFallback(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"doctor", "--config", path}, &stdout, &stderr)
+	code := r.Run([]string{"doctor", "--config", path}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -2245,20 +2361,20 @@ func (w *fakeLoginCallbackWaiter) Close() error {
 	return nil
 }
 
-func resetLoginTestHooks(t *testing.T) {
+func (r *runner) resetLoginTestHooks(t *testing.T) {
 	t.Helper()
 
-	oldNewLoginFlow := newLoginFlow
-	oldNewLoginContext := newLoginContext
-	oldNewLoginCallbackWaiter := newLoginCallbackWaiter
-	oldOpenLoginBrowser := openLoginBrowser
-	oldNewCredentialStore := newCredentialStore
+	oldNewLoginFlow := r.newLoginFlow
+	oldNewLoginContext := r.newLoginContext
+	oldNewLoginCallbackWaiter := r.newLoginCallbackWaiter
+	oldOpenLoginBrowser := r.openLoginBrowser
+	oldNewCredentialStore := r.newCredentialStore
 	t.Cleanup(func() {
-		newLoginFlow = oldNewLoginFlow
-		newLoginContext = oldNewLoginContext
-		newLoginCallbackWaiter = oldNewLoginCallbackWaiter
-		openLoginBrowser = oldOpenLoginBrowser
-		newCredentialStore = oldNewCredentialStore
+		r.newLoginFlow = oldNewLoginFlow
+		r.newLoginContext = oldNewLoginContext
+		r.newLoginCallbackWaiter = oldNewLoginCallbackWaiter
+		r.openLoginBrowser = oldOpenLoginBrowser
+		r.newCredentialStore = oldNewCredentialStore
 	})
 }
 
@@ -2362,7 +2478,7 @@ func writeRawStoredCredentialFile(t *testing.T, content string) {
 	}
 }
 
-func installValidLiveTokenValidator(t *testing.T, login string) *twitch.FakeTokenValidator {
+func (r *runner) installValidLiveTokenValidator(t *testing.T, login string) *twitch.FakeTokenValidator {
 	t.Helper()
 	fake := twitch.NewFakeTokenValidator()
 	fake.SetDefault(twitch.TokenValidationResult{
@@ -2371,12 +2487,12 @@ func installValidLiveTokenValidator(t *testing.T, login string) *twitch.FakeToke
 		Scopes:   twitch.RequiredIRCScopes(),
 	}, nil)
 
-	oldNewLiveTokenValidator := newLiveTokenValidator
-	newLiveTokenValidator = func() twitch.TokenValidator {
+	oldNewLiveTokenValidator := r.newLiveTokenValidator
+	r.newLiveTokenValidator = func() twitch.TokenValidator {
 		return fake
 	}
 	t.Cleanup(func() {
-		newLiveTokenValidator = oldNewLiveTokenValidator
+		r.newLiveTokenValidator = oldNewLiveTokenValidator
 	})
 	return fake
 }
@@ -2423,9 +2539,11 @@ func TestChatChannelFlagsAccumulateAndSplitCommas(t *testing.T) {
 // `twi chat` with no configured channel now launches into the empty state
 // instead of exiting; only missing credentials still stop it.
 func TestChatWithoutChannelsDoesNotExitEarly(t *testing.T) {
+	r := newRunner()
+
 	clearTwitchCredentialEnv(t)
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"chat", "--mock", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+	code := r.Run([]string{"chat", "--mock", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
 	}
@@ -2435,6 +2553,7 @@ func TestChatWithoutChannelsDoesNotExitEarly(t *testing.T) {
 }
 
 func TestRefreshCapabilityWarning(t *testing.T) {
+
 	for _, tt := range []struct {
 		name string
 		cfg  config.TwitchConfig

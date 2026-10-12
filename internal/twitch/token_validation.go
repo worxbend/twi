@@ -79,6 +79,7 @@ type TokenIdentity struct {
 // TokenValidationResult describes the validated token identity, lifetime,
 // scopes, and user-facing status without carrying token contents.
 type TokenValidationResult struct {
+	ClientID         string
 	Status           TokenValidationStatus
 	Identity         TokenIdentity
 	Scopes           []TokenScope

@@ -41,3 +41,15 @@ func TestQueueComposerSendMeActionStillQueues(t *testing.T) {
 		t.Fatalf("activeSend = %#v, want action send with text %q", state.activeSend, "waves")
 	}
 }
+func TestFullSendQueueRetainsDraft(t *testing.T) {
+	model := composerTestModel(t)
+	model.services.client = NewFakeChatClient(1)
+	state := model.activeChannelState()
+	state.sendQueue = make([]queuedComposerSend, maxPendingComposerSends)
+	state.composerText = "keep this draft"
+	updated, cmd := model.queueComposerSend()
+	state = updated.activeChannelState()
+	if cmd != nil || state.composerText != "keep this draft" || len(state.sendQueue) != maxPendingComposerSends || state.sendState != composerSendFailed {
+		t.Fatal("queue pressure changed draft or scheduled work")
+	}
+}

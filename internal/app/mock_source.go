@@ -5,7 +5,8 @@ import (
 	"io"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/worxbend/twi/internal/animation"
 	"github.com/worxbend/twi/internal/assets"
 	"github.com/worxbend/twi/internal/config"
@@ -37,7 +38,7 @@ func RunMockWithOptions(w io.Writer, cfg config.Config, opts ClientOptions) erro
 	model.debugLogger = opts.DebugLogger
 	model.debugAppStart("mock", len(configuredChannels(channel, cfg.DefaultChannels)))
 	if !isInteractiveTerminal(w) {
-		_, err := fmt.Fprintln(w, model.View())
+		_, err := fmt.Fprintln(w, ansi.Strip(model.View().Content))
 		return err
 	}
 	if opts.SystemNotifier == nil {
@@ -46,11 +47,13 @@ func RunMockWithOptions(w io.Writer, cfg config.Config, opts ClientOptions) erro
 	model.services.systemNotifier = opts.SystemNotifier
 	model.frames.splashUntil = splashDeadline(model.animationMode)
 	model.terminalOutput = w
-	primeTerminalBackground(w, model.canvasBackground())
 
-	program := tea.NewProgram(model, programOptions(w, cfg)...)
+	options := programOptions(w, cfg)
+	if opts.Context != nil {
+		options = append(options, tea.WithContext(opts.Context))
+	}
+	program := tea.NewProgram(model, options...)
 	_, err := program.Run()
-	resetTerminalBackground(w)
 	return err
 }
 

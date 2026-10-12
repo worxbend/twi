@@ -32,3 +32,24 @@ services:
   doctor:
     <<: *twi
     command: ["doctor"]
+
+  recorder:
+    <<: *twi
+    command: ["record", "--channel", "${TWITCH_CHANNEL:-demo}"]
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - twi-state:/state
+      - twi-config:/config
+      - twi-cache:/cache
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    stop_grace_period: 15s
+
+volumes:
+  twi-state:
+  twi-config:
+  twi-cache:

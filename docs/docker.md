@@ -10,7 +10,7 @@ docker build -t twi:local .
 
 The image uses a multi-stage build:
 
-- `golang:1.26.4-bookworm` compiles `cmd/twi`.
+- `golang:1.27.2-bookworm` compiles `cmd/twi`.
 - `debian:bookworm-slim` runs the static binary as a non-root `twi` user.
 - CA certificates are copied into the runtime image for Twitch IRC over TLS.
 
@@ -190,3 +190,13 @@ docker run --rm -it \
   -e TWI_ANIMATION_MODE=off \
   twi:local chat --mock --channel demo
 ```
+
+## Foreground recording
+
+`docker compose run --rm recorder` records the explicit `TWITCH_CHANNEL` into
+named volume `twi-state` at `/state/twi/history.sqlite3`. Supply credentials via
+the existing environment file/runtime secrets. The image remains nonroot; volume
+ownership must permit UID 10001 to create private state files. Stop with SIGTERM
+for a clean capture boundary. Mount the same state volume into a separate reader
+using `twi consume --history /state/twi/history.sqlite3 -t CHANNEL --last 10`.
+Do not put the database on a network filesystem. See [Automation](automation.md).

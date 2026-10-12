@@ -1,0 +1,27 @@
+# Per-user unit. Copy only after configuring the private named account/env file.
+[Unit]
+Description=Foreground Twitch chat recorder
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/twi/recorder.env
+Environment=XDG_STATE_HOME=%h/.local/state
+Environment=XDG_CACHE_HOME=%h/.cache
+ExecStart=%h/.local/bin/twi record --account recorder --channel ${TWI_RECORD_CHANNEL} --transport ${TWI_RECORD_TRANSPORT} --history %h/.local/state/twi/history.sqlite3
+UMask=0077
+NoNewPrivileges=true
+Restart=on-failure
+RestartSec=15s
+RestartPreventExitStatus=2 3 7
+SuccessExitStatus=130 143
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=20s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

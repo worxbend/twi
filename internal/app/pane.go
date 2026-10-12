@@ -3,7 +3,7 @@ package app
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/rivo/uniseg"
 	"github.com/worxbend/twi/internal/theme"
 )
@@ -55,8 +55,8 @@ func (m shellModel) renderPane(spec paneSpec) string {
 	}
 	title := m.paneTitleLine(spec.width, spec.icon, spec.title, spec.accent, railColor, frameColor, spec.focused)
 	body := lipgloss.NewStyle().
-		Width(clampMin(spec.width-2, 0)).
-		Height(spec.contentHeight).
+		Width(spec.width).
+		Height(spec.contentHeight+1).
 		Foreground(lipgloss.Color(m.theme.Foreground)).
 		Background(lipgloss.Color(m.theme.Surface)).
 		BorderStyle(lipgloss.NormalBorder()).

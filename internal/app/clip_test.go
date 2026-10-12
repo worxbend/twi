@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/twitch"
 	"github.com/worxbend/twi/internal/twitch/helix"
@@ -84,7 +84,7 @@ func TestLiveShellClipInputCreatesClip(t *testing.T) {
 	model.selfBroadcasterID = "123"
 	model.activeChannelState().composerText = "/clip T-5m"
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("/clip Enter returned nil command, want clip-create command")
@@ -124,7 +124,7 @@ func TestLiveShellClipInputSurfacesParseError(t *testing.T) {
 	model.services.clipManager = &appFakeClipManager{}
 	model.activeChannelState().composerText = "/clip T-2m T-4m"
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatal("/clip with invalid offsets returned a command, want nil (no network call)")
@@ -139,7 +139,7 @@ func TestLiveShellClipInputUnavailableWithoutClipManager(t *testing.T) {
 	model.focus = focusComposer
 	model.activeChannelState().composerText = "/clip"
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatal("/clip with no clipManager returned a command, want nil")

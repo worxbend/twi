@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/render"
@@ -90,7 +90,7 @@ func TestCycleMessageLayoutRotatesAndPersists(t *testing.T) {
 	}
 
 	for _, want := range []render.LayoutMode{render.LayoutGrouped, render.LayoutCompact, render.LayoutInline} {
-		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
+		updated, _ := model.Update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
 		model = updated.(shellModel)
 		if model.display.messageLayout != want {
 			t.Fatalf("layout after ctrl+g = %q, want %q", model.display.messageLayout, want)
@@ -114,7 +114,7 @@ func TestCycleBadgeModeRotatesAndChangesRendering(t *testing.T) {
 		t.Fatalf("default badge rendering missing glyph:\n%s", got)
 	}
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
 	if model.display.badgeMode != render.BadgeModeText {
 		t.Fatalf("badge mode after one ctrl+b = %q, want text", model.display.badgeMode)
@@ -123,7 +123,7 @@ func TestCycleBadgeModeRotatesAndChangesRendering(t *testing.T) {
 		t.Fatalf("text badge mode rendering wrong:\n%s", got)
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
 	if model.display.badgeMode != render.BadgeModeOff {
 		t.Fatalf("badge mode after two ctrl+b = %q, want off", model.display.badgeMode)
@@ -132,7 +132,7 @@ func TestCycleBadgeModeRotatesAndChangesRendering(t *testing.T) {
 		t.Fatalf("badges still rendered when off:\n%s", got)
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
 	if model.display.badgeMode != render.BadgeModeGlyph {
 		t.Fatalf("badge mode after three ctrl+b = %q, want glyph again", model.display.badgeMode)
@@ -149,7 +149,7 @@ func TestToggleFullUsernameShowsLogin(t *testing.T) {
 		t.Fatalf("login shown before enabling full usernames:\n%s", got)
 	}
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
 	if !model.display.fullUsername {
 		t.Fatal("ctrl+n did not enable full usernames")
@@ -165,7 +165,7 @@ func TestToggleEmoteHighlightFlipsRenderOption(t *testing.T) {
 		t.Fatal("emote highlighting should default on")
 	}
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
 	if model.display.highlightEmotes {
 		t.Fatal("ctrl+y did not disable emote highlighting")
@@ -186,7 +186,7 @@ func TestDisplayTogglesSurviveAFailedConfigWrite(t *testing.T) {
 	}
 	model.effectiveConfig.Path = filepath.Join(blocker, "config.toml")
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
 	if model.display.messageLayout != render.LayoutGrouped {
 		t.Fatalf("layout = %q after a failed save, want the change applied anyway", model.display.messageLayout)
@@ -197,7 +197,6 @@ func TestDisplayTogglesSurviveAFailedConfigWrite(t *testing.T) {
 }
 
 func TestMessageGroupSurfaceAndRailFollowAuthorColor(t *testing.T) {
-	forceColorProfile(t)
 	model := displayTestModel(t)
 
 	alice := chatRowBlock{message: model.activeChannelState().messages[0]}
@@ -219,7 +218,6 @@ func TestMessageGroupSurfaceAndRailFollowAuthorColor(t *testing.T) {
 }
 
 func TestNoticeRowsKeepNeutralAccentTreatment(t *testing.T) {
-	forceColorProfile(t)
 	model := displayTestModel(t)
 	notice := chatRowBlock{message: twitch.ChatMessage{
 		ID: "n1", Channel: "alpha", Type: twitch.MessageTypeNotice, Text: "system notice",

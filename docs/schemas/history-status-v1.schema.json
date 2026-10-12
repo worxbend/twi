@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "twi history_status v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "type",
+    "database_schema",
+    "path",
+    "private_files",
+    "bytes",
+    "retention_age",
+    "max_bytes",
+    "store_uuid",
+    "high_water",
+    "low_water",
+    "captures",
+    "gaps"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "type": {
+      "const": "history_status"
+    },
+    "database_schema": {
+      "type": "integer"
+    },
+    "path": {
+      "type": "string"
+    },
+    "private_files": {
+      "type": "boolean"
+    },
+    "bytes": {
+      "type": "integer"
+    },
+    "retention_age": {
+      "type": "string"
+    },
+    "max_bytes": {
+      "type": "integer"
+    },
+    "store_uuid": {
+      "type": "string"
+    },
+    "high_water": {
+      "type": "integer"
+    },
+    "low_water": {
+      "type": "integer"
+    },
+    "captures": {
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "gaps": {
+      "type": [
+        "array",
+        "null"
+      ]
+    }
+  }
+}

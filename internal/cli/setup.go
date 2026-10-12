@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -29,8 +31,6 @@ save tokens through the private credential store on supported Unix platforms.
 
 Flags:
 `
-
-var setupInput io.Reader = os.Stdin
 
 type setupCredentialAction string
 
@@ -82,16 +82,22 @@ func parseSetupFlags(args []string, stdout, stderr io.Writer) (opts setupFlagOpt
 	fs.BoolVar(&opts.login, "login", false, "run twi login after writing non-secret config")
 	fs.BoolVar(&opts.loginDryRun, "login-dry-run", false, "run twi login --dry-run after writing non-secret config")
 	fs.Usage = func() {
-		fmt.Fprint(stderr, setupUsage)
+		fmt.Fprint(fs.Output(), setupUsage)
 		fs.PrintDefaults()
 	}
 
-	if printUsageOnHelpRequest(fs, setupUsage, args, stdout) {
-		return opts, 0, false
-	}
+	var parseOutput bytes.Buffer
+	fs.SetOutput(&parseOutput)
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fs.SetOutput(stdout)
+			fs.Usage()
+			return opts, 0, false
+		}
+		_, _ = io.Copy(stderr, &parseOutput)
 		return opts, 2, false
 	}
+	fs.SetOutput(stderr)
 	if rejectPositionalArgs(fs, "setup", stderr) {
 		return opts, 2, false
 	}
@@ -116,7 +122,7 @@ func setupCredentialActionFor(opts setupFlagOptions) setupCredentialAction {
 	}
 }
 
-func runSetup(args []string, stdout, stderr io.Writer) int {
+func (r *runner) runSetupContext(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	opts, code, ok := parseSetupFlags(args, stdout, stderr)
 	if !ok {
 		return code
@@ -132,7 +138,7 @@ func runSetup(args []string, stdout, stderr io.Writer) int {
 	action := setupCredentialActionFor(opts)
 	if !opts.nonInteractive {
 		wizard := setupWizard{
-			reader: bufio.NewReader(setupInput),
+			reader: bufio.NewReader(contextReader{ctx, stdin}),
 			stdout: stdout,
 		}
 		action, err = wizard.Run(&cfg, action)
@@ -153,6 +159,9 @@ func runSetup(args []string, stdout, stderr io.Writer) int {
 	// Setup deliberately materializes the env-merged effective config: its job
 	// is to capture the configuration the flags or wizard just confirmed, so
 	// values that arrived via the environment are written along with the rest.
+	if ctx.Err() != nil {
+		return 1
+	}
 	if err := config.WriteNonSecretFile(cfg.Path, cfg); err != nil {
 		fmt.Fprintf(stderr, "write config: %s\n", config.RedactDisplayValue(err.Error()))
 		return 1
@@ -164,10 +173,10 @@ func runSetup(args []string, stdout, stderr io.Writer) int {
 	switch action {
 	case setupCredentialLogin:
 		fmt.Fprintln(stdout, "Starting login handoff.")
-		return runLogin([]string{"--config", cfg.Path}, stdout, stderr)
+		return r.runLoginContext(ctx, []string{"--config", cfg.Path}, stdout, stderr)
 	case setupCredentialDryRun:
 		fmt.Fprintln(stdout, "Starting login dry run.")
-		return runLogin([]string{"--config", cfg.Path, "--dry-run"}, stdout, stderr)
+		return r.runLoginContext(ctx, []string{"--config", cfg.Path, "--dry-run"}, stdout, stderr)
 	default:
 		fmt.Fprintf(stdout, "Next: run `twi login --config %s` when your Twitch app client ID and client secret are ready.\n", displayPath)
 		return 0

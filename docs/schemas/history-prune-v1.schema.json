@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "twi history_prune v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "type",
+    "records",
+    "through",
+    "bytes",
+    "dry_run"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "type": {
+      "const": "history_prune"
+    },
+    "records": {
+      "type": "integer"
+    },
+    "through": {
+      "type": "integer"
+    },
+    "bytes": {
+      "type": "integer"
+    },
+    "dry_run": {
+      "type": "boolean"
+    }
+  }
+}

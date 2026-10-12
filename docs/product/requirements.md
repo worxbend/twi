@@ -64,3 +64,10 @@ Terminal-image rendering (Kitty graphics) was implemented and later removed as a
 - Target terminal support tiers are explicit.
 - Current stable Go version is recorded from the provided verification context.
 - ADRs exist for IRC transport, Helix asset wrapper, Kitty graphics, normalized message model, animation scheduler, and Go toolchain management.
+
+## Automation and durable history
+
+Producer, consumer, foreground recorder, and local history commands are implemented
+through UI-independent services and explicit public DTOs. See [Automation](../automation.md) for
+capabilities, examples, coverage/cursor guarantees, retention, and validation limits.
+Live Twitch observation parity requires controlled credentialed validation.

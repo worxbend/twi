@@ -30,6 +30,7 @@ type ChatAssetsClientConfig struct {
 	HTTPClient            *http.Client
 	ClientID              string
 	OAuthToken            string
+	RetryPolicy           *RetryPolicy
 }
 
 // ChatAssetsClient resolves Twitch emote and badge metadata through
@@ -50,7 +51,7 @@ func NewChatAssetsClient(cfg ChatAssetsClientConfig) *ChatAssetsClient {
 		globalEmotesEndpoint:  endpointOrDefault(cfg.GlobalEmotesEndpoint, defaultHelixGlobalEmotesURL),
 		channelBadgesEndpoint: endpointOrDefault(cfg.ChannelBadgesEndpoint, defaultHelixChannelBadgesURL),
 		globalBadgesEndpoint:  endpointOrDefault(cfg.GlobalBadgesEndpoint, defaultHelixGlobalBadgesURL),
-		transport:             newTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken),
+		transport:             newTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken, cfg.RetryPolicy),
 	}
 }
 

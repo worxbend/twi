@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/twitch"
 	"github.com/worxbend/twi/internal/twitch/helix"
@@ -73,16 +73,16 @@ func TestTabSwitchAltDigitTogglesBetweenChatAndStreamInfo(t *testing.T) {
 	if model.activeTab != tabChat {
 		t.Fatalf("default activeTab = %v, want tabChat", model.activeTab)
 	}
-	if !strings.Contains(model.View(), "*1:Chat") {
-		t.Fatalf("view missing active chat tab marker:\n%s", model.View())
+	if !strings.Contains(model.View().Content, "*1:Chat") {
+		t.Fatalf("view missing active chat tab marker:\n%s", model.View().Content)
 	}
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}, Alt: true})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: '2', Mod: tea.ModAlt})
 	model = updated.(shellModel)
 	if model.activeTab != tabStreamInfo {
 		t.Fatalf("activeTab after alt+2 = %v, want tabStreamInfo", model.activeTab)
 	}
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "*2:Stream Info") {
 		t.Fatalf("view missing active stream-info tab marker:\n%s", view)
 	}
@@ -90,13 +90,13 @@ func TestTabSwitchAltDigitTogglesBetweenChatAndStreamInfo(t *testing.T) {
 		t.Fatalf("view with no channelManager should show unavailable message:\n%s", view)
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}, Alt: true})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: '1', Mod: tea.ModAlt})
 	model = updated.(shellModel)
 	if model.activeTab != tabChat {
 		t.Fatalf("activeTab after alt+1 = %v, want tabChat", model.activeTab)
 	}
-	if !strings.Contains(model.View(), "Message #example") {
-		t.Fatalf("view after switching back to chat missing composer:\n%s", model.View())
+	if !strings.Contains(model.View().Content, "Message #example") {
+		t.Fatalf("view after switching back to chat missing composer:\n%s", model.View().Content)
 	}
 }
 
@@ -183,17 +183,17 @@ func TestStreamInfoEditAndSaveUpdatesOnlyChangedFields(t *testing.T) {
 
 	// Edit only the title field; category/language/tags stay untouched.
 	model.streamInfo.selected = streamInfoFieldTitle
-	updated, _ := model.handleStreamInfoKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := model.handleStreamInfoKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated
 	if !model.streamInfo.editing {
 		t.Fatal("editing = false after enter on unedited field, want true")
 	}
 	model.streamInfo.editBuffer = ""
 	for _, r := range "New title" {
-		updated, _ = model.handleStreamInfoKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		updated, _ = model.handleStreamInfoKey(tea.KeyPressMsg{Text: string([]rune{r})})
 		model = updated
 	}
-	updated, _ = model.handleStreamInfoKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = model.handleStreamInfoKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated
 	if model.streamInfo.editing {
 		t.Fatal("editing = true after commit, want false")
@@ -202,7 +202,7 @@ func TestStreamInfoEditAndSaveUpdatesOnlyChangedFields(t *testing.T) {
 		t.Fatalf("title = %q, want %q", model.streamInfo.title, "New title")
 	}
 
-	updated, cmd := model.handleStreamInfoKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, cmd := model.handleStreamInfoKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	model = updated
 	if cmd == nil {
 		t.Fatal("ctrl+s returned nil command, want save command")
@@ -280,7 +280,7 @@ func TestCategoryPickerSearchesAndSelectsCategory(t *testing.T) {
 	model = model.applyStreamInfoLoaded(loaded)
 
 	model.streamInfo.selected = streamInfoFieldCategory
-	updated, cmd := model.handleStreamInfoKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.handleStreamInfoKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated
 	if !model.categoryPicker.open {
 		t.Fatal("categoryPicker.open = false after enter on category field, want true")
@@ -299,7 +299,7 @@ func TestCategoryPickerSearchesAndSelectsCategory(t *testing.T) {
 	// Type "fort" to search for Fortnite categories; each keystroke debounces.
 	model.categoryPicker.query = ""
 	for _, r := range "fort" {
-		updated, cmd = model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		updated, cmd = model.handleCategoryPickerKey(tea.KeyPressMsg{Text: string([]rune{r})})
 		model = updated
 		if cmd == nil {
 			t.Fatal("typing in category picker returned nil command, want debounce tick")
@@ -320,7 +320,7 @@ func TestCategoryPickerSearchesAndSelectsCategory(t *testing.T) {
 	// Entry 0 is the pinned "no category" row; move to the first real result
 	// (Fortnite, alphabetically before Fortnite Creative) and select it.
 	model.categoryPicker.move(1, len(model.categoryPickerEntries()))
-	updated, _ = model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = model.handleCategoryPickerKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated
 	if model.categoryPicker.open {
 		t.Fatal("categoryPicker.open = true after enter, want closed")
@@ -338,7 +338,7 @@ func TestCategoryPickerNoCategoryEntryClearsCategory(t *testing.T) {
 	model.streamInfo.categoryGameID = "1"
 	model.categoryPicker = categoryPickerState{open: true}
 
-	updated, _ := model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := model.handleCategoryPickerKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated
 	if model.streamInfo.category != "" || model.streamInfo.categoryGameID != "" {
 		t.Fatalf("category = %q id = %q, want cleared", model.streamInfo.category, model.streamInfo.categoryGameID)
@@ -352,7 +352,7 @@ func TestCategoryPickerEscCancelsWithoutChangingCategory(t *testing.T) {
 	model.streamInfo.categoryGameID = "1"
 	model.categoryPicker = categoryPickerState{open: true, filterList: filterList{query: "fort"}}
 
-	updated, _ := model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, _ := model.handleCategoryPickerKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	model = updated
 	if model.categoryPicker.open {
 		t.Fatal("categoryPicker.open = true after esc, want closed")
@@ -370,11 +370,11 @@ func TestCategoryPickerStaleDebounceAndResultsAreDiscarded(t *testing.T) {
 	}}
 	model.categoryPicker = categoryPickerState{open: true}
 
-	updated, cmd1 := model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	updated, cmd1 := model.handleCategoryPickerKey(tea.KeyPressMsg{Text: string([]rune{'f'})})
 	model = updated
 	staleDebounce := cmd1().(categoryPickerDebounceMsg)
 
-	updated, _ = model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	updated, _ = model.handleCategoryPickerKey(tea.KeyPressMsg{Text: string([]rune{'o'})})
 	model = updated
 
 	// The first keystroke's debounce tick arrives after the second keystroke

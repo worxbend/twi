@@ -10,8 +10,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/rivo/uniseg"
 	"github.com/worxbend/twi/internal/animation"
 	"github.com/worxbend/twi/internal/assets"
@@ -49,6 +50,9 @@ const (
 )
 
 type ClientOptions struct {
+	SourceDetail         string
+	Recorder             ChatRecorder
+	Context              context.Context
 	SystemNotifier       SystemNotifier
 	StreamStatusResolver twitch.StreamLookup
 	EmoteIndex           *assets.EmoteIndex
@@ -87,6 +91,8 @@ type shellModel struct {
 	avatarMode     string
 	mouseEnabled   bool
 	debugRecording bool
+	recorder       ChatRecorder
+	recorderError  error
 	// sourceDetail names where chat is coming from ("live IRC", "mock") for
 	// the status line.
 	sourceDetail string
@@ -164,7 +170,7 @@ type shellModel struct {
 // The set mirrors ClientOptions, which is how they arrive.
 type twitchServices struct {
 	// client is the chat transport events are read from and sends go to.
-	client ChatClient
+	client ChatSource
 	// notifier raises desktop notifications; nil disables them.
 	systemNotifier SystemNotifier
 	// streamStatusResolver backs the LIVE indicator.
@@ -422,13 +428,13 @@ type reconnectCompletedMsg struct {
 
 // RunClient starts the Bubble Tea chat shell against a real app-facing chat
 // client. The client is closed when the shell exits.
-func RunClient(w io.Writer, cfg config.Config, client ChatClient) error {
+func RunClient(w io.Writer, cfg config.Config, client ChatSource) error {
 	return RunClientWithOptions(w, cfg, client, ClientOptions{})
 }
 
 // RunClientWithOptions starts the Bubble Tea chat shell with optional
 // asynchronous app services such as avatar metadata resolution.
-func RunClientWithOptions(w io.Writer, cfg config.Config, client ChatClient, opts ClientOptions) error {
+func RunClientWithOptions(w io.Writer, cfg config.Config, client ChatSource, opts ClientOptions) error {
 	if client == nil {
 		return errors.New("missing chat client")
 	}
@@ -448,24 +454,27 @@ func RunClientWithOptions(w io.Writer, cfg config.Config, client ChatClient, opt
 	model := newLiveModelWithClockAndOptions(channel, cfg, client, nil, opts)
 	model.debugAppStart("live", len(configuredChannels(channel, cfg.DefaultChannels)))
 	if !interactive {
-		_, err := fmt.Fprintln(w, model.View())
+		_, err := fmt.Fprintln(w, ansi.Strip(model.View().Content))
 		return err
 	}
 	model.frames.splashUntil = splashDeadline(model.animationMode)
 	model.terminalOutput = w
-	primeTerminalBackground(w, model.canvasBackground())
 
 	// Everything the shell asks Twitch for hangs off this context, so quitting
 	// cancels the requests still in flight rather than leaving their goroutines
 	// waiting on a socket nobody is going to read.
-	lifetime, stop := context.WithCancel(context.Background())
+	base := opts.Context
+	if base == nil {
+		base = context.Background()
+	}
+	lifetime, stop := context.WithCancel(base)
 	defer stop()
 	model.lifetime = lifetime
 
-	program := tea.NewProgram(model, programOptions(w, cfg)...)
+	options := append(programOptions(w, cfg), tea.WithContext(lifetime))
+	program := tea.NewProgram(model, options...)
 	_, err := program.Run()
 	stop()
-	resetTerminalBackground(w)
 	return err
 }
 
@@ -480,11 +489,7 @@ func splashDeadline(animationMode string) time.Time {
 }
 
 func programOptions(w io.Writer, cfg config.Config) []tea.ProgramOption {
-	options := []tea.ProgramOption{tea.WithOutput(w), tea.WithAltScreen(), tea.WithReportFocus()}
-	if cfg.Features.EnableMouse {
-		options = append(options, tea.WithMouseCellMotion())
-	}
-	return options
+	return []tea.ProgramOption{tea.WithOutput(w)}
 }
 
 // newShellModel builds the parts of the model that come from configuration,
@@ -536,11 +541,11 @@ func newShellModel(channel string, cfg config.Config, clock animation.Clock) she
 	}
 }
 
-func newLiveModelWithClock(channel string, cfg config.Config, client ChatClient, clock animation.Clock) shellModel {
+func newLiveModelWithClock(channel string, cfg config.Config, client ChatSource, clock animation.Clock) shellModel {
 	return newLiveModelWithClockAndOptions(channel, cfg, client, clock, ClientOptions{})
 }
 
-func newLiveModelWithClockAndOptions(channel string, cfg config.Config, client ChatClient, clock animation.Clock, opts ClientOptions) shellModel {
+func newLiveModelWithClockAndOptions(channel string, cfg config.Config, client ChatSource, clock animation.Clock, opts ClientOptions) shellModel {
 	model := newShellModel(channel, cfg, clock)
 	active := model.channels.activeState()
 	active.status = ConnectionState{
@@ -551,6 +556,9 @@ func newLiveModelWithClockAndOptions(channel string, cfg config.Config, client C
 	}
 
 	model.sourceDetail = "live IRC"
+	if opts.SourceDetail != "" {
+		model.sourceDetail = opts.SourceDetail
+	}
 	model.services = twitchServices{
 		client:               client,
 		systemNotifier:       opts.SystemNotifier,
@@ -568,11 +576,13 @@ func newLiveModelWithClockAndOptions(channel string, cfg config.Config, client C
 	model.emotes.emoteEntries = make(map[string][]assets.EmoteEntry)
 	model.emotes.emoteEntriesRequested = make(map[string]bool)
 	model.debugLogger = opts.DebugLogger
+	model.recorder = opts.Recorder
 	return model
 }
 
 func (m shellModel) Init() tea.Cmd {
 	return tea.Batch(
+		m.nextRecorderErrorCommand(),
 		m.nextIncomingCommand(),
 		m.nextClientMessageCommand(),
 		m.nextConnectionStateCommand(),
@@ -596,6 +606,10 @@ func (m shellModel) Init() tea.Cmd {
 // message type, so the order they are tried in is only about readability -
 // it cannot change which handler runs.
 func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if failure, ok := msg.(recorderErrorMsg); ok {
+		m.recorderError = failure.err
+		return m, nil
+	}
 	if model, cmd, handled := m.updateTerminalEvent(msg); handled {
 		return model, cmd
 	}
@@ -609,38 +623,6 @@ func (m shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return model, cmd
 	}
 	return m, nil
-}
-
-// updateTerminalEvent handles what the terminal itself reports: keys, mouse
-// activity, resizes, and the window gaining or losing focus.
-func (m *shellModel) updateTerminalEvent(msg tea.Msg) (shellModel, tea.Cmd, bool) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		model, cmd := m.handleKey(msg)
-		return model, cmd, true
-	case tea.MouseMsg:
-		// The theme page and category picker own the whole screen, so a
-		// click has nothing to hit outside them.
-		if m.themeSettings.open || m.categoryPicker.open {
-			return *m, nil, true
-		}
-		model, cmd := m.handleMouse(msg)
-		return model, cmd, true
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.refreshActiveRevealRows()
-		m.clampScroll()
-		model, cmd := m.withAsyncAssetCommands(nil)
-		return model, cmd, true
-	case tea.FocusMsg:
-		m.terminalFocused = true
-		return *m, nil, true
-	case tea.BlurMsg:
-		m.terminalFocused = false
-		return *m, nil, true
-	}
-	return *m, nil, false
 }
 
 // updateChatStream handles chat arriving from the connected client - or from
@@ -728,6 +710,12 @@ func (m *shellModel) updateChatStream(msg tea.Msg) (shellModel, tea.Cmd, bool) {
 // stream stopped: event is the name that line is filed under, detail is the
 // wording the user sees.
 func (m *shellModel) markStreamClosed(event, detail string) {
+	// Stream closures can arrive after their terminal failure through a separate
+	// command. Preserve the actionable failure instead of replacing it with EOF.
+	if state := m.activeChannelState().status; state.Status == ConnectionFailed || state.Status == ConnectionClosed {
+		m.debugConnectionState(event, state)
+		return
+	}
 	m.channels.applyConnectionState(ConnectionState{
 		Status:  ConnectionDisconnected,
 		Channel: m.activeChannelName(),
@@ -864,362 +852,6 @@ func (m *shellModel) updateAsyncResults(msg tea.Msg) (shellModel, tea.Cmd, bool)
 // that must work everywhere (quit, tab switching, the panel toggles) are
 // consumed first, then an open overlay or a non-chat tab gets first refusal
 // on what is left, and only then do the chat-view bindings apply.
-// handleRuneShortcut handles the single-character shortcuts of the chat view.
-//
-// Each is gated on where the focus is, because inside the composer these are
-// ordinary characters in the message being typed. handled is false when the
-// rune means nothing in the current focus, leaving the caller to treat it as
-// text.
-//
-// This used to be nine consecutive `if` statements that each re-tested
-// `m.focus == focusChat && len(msg.Runes) == 1` before comparing one rune.
-// Testing the focus once and switching on the rune says the same thing, and
-// adding a shortcut is now one case rather than another copy of the guard.
-func (m *shellModel) handleRuneShortcut(r rune) (shellModel, tea.Cmd, bool) {
-	// "?" toggles help everywhere except in the composer, where it is an
-	// ordinary character in the message being typed.
-	if r == '?' && m.focus != focusComposer {
-		m.helpExpanded = !m.helpExpanded
-		m.clampScroll()
-		return *m, nil, true
-	}
-	// Pane resizing works from the chat view and from the sidebar, because
-	// the sidebar is the one pane whose own width these keys adjust;
-	// everywhere else they act on the activity column.
-	if m.focus == focusChat || m.focus == focusSidebar {
-		switch r {
-		case '<':
-			m.resizeFocusedPane(-paneResizeStep)
-			m.clampScroll()
-			return *m, nil, true
-		case '>':
-			m.resizeFocusedPane(paneResizeStep)
-			m.clampScroll()
-			return *m, nil, true
-		case '=':
-			m.resetPaneWidths()
-			m.clampScroll()
-			return *m, nil, true
-		}
-	}
-	// Everything below belongs to the chat view alone.
-	if m.focus != focusChat {
-		return *m, nil, false
-	}
-	// The message-filter shortcuts are 1-4, and are looked up rather than
-	// listed here so the filters stay defined in one place.
-	if filter, ok := messageFilterForShortcutRune(r); ok {
-		return *m, m.toggleActiveMessageFilter(filter), true
-	}
-	// i/o/a all enter the composer, matching vim's insert keys; the composer
-	// has no cursor to position, so they differ only in muscle memory.
-	if isInsertRune(r) {
-		m.focus = focusComposer
-		return *m, nil, true
-	}
-	switch r {
-	case ']':
-		if m.channels.switchBy(1) {
-			m.clampScroll()
-			model, cmd := m.withAsyncAssetCommands(nil)
-			return model, cmd, true
-		}
-		return *m, nil, true
-	case '[':
-		if m.channels.switchBy(-1) {
-			m.clampScroll()
-			model, cmd := m.withAsyncAssetCommands(nil)
-			return model, cmd, true
-		}
-		return *m, nil, true
-	case '0':
-		return *m, m.resetActiveMessageFilters(), true
-	case 'q':
-		return *m, tea.Quit, true
-	case 'r':
-		m.startReplyMode()
-		return *m, nil, true
-	case 'j':
-		m.selectReplyMessage(1)
-		return *m, nil, true
-	case 'k':
-		m.selectReplyMessage(-1)
-		return *m, nil, true
-	case 'K':
-		// K is vim's "show me more about this", which is exactly what the
-		// inspect panel does. It replaces the old bare i, now an insert key.
-		m.toggleInspect()
-		return *m, nil, true
-	}
-	return *m, nil, false
-}
-
-// handleAlwaysOnKey consumes the keys that must work no matter what is on
-// screen: quitting, skipping the splash, switching tabs, and the three panel
-// toggles. handled is false when the key was none of those, and the caller
-// carries on with it.
-//
-// Its first few lines still run for every keypress, because disarming a
-// pending ctrl+L confirmation is something any other key does.
-func (m *shellModel) handleAlwaysOnKey(msg tea.KeyMsg) (shellModel, tea.Cmd, bool) {
-	// Any key other than a second ctrl+L abandons a pending clear, so a
-	// stray press cannot arm the confirmation and sit waiting for an
-	// unrelated keystroke to trigger it later.
-	if m.pendingClearChat && msg.Type != tea.KeyCtrlL {
-		m.pendingClearChat = false
-	}
-	switch {
-	case msg.Type == tea.KeyCtrlC:
-		return *m, tea.Quit, true
-	case m.splashActive():
-		m.frames.splashSkipped = true
-		return *m, nil, true
-	}
-	if msg.Type == tea.KeyRunes && msg.Alt && len(msg.Runes) == 1 {
-		if tab, ok := tabForShortcutRune(msg.Runes[0]); ok {
-			model, cmd := m.switchToTab(tab)
-			return model, cmd, true
-		}
-	}
-	switch msg.Type {
-	case tea.KeyCtrlP:
-		m.toggleCommandPalette()
-		return *m, nil, true
-	case tea.KeyCtrlE:
-		m.toggleEmotePicker()
-		return *m, nil, true
-	case tea.KeyCtrlT:
-		m.toggleThemeSettings()
-		return *m, nil, true
-	}
-	if m.handleDisplayToggleKey(msg) {
-		return *m, nil, true
-	}
-	return *m, nil, false
-}
-
-// routeKeyToOpenPanel hands the key to whichever overlay or full-screen tab
-// currently owns the keyboard. At most one of them is ever active, and the
-// case order decides which wins if that were somehow not true.
-func (m shellModel) routeKeyToOpenPanel(msg tea.KeyMsg) (shellModel, tea.Cmd, bool) {
-	var (
-		model shellModel
-		cmd   tea.Cmd
-	)
-	switch {
-	case m.palette.open:
-		model, cmd = m.handleCommandPaletteKey(msg)
-	case m.emotePicker.open:
-		model, cmd = m.handleEmotePickerKey(msg)
-	case m.themeSettings.open:
-		model, cmd = m.handleThemeSettingsKey(msg)
-	case m.channelPicker.open:
-		model, cmd = m.handleChannelPickerKey(msg)
-	case m.categoryPicker.open:
-		model, cmd = m.handleCategoryPickerKey(msg)
-	case m.activeTab == tabStreamInfo:
-		model, cmd = m.handleStreamInfoKey(msg)
-	case m.activeTab == tabMisc:
-		model, cmd = m.handleMiscKey(msg)
-	default:
-		return m, nil, false
-	}
-	return model, cmd, true
-}
-
-// handleMentionKey lets the @mention strip claim tab, the arrows and esc, but
-// only while it is actually offering completions, so those keys keep their
-// normal meaning the rest of the time.
-func (m *shellModel) handleMentionKey(msg tea.KeyMsg) (shellModel, tea.Cmd, bool) {
-	if len(m.mentionSuggestions()) == 0 {
-		return *m, nil, false
-	}
-	switch msg.Type {
-	case tea.KeyTab:
-		if m.acceptMentionSuggestion() {
-			return *m, nil, true
-		}
-	case tea.KeyDown:
-		m.moveMentionSelection(1)
-		return *m, nil, true
-	case tea.KeyUp:
-		m.moveMentionSelection(-1)
-		return *m, nil, true
-	case tea.KeyEsc:
-		if m.dismissMentionSuggestions() {
-			return *m, nil, true
-		}
-	}
-	return *m, nil, false
-}
-
-func (m shellModel) handleKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
-	if model, cmd, handled := m.handleAlwaysOnKey(msg); handled {
-		return model, cmd
-	}
-	if model, cmd, handled := m.routeKeyToOpenPanel(msg); handled {
-		return model, cmd
-	}
-	if model, cmd, handled := m.handleMentionKey(msg); handled {
-		return model, cmd
-	}
-	// The space leader chord is consumed before every other binding so a
-	// pending leader can never be mistaken for a normal-mode key. It is
-	// only ever armed outside the composer, where space is literal text.
-	if m.leaderPending {
-		return m.handleLeaderKey(msg)
-	}
-	if msg.Type == tea.KeySpace && m.focus != focusComposer {
-		m.leaderPending = true
-		return m, nil
-	}
-	if m.focus == focusSidebar {
-		if model, cmd, handled := m.handleSidebarKey(msg); handled {
-			return model, cmd
-		}
-	}
-
-	switch msg.Type {
-	case tea.KeyTab:
-		m.cycleFocus()
-	case tea.KeyPgUp:
-		m.scrollBy(m.layout().chatContentHeight)
-	case tea.KeyPgDown:
-		m.scrollBy(-m.layout().chatContentHeight)
-	case tea.KeyCtrlL:
-		// Clearing discards the whole retained backlog for the channel
-		// and cannot be undone. It is one keystroke, next to keys used
-		// constantly, on a tool that is often running during a live
-		// broadcast -- so it asks once. The leader chord for closing a
-		// channel and the sidebar's explicit x are already deliberate
-		// enough not to need this.
-		if m.pendingClearChat {
-			m.pendingClearChat = false
-			m.clearLocalChat()
-			break
-		}
-		m.pendingClearChat = true
-	case tea.KeyCtrlR:
-		return m, m.requestReconnect()
-	case tea.KeyBackspace:
-		if m.focus == focusComposer {
-			m.deleteComposerRune()
-			m.resetMentionSelection()
-		}
-	case tea.KeyEsc:
-		// esc is "leave insert mode" first: from the composer it always
-		// returns to the chat view, keeping the draft intact.
-		if m.focus == focusComposer {
-			m.focus = focusChat
-			return m, nil
-		}
-		if m.inspectOpen {
-			m.inspectOpen = false
-			m.clampScroll()
-			return m, nil
-		}
-		m.activeChannelState().replyTo = nil
-	case tea.KeyUp:
-		if m.focus == focusChat {
-			m.selectReplyMessage(-1)
-		}
-	case tea.KeyDown:
-		if m.focus == focusChat {
-			m.selectReplyMessage(1)
-		}
-	case tea.KeyCtrlU:
-		if m.focus == focusComposer {
-			m.activeChannelState().composerText = ""
-		}
-	case tea.KeyEnter:
-		if m.focus == focusComposer {
-			return m.queueComposerSend()
-		}
-	case tea.KeySpace:
-		if m.focus == focusComposer {
-			m.activeChannelState().composerText += " "
-		}
-	case tea.KeyRunes:
-		if len(msg.Runes) == 1 {
-			if model, cmd, handled := m.handleRuneShortcut(msg.Runes[0]); handled {
-				return model, cmd
-			}
-		}
-		if m.focus == focusComposer {
-			m.insertComposerText(string(msg.Runes))
-			m.resetMentionSelection()
-		}
-	}
-	return m, nil
-}
-
-func (m shellModel) View() string {
-	backgroundOverride := m.themeBackgroundSequence()
-	if m.splashActive() {
-		return backgroundOverride + m.splashView()
-	}
-	// The theme picker is a full-screen page, not a docked strip: it replaces
-	// the dashboard the same way the splash does.
-	if m.themeSettings.open {
-		return backgroundOverride + m.themeSettingsPageView()
-	}
-	layout := m.layout()
-
-	regions := make([]string, 0, 4)
-	if layout.tabBarHeight > 0 {
-		regions = append(regions, m.tabBarLine(layout.width))
-	}
-	if layout.statusHeight > 0 {
-		regions = append(regions, m.statusLine(layout.width))
-	}
-	if layout.chatHeight > 0 {
-		chat := m.chatView(layout)
-		if layout.sidebarWidth > 0 {
-			chat = lipgloss.JoinHorizontal(lipgloss.Top, m.sidebarView(layout), chat)
-		}
-		if layout.activityWidth > 0 {
-			chat = lipgloss.JoinHorizontal(lipgloss.Top, chat, m.activityLogView(layout))
-		}
-		regions = append(regions, chat)
-	}
-	if layout.streamInfoHeight > 0 {
-		regions = append(regions, m.streamInfoView(layout))
-	}
-	if layout.miscHeight > 0 {
-		regions = append(regions, m.miscView(layout))
-	}
-	if layout.paletteHeight > 0 {
-		regions = append(regions, m.commandPaletteView(layout))
-	}
-	if layout.inspectHeight > 0 {
-		regions = append(regions, m.inspectView(layout))
-	}
-	if layout.emotePickerHeight > 0 {
-		regions = append(regions, m.emotePickerView(layout))
-	}
-	if layout.channelPickerHeight > 0 {
-		regions = append(regions, m.channelPickerView(layout))
-	}
-	if layout.categoryPickerHeight > 0 {
-		regions = append(regions, m.categoryPickerView(layout))
-	}
-	if layout.composerHeight > 0 {
-		regions = append(regions, m.composerView(layout))
-	}
-	if layout.helpHeight > 0 {
-		regions = append(regions, m.helpView(layout.width, layout.helpHeight))
-	}
-
-	joined := lipgloss.JoinVertical(lipgloss.Left, regions...)
-	rendered := lipgloss.NewStyle().
-		Width(layout.width).
-		Height(clampMin(m.height, 1)).
-		Background(lipgloss.Color(m.canvasBackground())).
-		Foreground(lipgloss.Color(m.theme.Foreground)).
-		Render(joined)
-	return backgroundOverride + rendered
-}
-
 // droppedMessageCount reports messages lost to a full buffer, or zero for a
 // source that cannot drop (mock mode, test fakes).
 func (m shellModel) droppedMessageCount() uint64 {
@@ -1270,6 +902,14 @@ func (m shellModel) statusLine(width int) string {
 	}
 	appendSeparated := func(segments ...run) {
 		appendSegments(append([]run{separatorRun(separator, tokens)}, segments...)...)
+	}
+
+	if m.recorder != nil {
+		if m.recorderError != nil {
+			appendSegments(run{text: "HISTORY ERROR " + m.recorderError.Error(), foreground: tokens.OnError, background: tokens.Error, bold: true}, separatorRun(separator, tokens))
+		} else {
+			appendSegments(run{text: "HISTORY REC", foreground: tokens.OnSuccess, background: tokens.Success, bold: true}, separatorRun(separator, tokens))
+		}
 	}
 
 	channelColor := tokens.Muted

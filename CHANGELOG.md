@@ -6,10 +6,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 While the major version is `0`, minor releases may change behavior.
 
-Versions are derived from git tags (`git describe`); there is no version
-constant in the source tree.
+Release builds embed `git describe` through linker flags. Development builds
+report their build revision and `development` unless an explicit version is supplied.
 
 ## [Unreleased]
+
+### Added
+
+- Explicit `produce`/`consume` modes and `-P`/`-C` aliases, acknowledged Helix
+  receipts, strict bounded batch input, JSONL/text output, capability login,
+  completion/version, and documented process exit contracts.
+- Private SQLite history with foreground recording, capture coverage/gaps,
+  retention/status/prune, per-channel tails, relative time, resumable cursors,
+  and bounded replay-follow from one durable stream.
+- Explicit EventSub reader with normalized messages/moderation/shared metadata,
+  deduplication, keepalives, revocation, and reconnect handover.
+
+
+### Changed
+
+- Bound pending TUI sends and scrollback, preserve drafts under pressure, share
+  account/channel permits and token refresh, and propagate process cancellation.
+- Refresh Go modules and pinned analysis tools to their latest compatible
+  releases, use Go 1.27.2, and align Docker, Snap, and GitHub Actions build
+  dependencies. Bubble Tea and Lip Gloss remain on their current major versions;
+  their v2 migration is planned separately in `PLAN.md`.
+- Add `PLAN.md` with the researched producer/consumer CLI contract, local chat
+  history design, architecture changes, and a prioritized maintenance roadmap.
 
 ## [0.18.0] — 2026-10-06
 

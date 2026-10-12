@@ -5,13 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/worxbend/twi/internal/config"
 )
 
 func TestRenderPanePreservesDimensionsAndAddsIconTitle(t *testing.T) {
-	forceColorProfile(t)
 	model := newMockModel("alpha", config.Default())
 	view := model.renderPane(paneSpec{
 		icon:          "💬",
@@ -41,7 +40,6 @@ func TestRenderPanePreservesDimensionsAndAddsIconTitle(t *testing.T) {
 }
 
 func TestFocusedPaneChromeAnimatesFromSharedFrame(t *testing.T) {
-	forceColorProfile(t)
 	model := newMockModel("alpha", config.Default())
 	spec := paneSpec{icon: "💬", title: "Chat", width: 24, contentHeight: 1, accent: model.theme.Accent, focused: true}
 	model.frames.lastFrameAt = time.UnixMilli(1600)
@@ -57,7 +55,6 @@ func TestFocusedPaneChromeAnimatesFromSharedFrame(t *testing.T) {
 }
 
 func TestChatPaneChromeIsStaticWhenNotFocused(t *testing.T) {
-	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "fast"
 	model := newMockModel("alpha", cfg)
@@ -80,7 +77,6 @@ func TestChatPaneChromeIsStaticWhenNotFocused(t *testing.T) {
 // on focus at all, unlike every other pane (see
 // TestFocusedPaneChromeAnimatesFromSharedFrame).
 func TestChatPaneChromeAnimatesWhenFocused(t *testing.T) {
-	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "fast"
 	model := newMockModel("alpha", cfg)
@@ -105,7 +101,6 @@ func TestCanvasBackgroundIsDarkerThanThemeBackground(t *testing.T) {
 }
 
 func TestPaneTitleLinePreservesResponsiveWidth(t *testing.T) {
-	forceColorProfile(t)
 	model := newMockModel("alpha", config.Default())
 	for width := 1; width <= 60; width++ {
 		for _, focused := range []bool{false, true} {

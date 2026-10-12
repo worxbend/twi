@@ -255,3 +255,10 @@ go build -o bin/twi ./cmd/twi
 Twitch IRC connection status is connection-level: Multi-channel live mode joins each configured channel, but Twitch IRC connect, reconnect, and disconnect callbacks are not independent per-channel events.
 
 Avatars, badges, emotes, and emoji look like text: this is expected and is the only rendering mode. `twi` has no terminal-image rendering path, so authors always show a `[XY]` initials chip (or nothing when `avatar_mode = "off"`), badges show compact labels, Twitch emotes show their matched text token, and standard emoji show the native Unicode glyph.
+
+## Automation and durable history
+
+Producer, consumer, foreground recorder, and local history commands are implemented
+through UI-independent services and explicit public DTOs. See [Automation](automation.md) for
+capabilities, examples, coverage/cursor guarantees, retention, and validation limits.
+Live Twitch observation parity requires controlled credentialed validation.

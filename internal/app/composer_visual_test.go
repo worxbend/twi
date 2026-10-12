@@ -1,23 +1,23 @@
 package app
 
 import (
+	"github.com/charmbracelet/x/ansi"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/worxbend/twi/internal/config"
 )
 
 func TestComposerUsesOpenCodeInspiredSurfaceAnatomy(t *testing.T) {
-	forceColorProfile(t)
 	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 88, 20
 	model.focus = focusComposer
 	model.activeChannelState().composerText = "hello chat"
 	layout := model.layout()
 
-	view := model.composerView(layout)
+	view := ansi.Strip(model.composerView(layout))
 	if got, want := lineCount(view), 4; got != want {
 		t.Fatalf("composer height = %d, want %d:\n%s", got, want, view)
 	}
@@ -43,13 +43,13 @@ func TestComposerFocusSwapsPlaceholderForBlockCursor(t *testing.T) {
 	model.width, model.height = 72, 18
 	layout := model.layout()
 
-	unfocused := model.composerView(layout)
+	unfocused := ansi.Strip(model.composerView(layout))
 	if !strings.Contains(unfocused, "Message #alpha…") || strings.Contains(unfocused, "█") {
 		t.Fatalf("unfocused composer should show placeholder without cursor:\n%s", unfocused)
 	}
 
 	model.focus = focusComposer
-	focused := model.composerView(layout)
+	focused := ansi.Strip(model.composerView(layout))
 	if strings.Contains(focused, "Message #alpha…") || !strings.Contains(focused, "█") {
 		t.Fatalf("focused empty composer should show only the block cursor:\n%s", focused)
 	}
@@ -62,9 +62,9 @@ func TestComposerCursorBlinksFromSharedFrameClock(t *testing.T) {
 	layout := model.layout()
 
 	model.frames.lastFrameAt = time.UnixMilli(1000)
-	visible := model.composerView(layout)
+	visible := ansi.Strip(model.composerView(layout))
 	model.frames.lastFrameAt = time.UnixMilli(1500)
-	hidden := model.composerView(layout)
+	hidden := ansi.Strip(model.composerView(layout))
 	if !strings.Contains(visible, "█") || strings.Contains(hidden, "█") {
 		t.Fatalf("cursor blink states incorrect:\nvisible:\n%s\nhidden:\n%s", visible, hidden)
 	}
@@ -79,7 +79,7 @@ func TestComposerKeepsLongUnicodeDraftTailBesideCursor(t *testing.T) {
 	model.focus = focusComposer
 	model.activeChannelState().composerText = strings.Repeat("old-", 12) + "latest 😀"
 
-	view := model.composerView(model.layout())
+	view := ansi.Strip(model.composerView(model.layout()))
 	if !strings.Contains(view, "latest 😀█") {
 		t.Fatalf("composer did not keep the draft tail beside its cursor:\n%s", view)
 	}
@@ -104,7 +104,7 @@ func TestComposerShowsReplyAndSendStateInSurface(t *testing.T) {
 	state.replyTo = &composerReplyContext{MessageID: "parent", Author: "viewer", Text: "question for chat"}
 	state.sendState = composerSendRateLimited
 
-	view := model.composerView(model.layout())
+	view := ansi.Strip(model.composerView(model.layout()))
 	for _, want := range []string{"Replying to viewer", "question for chat", "thanks!", "rate limited"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("reply composer missing %q:\n%s", want, view)
@@ -122,7 +122,7 @@ func TestComposerCompactsWithoutOverflow(t *testing.T) {
 		model.focus = focusComposer
 		model.activeChannelState().composerText = "hello 😀 表"
 		layout := model.layout()
-		view := model.composerView(layout)
+		view := ansi.Strip(model.composerView(layout))
 
 		if got := lineCount(view); got != layout.composerHeight {
 			t.Fatalf("width %d composer height = %d, want %d:\n%s", width, got, layout.composerHeight, view)
@@ -145,7 +145,7 @@ func TestComposerUsesReadableFallbackAtBoundaryWidths(t *testing.T) {
 		if layout.composerFramed {
 			t.Fatalf("width %d composerFramed = true, want readable plain fallback", width)
 		}
-		if view := model.composerView(layout); !strings.Contains(view, "ello") || !strings.Contains(view, "█") {
+		if view := ansi.Strip(model.composerView(layout)); !strings.Contains(view, "ello") || !strings.Contains(view, "█") {
 			t.Fatalf("width %d fallback hid the draft:\n%s", width, view)
 		}
 	}
@@ -165,7 +165,7 @@ func TestPlainComposerKeepsLongDraftTailVisible(t *testing.T) {
 		model.width, model.height = width, 8
 		model.focus = focusComposer
 		model.activeChannelState().composerText = "old-old-newest"
-		view := model.composerView(model.layout())
+		view := ansi.Strip(model.composerView(model.layout()))
 		if !strings.Contains(view, "est█") || strings.Contains(view, "old-") {
 			t.Fatalf("width %d plain fallback did not keep the draft tail visible:\n%s", width, view)
 		}
@@ -184,7 +184,7 @@ func TestCompactComposerKeepsReplyContextVisible(t *testing.T) {
 		t.Fatalf("compact composer height = %d, want 3", layout.composerHeight)
 	}
 
-	view := model.composerView(layout)
+	view := ansi.Strip(model.composerView(layout))
 	for _, want := range []string{"Replying to viewer", "reply draft", "Chat", "#alpha"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("compact reply composer missing %q:\n%s", want, view)

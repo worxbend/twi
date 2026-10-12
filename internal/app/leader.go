@@ -1,7 +1,7 @@
 package app
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // The space leader chord follows the AstroNvim convention: space starts a
@@ -18,12 +18,12 @@ const (
 
 // handleLeaderKey consumes the key following a pending space leader. It
 // always clears the pending flag: a chord is exactly two keystrokes.
-func (m shellModel) handleLeaderKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
+func (m shellModel) handleLeaderKey(msg tea.KeyPressMsg) (shellModel, tea.Cmd) {
 	m.leaderPending = false
-	if msg.Type != tea.KeyRunes || len(msg.Runes) != 1 {
+	if msg.Text == "" || len([]rune(msg.Text)) != 1 {
 		return m, nil
 	}
-	switch msg.Runes[0] {
+	switch []rune(msg.Text)[0] {
 	case leaderSidebarRune:
 		m.toggleSidebar()
 		return m, nil

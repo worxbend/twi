@@ -1,220 +1,163 @@
-# Release Packaging
+# Release packaging and verification
 
-This project uses a credential-free release dry-run for binary and container
-packaging. It is separate from the default pull-request CI gate because Docker
-runtime checks, terminal behavior, and credentialed Twitch checks have different
-environment needs.
+The release dry-run builds the four supported binary targets with the pinned
+Go toolchain, `CGO_ENABLED=0`, trimmed source paths, and an explicit version.
+It generates target-specific SBOMs and provenance, verifies checksums, and tests
+native and Docker behavior without Twitch credentials. Packaging tests never
+load `.env` or the user's saved credentials.
 
-## Supported Binary Targets
-
-The release script builds these targets by default:
-
-| GOOS | GOARCH | Artifact |
-| --- | --- | --- |
-| linux | amd64 | `twi_linux_amd64` |
-| linux | arm64 | `twi_linux_arm64` |
-| darwin | amd64 | `twi_darwin_amd64` |
-| darwin | arm64 | `twi_darwin_arm64` |
-
-Each binary is built with:
-
-```sh
-CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" ./cmd/twi
-```
-
-The script writes a sibling `.sha256` file for each binary and verifies the
-checksum before continuing.
-
-## Local Dry Run
-
-Run the full release dry-run from the repository root:
+| Target | Binary |
+| --- | --- |
+| Linux amd64 | `twi_linux_amd64` |
+| Linux arm64 | `twi_linux_arm64` |
+| macOS amd64 | `twi_darwin_amd64` |
+| macOS arm64 | `twi_darwin_arm64` |
 
 ```sh
 scripts/release-dry-run.sh --out /tmp/twi-release --image twi:local
+# Binary/SBOM/provenance checks without container validation:
+scripts/release-dry-run.sh --out /tmp/twi-release --skip-docker
 ```
 
-The default output directory is `dist/release`, which is ignored by Git. Use
-`--skip-docker` only when Docker is unavailable and you want to validate binary
-packaging without claiming container coverage.
+The default directory is ignored `dist/release`. A `--targets` space-separated
+list can narrow the matrix. `scripts/check-toolchain.sh` requires the active Go
+version and Docker default to match `go.mod`, and the Snap Go track to match that
+version's major/minor family. Snap builds additionally reject a mismatched patch
+version. This keeps toolchain drift visible when a Snap channel changes.
 
-The script reads the `toolchain` directive from `go.mod`, uses `GOTOOLCHAIN=auto`
-unless already overridden, and passes the same Go version to the Docker build as
-`GO_VERSION`. It does not add package manifests, global tools, or unmanaged
-release dependencies. Native binary smokes run with temporary isolated
-`XDG_CONFIG_HOME` and `XDG_CACHE_HOME` directories, plus empty Twitch credential
-environment variables, so local config files and saved credentials are not read.
+## SBOMs, provenance, and checksums
 
-## Installing A Built Binary
+Every binary has a `.sbom.cdx.json` CycloneDX 1.6 document generated from its
+embedded Go build information. It includes the exact linked module identities,
+Go authenticated module hashes, the Go standard library version, and target.
+The application's MIT license comes from this repository's license; the generator
+does not infer dependency licenses. Go `h1` hashes identify authenticated module
+content and are not archive download checksums.
 
-The dry-run writes executable binaries directly into the output directory. Pick
-the file that matches the target machine, verify the matching checksum, then
-copy it into a directory on `PATH`.
+Each `.provenance.json` is an in-toto Statement v1 with a SLSA provenance v1
+predicate. Its subjects bind the binary and SBOM by SHA-256. It records version,
+target, Go version, `CGO_ENABLED=0`, source revision, dirty-source status, and a
+source tree digest over explicit build inputs. Local statements are unsigned
+and carry no independently attested SLSA-level guarantee. They omit environment
+dumps, credentials, `.env`, local configuration, and recorded chat.
 
-Linux amd64 example:
+Sibling `.sha256` files and aggregate `SHA256SUMS` cover binaries, metadata,
+and the release installer.
+Verify the complete set before installing:
 
 ```sh
 cd /tmp/twi-release
-sha256sum -c twi_linux_amd64.sha256
+sha256sum -c SHA256SUMS
 install -m 0755 twi_linux_amd64 "$HOME/.local/bin/twi"
-twi --help
 ```
 
-macOS users can verify with `shasum -a 256 -c twi_darwin_arm64.sha256` when
-`sha256sum` is unavailable. No unsupported OS artifact, package-manager
-manifest, signing, notarization, registry publishing, or SBOM/provenance step
-is implemented in this release candidate path.
+On macOS use `shasum -a 256 -c SHA256SUMS`. The tag release workflow uploads all
+four binaries, their metadata/checksums, the aggregate manifest, and `install.sh`.
+The existing Linux installer verifies the downloaded binary's sibling checksum.
+These checks establish integrity relative to the downloaded manifest; repository
+release access remains the trust boundary.
 
-## Curl-Pipe Install (Linux)
+Specification references: [CycloneDX 1.6 JSON schema](https://github.com/CycloneDX/specification/blob/master/schema/bom-1.6.schema.json),
+[SLSA provenance v1](https://slsa.dev/spec/v1.0/provenance), and
+[Go build information](https://pkg.go.dev/runtime/debug#BuildInfo).
 
-`scripts/install.sh` automates the steps above for Linux amd64/arm64: it
-downloads the matching `twi_linux_*` binary from a GitHub Release (latest by
-default), verifies its `.sha256`, installs it as `twi` under `~/.local/bin`
-(or `--dir`/`TWI_INSTALL_DIR`), and appends that directory to `PATH` in
-`~/.bashrc` and `~/.zshrc` if it's missing. It refuses to run on any OS other
-than Linux, since only Linux binaries are published.
+## Immutable workflow actions
 
-Each release upload (`.github/workflows/release.yml`) attaches
-`scripts/install.sh` itself as a release asset named `install.sh`, so it is
-reachable at a stable URL and can be piped straight into `sh`:
+All external workflow actions use full commit SHAs, with release tags retained
+as comments. `.github/action-pins.json` records the reviewed mapping. Annotated
+Snap action tags are resolved to their underlying commits. CI rejects floating
+refs or changes that disagree with the mapping.
 
 ```sh
-curl --proto '=https' --tlsv1.2 -sSf \
-  https://github.com/worxbend/twi/releases/latest/download/install.sh | sh
+python3 scripts/verify-action-pins.py
+# Verify each upstream tag still points to the reviewed commit:
+python3 scripts/verify-action-pins.py --online
 ```
 
-Pin a specific release instead of the latest with `--version`:
+The pins were checked against each upstream repository on 2026-10-12. Pinning
+follows [GitHub's secure action-use guidance](https://docs.github.com/en/actions/reference/security/secure-use#using-third-party-actions).
+Dependency updates should change the reviewed manifest and workflow references
+together after verifying the upstream release.
 
-```sh
-curl --proto '=https' --tlsv1.2 -sSf \
-  https://github.com/worxbend/twi/releases/download/v0.3.0/install.sh | sh -s -- --version v0.3.0
-```
+## Container recording
 
-## Container Usage
-
-Build and run the local image:
+The image runs as UID/GID 10001 and exposes separate config, cache, and state
+locations. The explicit Compose recorder service persists all three, uses an
+init process, a read-only root filesystem, and a 15-second signal grace period.
+Only that explicit live service reads the optional local credential environment
+file; offline packaging scripts use isolated fixtures.
 
 ```sh
 docker build -t twi:local .
-docker run --rm twi:local --help
-docker run --rm -it twi:local chat --mock --channel demo
+docker run --rm --network none twi:local --help
+docker compose run --rm recorder
 ```
 
-For live chat, pass credentials through environment variables, an ignored
-local `.env`, a private runtime secret mechanism, or a mounted private config
-directory. Never bake OAuth tokens, refresh tokens, callback codes, client
-secrets, authorization URLs, debug logs, screenshots, or local config files
-into the image.
+Set `TWITCH_CHANNEL` and the documented Twitch credentials when starting a live
+recorder. It remains a foreground process. State belongs in the mounted `/state`
+volume. Never put credentials into image layers or bake configuration into the
+build context.
 
-## Automated Checks
+The release dry-run includes:
 
-The local script and `.github/workflows/release.yml` share the same binary
-packaging path:
+- Native and network-disabled image help, doctor, and mock chat checks.
+- `scripts/container-recorder-smoke.sh`: the real `runRecord` command with an
+  injected per-invocation scripted reader, nonroot SIGTERM/SIGINT cancellation,
+  committed observed history, clean shutdown, private 0600/0700 state, and
+  rejection of an unwritable history location. It makes no Twitch requests.
+- `scripts/history-disk-full-smoke.sh`: real `ENOSPC` in a fresh 8 MiB container
+  tmpfs, preserving committed history while stopping recording. The host disk
+  is never filled.
 
-- Build trimmed binaries for the supported target matrix.
-- Write and verify SHA-256 checksum files.
-- Smoke the native binary with `twi --help`, `twi doctor`, and
-  `twi chat --mock --channel example`.
+## Snap build and smoke
 
-The full local dry-run also builds the Docker image from the repository
-Dockerfile and smokes the image with `twi --help`, `twi doctor`, and mock chat.
-The GitHub Actions release workflow publishes only Linux amd64 and arm64 binary
-assets.
-
-The workflow is triggered by `workflow_dispatch` or `v*` tag pushes. Manual
-dispatch builds Linux amd64 and arm64 artifacts and uploads them as a workflow
-artifact. A `v*` tag push also creates the matching GitHub Release when needed
-and uploads these release assets, replacing same-named assets if the workflow is
-rerun:
-
-- `twi_linux_amd64`
-- `twi_linux_amd64.sha256`
-- `twi_linux_arm64`
-- `twi_linux_arm64.sha256`
-
-It is not a pull-request trigger.
-
-## Snap Store Packaging
-
-`snap/snapcraft.yaml` packages `twi` as a classically confined snap (`base:
-core24`) for `amd64` and `arm64`. Classic confinement runs unsandboxed, like a
-traditional package, so `twi` reads/writes config, cache, and credential
-files at their normal locations under the real `$HOME` (e.g. `~/.config/twi`,
-`~/.cache/twi`) and `twi login` can bind its local OAuth callback listener and
-launch a browser without interface-plug restrictions. The snap version is
-derived from `git describe --tags` at build time, so it always matches the
-nearest `v*` tag.
-
-Classic confinement requires manual review by the Snap Store team before a
-snap can publish to a stable channel for the first time (see
-[the classic confinement review process](https://forum.snapcraft.io/t/process-for-reviewing-classic-confinement-snaps/));
-request that review from the Snapcraft forum once the snap is registered and
-an initial build has been pushed to `edge`.
-
-`.github/workflows/snap.yml` builds the snap with
-[`snapcore/action-build`](https://github.com/snapcore/action-build) on every
-push to `main` and on `v*` tag pushes, smokes the built snap with `twi
---help`, `twi doctor`, and `twi chat --mock --channel example` via a local
-`snap install --dangerous --classic`, and uploads it as a workflow artifact.
-It also publishes with [`snapcore/action-publish`](https://github.com/snapcore/action-publish):
-
-- Pushes to `main` publish to the `edge` channel.
-- `v*` tag pushes publish to the `stable` channel.
-
-Both publish steps are skipped (not failed) until the
-`SNAPCRAFT_STORE_CREDENTIALS` repository secret exists, since that requires a
-one-time manual step only a Snap Store account owner can do:
+The core24 classic snap uses the Go plugin, pinned-toolchain validation, version
+injection, and static compilation. The 1.27/candidate channel currently supplies
+Go 1.27.2; switch to stable when that exact toolchain is available there.
 
 ```sh
-snapcraft export-login --snaps=twi \
-  --acls package_access,package_push,package_update,package_release \
-  exported.txt
+# Standard Snapcraft/LXD build, using a sanitized source copy:
+scripts/snap-build-smoke.sh --out /tmp/twi-snap
+# Isolated Ubuntu 24.04 Docker fallback without installing LXD/snapd on the host:
+scripts/snap-build-smoke.sh --docker --out /tmp/twi-snap
+# Repeat package payload smoke without rebuilding:
+scripts/snap-smoke.sh /tmp/twi-snap/twi_amd64.snap
 ```
 
-Paste the contents of `exported.txt` into this repository's **Settings >
-Secrets and variables > Actions** as a new secret named
-`SNAPCRAFT_STORE_CREDENTIALS`, then delete the local `exported.txt` (it
-contains a scoped but still sensitive login). The `twi` snap name must also be
-registered once with `snapcraft register twi` before the first publish.
+The Docker fallback uses a pinned Canonical Snapcraft image and mounts the
+project's exact Go toolchain read-only instead of installing Go as a build snap.
+It modifies only that toolchain-provisioning detail in a temporary recipe copy.
+The build inputs are copied from an allowlist; `.env`, credentials, recordings,
+and local run reports are excluded. This fallback requires Docker, Python/PyYAML,
+Go, and `unsquashfs`. It builds the native amd64 Snap package.
 
-Local build (requires `snapcraft`, typically via `sudo snap install
-snapcraft --classic`, and `multipass` or LXD as the build backend):
+Payload checks validate metadata, version, static build information, help,
+doctor, dry-run production, and mock TUI operation with isolated config/state.
+The manual Snap workflow additionally installs the package with snapd, checks
+the installed launcher, and removes it. This validation does not publish a Snap.
+Store name registration, publishing credentials, and classic-confinement review
+remain separate release-administration requirements.
 
-```sh
-snapcraft
-sudo snap install --dangerous --classic ./twi_*.snap
-```
+On 2026-10-12 an actual Docker Snapcraft build and packaged payload smoke passed.
+The host sudo/LXD route required interactive authentication. Installed-launcher
+validation then passed in an isolated Ubuntu 24.04 KVM guest: the actual package
+was installed with snapd, its launcher passed help/version/doctor/dry-run produce/
+record help/mock checks, and the package was removed. The official Ubuntu cloud
+image SHA-256 was verified. Only the Snap artifact entered the guest; no host
+credentials, `.env`, or source checkout was copied. Reproduce with
+`scripts/operations/snap-launcher-vm-smoke.sh /tmp/twi-plan-snap/twi_amd64.snap`.
+The produced package is available in `/tmp/twi-plan-snap/twi_amd64.snap`; no host
+Snap was installed.
 
-## Secret Handling
+Final review builds use `/tmp/twi-final-reviewed-release` and image
+`twi:final-reviewed`. Their aggregate manifest is
+`/tmp/twi-final-reviewed-release/SHA256SUMS`. The final Snap build uses the same
+reviewed source, including notification-body moderation redaction and terminal
+state/readiness fixes.
 
-Release builds must not embed Twitch credentials. The Dockerfile copies only
-`go.mod`, `go.sum`, `cmd/`, and `internal/` into the build stage. The
-`.dockerignore` file excludes local environment files, `.local` config mounts,
-root config/credential JSON files, build outputs, logs, screenshots, recordings,
-and agent state from the build context. The release script clears both `TWI_*`
-and short `TWITCH_*` credential environment variables for binary and container
-smokes, and passes empty credential values explicitly to `docker run`.
-
-Do not add `--build-arg`, `ENV`, or copied files that contain OAuth tokens,
-refresh tokens, client secrets, callback codes, authorization URLs, debug logs,
-screenshots, or local config credentials.
-
-## Manual Or Credentialed Checks
-
-The release dry-run does not prove:
-
-- Credentialed Twitch IRC read/send/reconnect behavior.
-- Browser-based `twi login` against a real Twitch app.
-- Interactive pointer behavior in a physical terminal.
-- Registry publishing, signing, notarization, or package-manager installs.
-
-Record those checks in [manual-validation.md](manual-validation.md) when the
-right terminal and credentials are available. If an environment is unavailable,
-document the skip reason instead of claiming support.
-
-Current release-candidate evidence is credential-free. The T004 manual matrix
-covered PTY mock chat, resize, keyboard workflows, setup/login dry-run,
-doctor/config smokes, debug-log privacy, and text-fallback rendering (avatars,
-badges, emotes, and emoji always render as text, so there is no image-drawing
-check to complete). Credentialed Twitch and exact Docker CLI smokes on a
-Docker-enabled host remain the release-specific checks to complete before
-making broader support claims.
+Final post-tidy local artifacts were rebuilt from the implemented schema7,
+app-token/IRC-action, device-login and offline-upgrade source. All local gates
+and the isolated installed launcher passed again. Hosted CI, release preparation,
+and Snap build/install smoke also passed at `490c9a3d9ce03a76cc83c4fe9c0562ea2bd3b5f1`.
+See [hosted evidence](hosted-validation.md) for exact run links, artifact hashes
+and skipped publication steps.

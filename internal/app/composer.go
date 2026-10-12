@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/rivo/uniseg"
 	"github.com/worxbend/twi/internal/animation"
 	"github.com/worxbend/twi/internal/theme"
@@ -220,6 +220,9 @@ func (m shellModel) composerMetadataSegments() []composerSegment {
 func (m shellModel) composerPlaceholder(suffix string) string {
 	if m.channels.empty() {
 		return "/channels to open a channel" + suffix
+	}
+	if _, canSend := m.services.client.(ChatSender); m.services.client != nil && !canSend {
+		return "Read-only history #" + m.activeChannelName() + suffix
 	}
 	return "Message #" + m.activeChannelName() + suffix
 }

@@ -1,0 +1,21 @@
+# Explicit standalone foreground recorder. No daemon is installed by twi.
+services:
+  recorder:
+    image: twi:local
+    command: ["record", "--account", "recorder", "--channel", "${TWI_RECORD_CHANNEL:?set an explicit Twitch channel}", "--transport", "${TWI_RECORD_TRANSPORT:-irc}"]
+    init: true
+    restart: "on-failure:5"
+    stop_signal: SIGTERM
+    stop_grace_period: 20s
+    read_only: true
+    user: "10001:10001"
+    tmpfs:
+      - /tmp:mode=1777
+    volumes:
+      - twi-config:/config
+      - twi-cache:/cache
+      - twi-state:/state
+volumes:
+  twi-config:
+  twi-cache:
+  twi-state:

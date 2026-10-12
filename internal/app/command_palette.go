@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/worxbend/twi/internal/animation"
 	"github.com/worxbend/twi/internal/render"
 	"github.com/worxbend/twi/internal/twitch"
@@ -146,12 +146,12 @@ func (m shellModel) paletteRevealedLines(lines []string, width int) []string {
 	return out
 }
 
-func (m shellModel) handleCommandPaletteKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyEsc:
+func (m shellModel) handleCommandPaletteKey(msg tea.KeyPressMsg) (shellModel, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
 		m.palette = commandPaletteState{}
 		return m, nil
-	case tea.KeyEnter:
+	case "enter":
 		return m.executeCommandPaletteSelection()
 	}
 	// Everything else is either a key every searchable overlay shares or one

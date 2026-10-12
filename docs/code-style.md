@@ -19,9 +19,9 @@ This guide describes the local engineering style for `twi`. It is intentionally 
 | `internal/config` | Flat config, env mapping, defaults, display redaction. | Credential persistence or network clients. |
 | `internal/app` | Bubble Tea model, update loop, view composition, fake/live chat boundary, per-channel UI state. | Concrete Twitch IRC types or blocking I/O in `View`. |
 | `internal/twitch` | IRC transport, OAuth validation, Helix identity/assets adapters, normalized Twitch events. | Bubble Tea components. |
-| `internal/render` | Message fragments, wrapping, image placeholders, terminal image preparation/rendering. | Network downloads or Twitch client ownership. |
+| `internal/render` | Message fragments, wrapping, text/initials/Unicode rendering. | Network downloads or Twitch client ownership. |
 | `internal/assets` | Asset metadata resolution, public image downloading, cache write-through, safe asset events. | UI state mutation. |
-| `internal/storage` | Disk cache, filesystem probes, Unix credential-file persistence, storage test fakes. | UI decisions or non-Unix credential backends. |
+| `internal/storage` | Filesystem probes, Unix credential-file persistence, storage test fakes. | UI decisions or non-Unix credential backends. |
 | `internal/animation` | Grapheme-safe reveal units, bounded queues, the shared frame clock, and time-pure chrome text effects that return styled cells. | Raw IRC parsing or terminal I/O. |
 | `internal/debuglog` | Redacted JSON-line debug records. | Raw struct dumping. |
 | `internal/theme` | Palette and contrast correction. | App state. |
@@ -46,7 +46,7 @@ Keep narrow layouts usable. Sidebar, help, status, composer, inspect panel, and 
 
 Normalize Twitch events before rendering. Render fragments, not raw IRC strings. Use width-aware APIs for terminal layout. Do not slice user-visible strings by byte or rune when grapheme clusters, emoji, combining marks, ANSI styles, or image placeholders can be involved.
 
-Image placeholders must reserve stable width so late avatar, emote, badge, or emoji assets do not reflow chat history. Text, initials, Unicode emoji, compact badge labels, and emote tokens must remain good fallbacks.
+Text avatars, badge labels, emote tokens, and Unicode glyphs must preserve measured cell width.
 
 ## Secret And Debug Rules
 

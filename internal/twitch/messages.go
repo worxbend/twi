@@ -48,22 +48,29 @@ func IsLoginRune(r rune) bool {
 const MaxChatMessageRunes = 500
 
 type ChatMessage struct {
-	ID          string
-	Channel     string
-	ChannelID   string
-	Timestamp   time.Time
-	AuthorLogin string
-	AuthorID    string
-	DisplayName string
-	AuthorColor string
-	AvatarURL   string
-	Badges      []Badge
-	Text        string
-	Fragments   []MessageFragment
-	Emotes      []Emote
-	Reply       *Reply
-	Type        MessageType
-	Deleted     bool
+	// PlatformMessageType retains Twitch documented message categories without changing UI kinds.
+	PlatformMessageType string
+	SourceBadges        []Badge
+	DeliveryID          string
+	SourceChannelID     string
+	SourceChannelLogin  string
+	SourceMessageID     string
+	ID                  string
+	Channel             string
+	ChannelID           string
+	Timestamp           time.Time
+	AuthorLogin         string
+	AuthorID            string
+	DisplayName         string
+	AuthorColor         string
+	AvatarURL           string
+	Badges              []Badge
+	Text                string
+	Fragments           []MessageFragment
+	Emotes              []Emote
+	Reply               *Reply
+	Type                MessageType
+	Deleted             bool
 	// Bits is the cheer amount from a Twitch PRIVMSG's "bits" tag, or 0 for a
 	// message with no cheer. Cheers arrive as ordinary chat messages (not a
 	// USERNOTICE), so this is the only signal that a message is a cheer.
@@ -91,6 +98,8 @@ const (
 )
 
 type MessageFragment struct {
+	Bits int
+	Tier int
 	Type FragmentType
 	Text string
 	Ref  AssetRef
@@ -104,6 +113,7 @@ const (
 	FragmentEmote   FragmentType = "emote"
 	FragmentEmoji   FragmentType = "emoji"
 	FragmentBits    FragmentType = "bits"
+	FragmentGIF     FragmentType = "gif"
 )
 
 type Badge struct {

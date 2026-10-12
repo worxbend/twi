@@ -21,8 +21,8 @@ func bindingForKeys(keys string) (keyBinding, bool) {
 	return keyBinding{}, false
 }
 
-// ctrlKeyPattern finds the tea.KeyCtrlX constants the model actually handles.
-var ctrlKeyPattern = regexp.MustCompile(`tea\.KeyCtrl([A-Z])\b`)
+// ctrlKeyPattern finds the native v2 control-key names the model handles.
+var ctrlKeyPattern = regexp.MustCompile(`"ctrl\+([a-z])"`)
 
 // TestEveryHandledCtrlKeyIsDocumented is the guard that would have caught the
 // drift this table exists to prevent.
@@ -64,7 +64,7 @@ func TestEveryHandledCtrlKeyIsDocumented(t *testing.T) {
 		}
 	}
 	if len(seen) == 0 {
-		t.Fatal("found no tea.KeyCtrl* handlers; the scan is broken, not the keymap")
+		t.Fatal("found no control-key handlers; the scan is broken, not the keymap")
 	}
 
 	for key, file := range seen {

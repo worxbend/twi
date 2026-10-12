@@ -5,14 +5,13 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/twitch"
 )
 
 func composerTestModel(t *testing.T) shellModel {
 	t.Helper()
-	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
@@ -62,7 +61,7 @@ func TestComposerPasteDropsControlCharacters(t *testing.T) {
 func TestComposerTypingStillWorks(t *testing.T) {
 	model := composerTestModel(t)
 	for _, r := range "gg wp" {
-		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		updated, _ := model.Update(tea.KeyPressMsg{Text: string([]rune{r})})
 		model = updated.(shellModel)
 	}
 	if got, want := model.activeChannelState().composerText, "gg wp"; got != want {
@@ -71,10 +70,10 @@ func TestComposerTypingStillWorks(t *testing.T) {
 }
 
 // TestComposerPasteArrivesThroughUpdate covers the real path: bracketed paste
-// reaches the model as one KeyRunes burst, not as individual keystrokes.
+// reaches the model as one native paste event, not as individual keystrokes.
 func TestComposerPasteArrivesThroughUpdate(t *testing.T) {
 	model := composerTestModel(t)
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("one\ntwo")})
+	updated, _ := model.Update(tea.PasteMsg{Content: "one\ntwo"})
 	model = updated.(shellModel)
 
 	if got, want := model.activeChannelState().composerText, "one two"; got != want {

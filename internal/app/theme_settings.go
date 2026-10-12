@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/rivo/uniseg"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/theme"
@@ -65,21 +65,21 @@ func (m *shellModel) toggleThemeSettings() {
 // View() re-derives the OSC 11 background sequence from m.theme on every
 // render (see themeBackgroundSequence), so changing m.theme here is enough
 // to keep the terminal background in sync with the live preview.
-func (m shellModel) handleThemeSettingsKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyEsc:
+func (m shellModel) handleThemeSettingsKey(msg tea.KeyPressMsg) (shellModel, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
 		m.theme = m.themeSettings.originalPalette
 		m.themeSettings = themeSettingsState{}
 		return m, nil
-	case tea.KeyEnter:
+	case "enter":
 		return m.persistSelectedTheme()
-	case tea.KeyUp:
+	case "up":
 		m.moveThemeSettingsSelection(-1)
-	case tea.KeyDown, tea.KeyTab:
+	case "down", "tab":
 		m.moveThemeSettingsSelection(1)
-	case tea.KeyHome:
+	case "home":
 		m.setThemeSettingsSelection(0)
-	case tea.KeyEnd:
+	case "end":
 		m.setThemeSettingsSelection(len(themeSettingsNames()) - 1)
 	}
 	return m, nil

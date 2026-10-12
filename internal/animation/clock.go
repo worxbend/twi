@@ -3,7 +3,7 @@ package animation
 import (
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // DefaultFrameInterval is the shared animation clock's tick rate. ~10fps is

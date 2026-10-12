@@ -57,3 +57,25 @@ func TestNormalizeChannelsDropsEmptyEntries(t *testing.T) {
 		t.Errorf("NormalizeChannels = %q, want %q", got, want)
 	}
 }
+
+func TestValidatedChannelSelectors(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{"", "#", "##foo", "@foo", "foo bar", "föö", "a/b", "abcdefghijklmnopqrstuvwxyz"} {
+		if _, err := twitch.ParseChannel(input); err == nil {
+			t.Errorf("accepted %q", input)
+		}
+	}
+	channels, err := twitch.ParseChannels([]string{" #Alpha ", "ALPHA", "beta_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(channels) != 2 || channels[0].String() != "alpha" || channels[1].String() != "beta_1" {
+		t.Fatalf("channels=%v", channels)
+	}
+	if (twitch.Channel{}).Valid() {
+		t.Fatal("zero channel is valid")
+	}
+	if _, err := twitch.ParseChannels([]string{"alpha", ""}); err == nil {
+		t.Fatal("empty selector silently dropped")
+	}
+}

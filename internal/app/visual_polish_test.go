@@ -1,18 +1,18 @@
 package app
 
 import (
+	"github.com/charmbracelet/x/ansi"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/render"
 	"github.com/worxbend/twi/internal/theme"
 )
 
 func TestGradientBackgroundLinePreservesRequestedWidth(t *testing.T) {
-	forceColorProfile(t)
 	line := gradientBackgroundLine(" ✦ twi 視聴者", 24, "#ff8000", "#00c0ff", "#ffffff", "#000000", 3, true)
 	if got := lipgloss.Width(line); got != 24 {
 		t.Fatalf("gradient line width = %d, want 24: %q", got, line)
@@ -48,14 +48,14 @@ func TestSplashViewHasAnimatedLogoAndNamedBootPhases(t *testing.T) {
 	started := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	model.frames.splashUntil = started.Add(splashDuration)
 
-	loading := model.splashViewAt(started)
+	loading := ansi.Strip(model.splashViewAt(started))
 	if !strings.Contains(loading, "████████") || !strings.Contains(loading, "twi · loading palette") {
 		t.Fatalf("initial splash missing logo or loading phase:\n%s", loading)
 	}
 	// Expressed as a share of splashDuration rather than a fixed number of
 	// milliseconds, so changing the splash length does not silently move
 	// this assertion into a different phase.
-	ready := model.splashViewAt(started.Add(splashDuration * 9 / 10))
+	ready := ansi.Strip(model.splashViewAt(started.Add(splashDuration * 9 / 10)))
 	if !strings.Contains(ready, "ready for #alpha") || !strings.Contains(ready, "█") {
 		t.Fatalf("late splash missing ready phase or progress:\n%s", ready)
 	}
@@ -103,7 +103,7 @@ func TestSplashViewFitsVeryShortTerminals(t *testing.T) {
 func TestChatRowsUseMessageRailsMailIconsAndEmoji(t *testing.T) {
 	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 88, 22
-	rows := strings.Join(model.chatRows(model.layout()), "\n")
+	rows := ansi.Strip(strings.Join(model.chatRows(model.layout()), "\n"))
 	for _, want := range []string{"│ ✉ ", "✨", "💜", "👀", "🔔"} {
 		if !strings.Contains(rows, want) {
 			t.Fatalf("decorated chat rows missing %q:\n%s", want, rows)
@@ -112,7 +112,6 @@ func TestChatRowsUseMessageRailsMailIconsAndEmoji(t *testing.T) {
 }
 
 func TestAnimatingMessageRailChangesWithSharedFrame(t *testing.T) {
-	forceColorProfile(t)
 	model := newMockModel("alpha", config.Default())
 	block := chatRowBlock{animating: true}
 	row := render.Row{Fragments: []render.Fragment{{Kind: render.FragmentText, Text: "hello"}}}

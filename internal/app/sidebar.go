@@ -1,7 +1,7 @@
 package app
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // sidebarVisibility is the user's standing choice for the channel sidebar.
@@ -93,28 +93,31 @@ func (m shellModel) selectedSidebarChannel() string {
 
 // handleSidebarKey implements the sidebar's vim-style navigation: j/k move,
 // enter/l switch, x/d close, esc/h leave for the chat pane.
-func (m shellModel) handleSidebarKey(msg tea.KeyMsg) (shellModel, tea.Cmd, bool) {
-	switch msg.Type {
-	case tea.KeyUp:
+func (m shellModel) handleSidebarKey(msg tea.KeyPressMsg) (shellModel, tea.Cmd, bool) {
+	switch msg.String() {
+	case "up":
 		m.moveSidebarSelection(-1)
 		return m, nil, true
-	case tea.KeyDown:
+	case "down":
 		m.moveSidebarSelection(1)
 		return m, nil, true
-	case tea.KeyEsc, tea.KeyLeft:
+	case "esc", "left":
 		m.focus = focusChat
 		return m, nil, true
-	case tea.KeyEnter, tea.KeyRight:
+	case "enter", "right":
 		model, cmd := m.switchToSelectedSidebarChannel()
 		return model, cmd, true
-	case tea.KeyDelete:
+	case "delete":
 		model, cmd := m.closeChannel(m.selectedSidebarChannel())
 		return model, cmd, true
-	case tea.KeyRunes:
-		if len(msg.Runes) != 1 {
+	default:
+		if msg.Text == "" {
+			break
+		}
+		if len([]rune(msg.Text)) != 1 {
 			return m, nil, false
 		}
-		switch msg.Runes[0] {
+		switch []rune(msg.Text)[0] {
 		case 'j':
 			m.moveSidebarSelection(1)
 			return m, nil, true
@@ -133,7 +136,7 @@ func (m shellModel) handleSidebarKey(msg tea.KeyMsg) (shellModel, tea.Cmd, bool)
 		}
 		// i/o/a mean "start typing" everywhere outside the composer, the
 		// sidebar included.
-		if isInsertRune(msg.Runes[0]) {
+		if isInsertRune([]rune(msg.Text)[0]) {
 			m.focus = focusComposer
 			return m, nil, true
 		}

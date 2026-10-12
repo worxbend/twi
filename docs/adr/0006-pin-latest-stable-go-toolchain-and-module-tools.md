@@ -45,6 +45,14 @@ If implementation starts after a newer stable Go release is verified, update the
 
 ## Verification
 
+### 2026-10-11 update
+
+The official [Go release feed](https://go.dev/dl/?mode=json) was checked again.
+The baseline is now `go 1.27.0` with `toolchain go1.27.2`. Docker and the Snap
+Go channel are aligned with this release. Module tools were refreshed to
+`golang.org/x/vuln v1.9.0` and `honnef.co/go/tools v0.8.1`; both run successfully
+with the new toolchain. The original dated decision above is retained as history.
+
 - Run `go version` before implementation work that depends on the toolchain.
 - Run `go mod tidy` after dependency or tool changes.
 - Run `go fmt ./...`.

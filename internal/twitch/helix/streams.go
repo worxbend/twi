@@ -25,7 +25,7 @@ var _ twitch.StreamLookup = (*StreamsClient)(nil)
 func NewStreamsClient(cfg StreamsClientConfig) *StreamsClient {
 	return &StreamsClient{
 		endpoint:  endpointOrDefault(cfg.Endpoint, defaultHelixStreamsURL),
-		transport: newTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken),
+		transport: newTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken, cfg.RetryPolicy),
 	}
 }
 

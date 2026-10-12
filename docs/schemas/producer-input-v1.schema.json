@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "title": "twi strict producer input",
+  "additionalProperties": false,
+  "required": [
+    "text"
+  ],
+  "properties": {
+    "channel": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    },
+    "reply_to_message_id": {
+      "type": "string"
+    },
+    "client_id": {
+      "type": "string"
+    },
+    "action": {
+      "type": "boolean"
+    }
+  }
+}

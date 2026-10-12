@@ -25,7 +25,7 @@ var _ twitch.UserLookup = (*UsersClient)(nil)
 func NewUsersClient(cfg UsersClientConfig) *UsersClient {
 	return &UsersClient{
 		endpoint:  endpointOrDefault(cfg.Endpoint, defaultHelixUsersURL),
-		transport: newTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken),
+		transport: newTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken, cfg.RetryPolicy),
 	}
 }
 

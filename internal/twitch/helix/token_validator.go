@@ -144,7 +144,8 @@ func validationResultFromOAuthResponse(resp oauthValidateResponse, credentials t
 	missing := twitch.MissingRequiredIRCScopes(scopes)
 	expiresAt := now.Add(time.Duration(resp.ExpiresIn) * time.Second)
 	result := twitch.TokenValidationResult{
-		Status: twitch.TokenValidationValid,
+		Status:   twitch.TokenValidationValid,
+		ClientID: resp.ClientID,
 		Identity: twitch.TokenIdentity{
 			UserID: resp.UserID,
 			Login:  strings.TrimSpace(resp.Login),

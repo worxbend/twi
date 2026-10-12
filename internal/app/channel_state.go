@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/worxbend/twi/internal/animation"
+	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/twitch"
 )
 
@@ -14,8 +15,8 @@ type channelStateSet struct {
 	states          map[string]*channelState
 	animationConfig animation.Config
 	clock           animation.Clock
-	// scrollbackLimit caps retained messages per channel. Zero or negative
-	// means unbounded. See config.FeatureConfig.ScrollbackLimit.
+	// scrollbackLimit caps retained messages per channel. Nonpositive inputs
+	// use the configured default.
 	scrollbackLimit int
 	// placeholder backs the no-channels-open empty state. It is never in
 	// order or states, so it cannot be joined, switched to, or shown in the
@@ -57,6 +58,9 @@ type channelState struct {
 }
 
 func newChannelStateSet(channels []string, animationConfig animation.Config, clock animation.Clock, scrollbackLimit int) *channelStateSet {
+	if scrollbackLimit <= 0 {
+		scrollbackLimit = config.DefaultScrollbackLimit
+	}
 	set := &channelStateSet{
 		states:          make(map[string]*channelState),
 		animationConfig: animationConfig,
@@ -270,10 +274,16 @@ func (s *channelStateSet) applyMessage(message twitch.ChatMessage) (*channelStat
 // clampScroll, once the buffer is short enough that the old offset would
 // scroll past the top.
 func (s *channelState) trimScrollback(limit int) {
-	if s == nil || limit <= 0 || len(s.messages) <= limit+scrollbackTrimMargin(limit) {
+	if limit <= 0 {
+		limit = config.DefaultScrollbackLimit
+	}
+	if s == nil || len(s.messages) <= limit+scrollbackTrimMargin(limit) {
 		return
 	}
 	drop := len(s.messages) - limit
+	for _, message := range s.messages[:drop] {
+		delete(s.localEchoes, message.ID)
+	}
 	// Reslice into a fresh backing array rather than sliding in place: the
 	// old array keeps every dropped message alive otherwise, which defeats
 	// the point of trimming on a long stream.
