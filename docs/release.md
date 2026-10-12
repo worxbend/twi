@@ -161,3 +161,13 @@ and the isolated installed launcher passed again. Hosted CI, release preparation
 and Snap build/install smoke also passed at `490c9a3d9ce03a76cc83c4fe9c0562ea2bd3b5f1`.
 See [hosted evidence](hosted-validation.md) for exact run links, artifact hashes
 and skipped publication steps.
+
+## Tagged release notes
+
+The tag release workflow publishes the matching version section from `CHANGELOG.md`
+as the GitHub release body, using `scripts/release-notes.py`. Prepare a dated
+changelog section and its comparison link before creating the annotated `vX.Y.Z`
+tag. The tagged build explicitly embeds that version, independently of shallow
+checkout history. A missing or empty changelog section fails publication rather
+than creating generic notes. Manual workflow dispatch still builds validation
+artifacts without creating a GitHub release.

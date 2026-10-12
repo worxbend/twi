@@ -11,28 +11,82 @@ report their build revision and `development` unless an explicit version is supp
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-10-12
+
 ### Added
 
-- Explicit `produce`/`consume` modes and `-P`/`-C` aliases, acknowledged Helix
-  receipts, strict bounded batch input, JSONL/text output, capability login,
-  completion/version, and documented process exit contracts.
-- Private SQLite history with foreground recording, capture coverage/gaps,
-  retention/status/prune, per-channel tails, relative time, resumable cursors,
-  and bounded replay-follow from one durable stream.
-- Explicit EventSub reader with normalized messages/moderation/shared metadata,
-  deduplication, keepalives, revocation, and reconnect handover.
-
+- **Scriptable chat automation:** `produce`/`consume` and `-P`/`-C` aliases,
+  batch input from messages/files/stdin, explicit multi-channel routing, replies,
+  acknowledged Helix send receipts, safe JSONL/text output, and documented exit codes.
+- **Durable local chat history:** a foreground SQLite recorder, per-channel tails,
+  time-range queries, replay-follow, capture coverage/gap reporting, retention,
+  pruning, and resumable cursors.
+- **Full-text message search and offline upgrades:** `history search` and
+  `history upgrade`, with explicit existing-store migration that preserves
+  retention settings, store identity, and sequence numbers.
+- **EventSub chat reading alongside IRC:** messages, structured fragments,
+  badges, replies, notices, held-message status, moderation actions, and
+  shared-chat source identity, with subscription limits and reconnect handling.
+- **Private named accounts and device login:** select credentials with
+  `--account`, request operation-specific capabilities, and use `login --device`
+  to authorize in another browser without a localhost callback.
+- **App-token sending:** delegated sender/channel authorization and explicit
+  `--shared-chat source|all`, with source-only delivery by default.
+- **Native IRC actions:** `produce --transport irc --action`, with truthful
+  unconfirmed write receipts instead of claiming API acknowledgement.
+- **Terminal history integration:** explicit TUI recording, read-only attachment
+  to existing recorded history, and optional acknowledged API composer sends.
+- **Operational tooling:** systemd, launchd, and Compose recorder examples,
+  command completion/version output, and reproducible TUI CPU/allocation/memory
+  profiling with workload budgets.
 
 ### Changed
 
-- Bound pending TUI sends and scrollback, preserve drafts under pressure, share
-  account/channel permits and token refresh, and propagate process cancellation.
-- Refresh Go modules and pinned analysis tools to their latest compatible
-  releases, use Go 1.27.2, and align Docker, Snap, and GitHub Actions build
-  dependencies. Bubble Tea and Lip Gloss remain on their current major versions;
-  their v2 migration is planned separately in `PLAN.md`.
-- Add `PLAN.md` with the researched producer/consumer CLI contract, local chat
-  history design, architecture changes, and a prioritized maintenance roadmap.
+- Migrated to **Bubble Tea v2.1.0 and Lip Gloss v2.0.6**, including native view,
+  keyboard/paste/mouse/focus handling, resizing, and terminal restoration.
+- Shared session readiness, reconnect, cancellation, token refresh, and
+  account/channel rate limits across terminal and automation paths.
+- Updated to **Go 1.27.2** and refreshed dependencies and analysis tools; aligned
+  Docker, Snap, and GitHub Actions builds with the pinned toolchain.
+- Release binaries for Linux/macOS amd64/arm64 now include CycloneDX SBOMs,
+  unsigned build provenance, per-file checksums, and an aggregate checksum manifest.
+
+### Fixed
+
+- Reconnect/shutdown races, hidden terminal connection failures, and unnecessary
+  readiness timeouts when no channel is selected.
+- Recorder overflow, final-flush errors, and end-of-query coverage checks now
+  produce explicit failures/gaps rather than incomplete success claims.
+- Bounded pending sends, scrollback, and local-echo tracking preserve drafts and
+  prevent long-running memory growth. Either observation/ack ordering retains
+  one message with its richer upstream metadata.
+- Rich notice fragments retain system notification text, and action framing is
+  removed correctly even when split around emote fragments.
+- HTTP/rate-limit handling preserves status and quota details, respects
+  cancellation, and never automatically retries an ambiguous send outcome.
+
+### Security
+
+- Moderation redacts removed messages/notices, text aliases, and reply previews,
+  including legacy stores, user-message clears, and delayed duplicates.
+  Schema 7 repairs existing privacy state; read-only legacy queries hide removed content.
+- Named accounts never fall back to another account's credentials; OAuth results
+  validate identity, client, and scopes before private persistence. Concurrent
+  processes coordinate credential rotation.
+- Device verification URLs and IRC wire inputs are validated; private device
+  codes, tokens, secrets, and credential-bearing redirects stay protected.
+- GitHub Actions references are pinned to immutable commits; release and
+  packaging checks cover private state, nonroot recording, signals, real disk-full
+  failures, and actual Snap installation/launcher behavior.
+
+### Upgrade notes
+
+- Historical queries use chat that your recorder already observed; they do not
+  retrieve arbitrary earlier Twitch chat.
+- Use `twi history upgrade --history PATH` for an existing store after making a
+  consistent private backup. Stop its recorder before maintenance.
+- Reauthorize the capabilities needed for new commands. IRC actions remain
+  unconfirmed writes; Helix remains the acknowledged plain-message transport.
 
 ## [0.18.0] — 2026-10-06
 
@@ -596,7 +650,9 @@ Releases before `0.8.0` predate this changelog; see the
 [commit history](https://github.com/worxbend/twi/commits/main) and the
 [releases page](https://github.com/worxbend/twi/releases).
 
-[Unreleased]: https://github.com/worxbend/twi/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/worxbend/twi/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/worxbend/twi/compare/v0.18.0...v0.19.0
+[0.18.0]: https://github.com/worxbend/twi/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/worxbend/twi/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/worxbend/twi/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/worxbend/twi/compare/v0.14.0...v0.15.0
