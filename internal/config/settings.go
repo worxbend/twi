@@ -195,6 +195,9 @@ var settings = []setting{
 		key: "scrollback_limit", env: "TWI_SCROLLBACK_LIMIT",
 		apply: func(cfg *Config, v string) {
 			cfg.Features.ScrollbackLimit = parseInt(v, cfg.Features.ScrollbackLimit)
+			if cfg.Features.ScrollbackLimit <= 0 {
+				cfg.Features.ScrollbackLimit = DefaultScrollbackLimit
+			}
 		},
 		format: func(cfg Config) string { return strconv.Itoa(cfg.Features.ScrollbackLimit) },
 	},

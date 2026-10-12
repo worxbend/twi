@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/worxbend/twi/internal/animation"
 	"github.com/worxbend/twi/internal/assets"
@@ -61,6 +61,9 @@ func TestRunMockRendersInitialShellForNonInteractiveOutput(t *testing.T) {
 	}
 
 	view := out.String()
+	if strings.Contains(view, "\x1b") {
+		t.Fatal("noninteractive output includes terminal escapes")
+	}
 	for _, want := range []string{
 		"#example",
 		"connected",
@@ -83,9 +86,9 @@ func TestRunMockRendersInitialShellForNonInteractiveOutput(t *testing.T) {
 func TestMockShellQuitsOnQAndCtrlC(t *testing.T) {
 	model := newMockModel("example", config.Default())
 
-	for name, msg := range map[string]tea.KeyMsg{
-		"q":      {Type: tea.KeyRunes, Runes: []rune{'q'}},
-		"ctrl+c": {Type: tea.KeyCtrlC},
+	for name, msg := range map[string]tea.KeyPressMsg{
+		"q":      {Text: string([]rune{'q'})},
+		"ctrl+c": {Code: 'c', Mod: tea.ModCtrl},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, cmd := model.Update(msg)
@@ -103,7 +106,7 @@ func TestMockShellWindowSizeKeepsViewWithinHeight(t *testing.T) {
 	model := newMockModel("example", config.Default())
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 64, Height: 12})
-	view := updated.View()
+	view := ansi.Strip(updated.View().Content)
 
 	if got, want := lineCount(view), 12; got != want {
 		t.Fatalf("view line count = %d, want %d:\n%s", got, want, view)
@@ -113,19 +116,19 @@ func TestMockShellWindowSizeKeepsViewWithinHeight(t *testing.T) {
 func TestMockShellFocusHelpAndComposerInput(t *testing.T) {
 	model := newMockModel("example", config.Default())
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	model = updated.(shellModel)
 	if got, want := model.focus, focusComposer; got != want {
 		t.Fatalf("focus after tab = %v, want %v", got, want)
 	}
-	if !strings.Contains(model.View(), "focus=composer") {
-		t.Fatalf("composer focus marker missing:\n%s", model.View())
+	if !strings.Contains(ansi.Strip(model.View().Content), "focus=composer") {
+		t.Fatalf("composer focus marker missing:\n%s", ansi.Strip(model.View().Content))
 	}
 
-	for _, msg := range []tea.KeyMsg{
-		{Type: tea.KeyRunes, Runes: []rune{'h', 'i'}},
-		{Type: tea.KeySpace},
-		{Type: tea.KeyRunes, Runes: []rune{'q'}},
+	for _, msg := range []tea.KeyPressMsg{
+		{Text: string([]rune{'h', 'i'})},
+		{Code: tea.KeySpace},
+		{Text: string([]rune{'q'})},
 	} {
 		updated, cmd := model.Update(msg)
 		if cmd != nil {
@@ -136,13 +139,13 @@ func TestMockShellFocusHelpAndComposerInput(t *testing.T) {
 	if got, want := model.activeChannelState().composerText, "hi q"; got != want {
 		t.Fatalf("composer text = %q, want %q", got, want)
 	}
-	if !strings.Contains(model.View(), "hi q") {
-		t.Fatalf("composer view missing typed text:\n%s", model.View())
+	if !strings.Contains(ansi.Strip(model.View().Content), "hi q") {
+		t.Fatalf("composer view missing typed text:\n%s", ansi.Strip(model.View().Content))
 	}
 
 	// "?" is a literal character while the composer has focus, not the help
 	// hotkey - otherwise it could never be typed into a message.
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	updated, _ = model.Update(tea.KeyPressMsg{Text: string([]rune{'?'})})
 	model = updated.(shellModel)
 	if model.helpExpanded {
 		t.Fatal("? toggled help while typing a message, want it inserted as text")
@@ -151,22 +154,22 @@ func TestMockShellFocusHelpAndComposerInput(t *testing.T) {
 		t.Fatalf("composer text = %q, want %q", got, want)
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	model = updated.(shellModel)
 	if got, want := model.focus, focusChat; got != want {
 		t.Fatalf("focus after second tab = %v, want %v", got, want)
 	}
 
 	// Away from the composer it is the help hotkey again.
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	updated, _ = model.Update(tea.KeyPressMsg{Text: string([]rune{'?'})})
 	model = updated.(shellModel)
 	if !model.helpExpanded {
 		t.Fatal("helpExpanded = false after ? outside the composer, want true")
 	}
-	if !strings.Contains(model.View(), "pgup/pgdn") {
-		t.Fatalf("expanded help missing page key hint:\n%s", model.View())
+	if !strings.Contains(ansi.Strip(model.View().Content), "pgup/pgdn") {
+		t.Fatalf("expanded help missing page key hint:\n%s", ansi.Strip(model.View().Content))
 	}
-	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	_, cmd := model.Update(tea.KeyPressMsg{Text: string([]rune{'q'})})
 	if cmd == nil {
 		t.Fatal("q from chat focus returned nil command, want tea.Quit")
 	}
@@ -178,7 +181,7 @@ func TestMockShellPageKeysScrollViewport(t *testing.T) {
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 13})
 	model = updated.(shellModel)
-	bottom := model.View()
+	bottom := ansi.Strip(model.View().Content)
 	if !strings.Contains(bottom, "message-11") {
 		t.Fatalf("bottom viewport missing latest message:\n%s", bottom)
 	}
@@ -186,9 +189,9 @@ func TestMockShellPageKeysScrollViewport(t *testing.T) {
 		t.Fatalf("bottom viewport unexpectedly contains oldest message:\n%s", bottom)
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
 	model = updated.(shellModel)
-	scrolled := model.View()
+	scrolled := ansi.Strip(model.View().Content)
 	if !strings.Contains(scrolled, "message-04") {
 		t.Fatalf("page up viewport missing previous page message:\n%s", scrolled)
 	}
@@ -196,24 +199,24 @@ func TestMockShellPageKeysScrollViewport(t *testing.T) {
 		t.Fatal("scrollOffset = 0 after page up, want non-zero")
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
 	model = updated.(shellModel)
-	if !strings.Contains(model.View(), "message-00") {
-		t.Fatalf("second page up viewport missing oldest message:\n%s", model.View())
+	if !strings.Contains(ansi.Strip(model.View().Content), "message-00") {
+		t.Fatalf("second page up viewport missing oldest message:\n%s", ansi.Strip(model.View().Content))
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 	model = updated.(shellModel)
 	if model.activeChannelState().scrollOffset == 0 {
 		t.Fatal("scrollOffset after one page down = 0, want still scrolled")
 	}
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 	model = updated.(shellModel)
 	if model.activeChannelState().scrollOffset != 0 {
 		t.Fatalf("scrollOffset after second page down = %d, want 0", model.activeChannelState().scrollOffset)
 	}
-	if !strings.Contains(model.View(), "message-11") {
-		t.Fatalf("second page down viewport missing latest message:\n%s", model.View())
+	if !strings.Contains(ansi.Strip(model.View().Content), "message-11") {
+		t.Fatalf("second page down viewport missing latest message:\n%s", ansi.Strip(model.View().Content))
 	}
 }
 
@@ -252,7 +255,7 @@ func TestInspectPanelShowsSelectedMessageMetadataAndRedactsDiagnostics(t *testin
 	model.activeChannelState().messages = []twitch.ChatMessage{message}
 	model.activeChannelState().replyTo = replyContextFromMessage(message)
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+	updated, cmd := model.Update(tea.KeyPressMsg{Text: string([]rune{'K'})})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("inspect toggle returned command %#v, want nil", cmd)
@@ -261,7 +264,7 @@ func TestInspectPanelShowsSelectedMessageMetadataAndRedactsDiagnostics(t *testin
 		t.Fatal("inspectOpen = false, want true")
 	}
 
-	view := model.View()
+	view := ansi.Strip(model.View().Content)
 	for _, want := range []string{
 		"Inspect: selected message",
 		"id=inspect-1",
@@ -300,7 +303,7 @@ func TestInspectPanelOpenClosePreservesComposerSelectionReplyAndScroll(t *testin
 	model.focus = focusChat
 
 	beforeReply := *state.replyTo
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+	updated, cmd := model.Update(tea.KeyPressMsg{Text: string([]rune{'K'})})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("open inspect returned command %#v, want nil", cmd)
@@ -318,7 +321,7 @@ func TestInspectPanelOpenClosePreservesComposerSelectionReplyAndScroll(t *testin
 		t.Fatalf("replyTo after open = %#v, want %#v", model.activeChannelState().replyTo, beforeReply)
 	}
 
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("close inspect returned command %#v, want nil", cmd)
@@ -352,7 +355,7 @@ func TestLiveShellEnterQueuesComposerSendAndSuccessKeepsComposerCleared(t *testi
 	model.focus = focusComposer
 	model.activeChannelState().composerText = " hello chat "
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("Enter returned nil command, want send command")
@@ -398,7 +401,7 @@ func TestLiveShellEnterQueuesComposerSendAndSuccessKeepsComposerCleared(t *testi
 	if len(sent) != 1 || sent[0].Channel != "example" || sent[0].Text != "hello chat" {
 		t.Fatalf("SentRequests = %#v, want one trimmed send to active channel", sent)
 	}
-	view := model.View()
+	view := ansi.Strip(model.View().Content)
 	for _, want := range []string{"accepted by Twitch", "hello chat", "self_user"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view missing %q after successful send:\n%s", want, view)
@@ -419,7 +422,7 @@ func TestLiveShellIncomingEchoReplacesLocalSentMessage(t *testing.T) {
 	model.focus = focusComposer
 	model.activeChannelState().composerText = "hello chat"
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	updated, _ = model.Update(cmd().(composerSendCompletedMsg))
 	model = updated.(shellModel)
@@ -454,7 +457,7 @@ func TestLiveShellEnterIgnoresEmptyComposer(t *testing.T) {
 	model.focus = focusComposer
 	model.activeChannelState().composerText = "   "
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("empty composer returned command %#v, want nil", cmd)
@@ -476,7 +479,7 @@ func TestLiveShellFailedSendShowsReasonAndRestoresComposer(t *testing.T) {
 	model.focus = focusComposer
 	model.activeChannelState().composerText = "please send"
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	completed := cmd().(composerSendCompletedMsg)
 	updated, _ = model.Update(completed)
@@ -489,8 +492,8 @@ func TestLiveShellFailedSendShowsReasonAndRestoresComposer(t *testing.T) {
 		t.Fatalf("sendState after failure = %q, want %q", got, want)
 	}
 	for _, want := range []string{"failed", errNetworkUnavailable.Error()} {
-		if !strings.Contains(model.View(), want) {
-			t.Fatalf("view missing %q after failed send:\n%s", want, model.View())
+		if !strings.Contains(ansi.Strip(model.View().Content), want) {
+			t.Fatalf("view missing %q after failed send:\n%s", want, ansi.Strip(model.View().Content))
 		}
 	}
 }
@@ -504,7 +507,7 @@ func TestLiveShellSendFailureUsesSendScopeGuidance(t *testing.T) {
 	model.focus = focusComposer
 	model.activeChannelState().composerText = "please send"
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	completed := cmd().(composerSendCompletedMsg)
 	updated, _ = model.Update(completed)
@@ -532,14 +535,14 @@ func TestLiveShellFailedSendRestoresQueuedFollowupText(t *testing.T) {
 	model.focus = focusComposer
 	model.activeChannelState().composerText = "first message"
 
-	updated, firstCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, firstCmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if firstCmd == nil {
 		t.Fatal("first Enter returned nil command, want send command")
 	}
 
 	model.activeChannelState().composerText = "second message"
-	updated, secondCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, secondCmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if secondCmd != nil {
 		t.Fatalf("queued follow-up returned command %#v while first send active, want nil", secondCmd)
@@ -569,8 +572,8 @@ func TestLiveShellFailedSendRestoresQueuedFollowupText(t *testing.T) {
 		t.Fatalf("SentRequests length = %d, want only first send attempted", got)
 	}
 	for _, want := range []string{"failed", errNetworkUnavailable.Error()} {
-		if !strings.Contains(model.View(), want) {
-			t.Fatalf("view missing %q after queued failure:\n%s", want, model.View())
+		if !strings.Contains(ansi.Strip(model.View().Content), want) {
+			t.Fatalf("view missing %q after queued failure:\n%s", want, ansi.Strip(model.View().Content))
 		}
 	}
 }
@@ -588,7 +591,7 @@ func TestLiveShellRateLimitedSendShowsReasonAndRestoresComposer(t *testing.T) {
 	model.focus = focusComposer
 	model.activeChannelState().composerText = "slow down?"
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	completed := cmd().(composerSendCompletedMsg)
 	updated, _ = model.Update(completed)
@@ -601,8 +604,8 @@ func TestLiveShellRateLimitedSendShowsReasonAndRestoresComposer(t *testing.T) {
 		t.Fatalf("sendState after rate limit = %q, want %q", got, want)
 	}
 	for _, want := range []string{"rate limited", "sending messages too quickly"} {
-		if !strings.Contains(model.View(), want) {
-			t.Fatalf("view missing %q after rate limit:\n%s", want, model.View())
+		if !strings.Contains(ansi.Strip(model.View().Content), want) {
+			t.Fatalf("view missing %q after rate limit:\n%s", want, ansi.Strip(model.View().Content))
 		}
 	}
 }
@@ -635,7 +638,7 @@ func TestLiveShellKeepsComposerSendStatePerChannel(t *testing.T) {
 	}
 
 	alpha.composerText = "alpha draft"
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("alpha reply selection returned command %#v, want nil", cmd)
@@ -644,7 +647,7 @@ func TestLiveShellKeepsComposerSendStatePerChannel(t *testing.T) {
 		t.Fatalf("alpha replyTo = %#v, want alpha-parent", alpha.replyTo)
 	}
 
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	updated, cmd = model.Update(tea.KeyPressMsg{Text: string([]rune{']'})})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("switch to beta returned command %#v, want nil", cmd)
@@ -659,14 +662,14 @@ func TestLiveShellKeepsComposerSendStatePerChannel(t *testing.T) {
 		t.Fatalf("beta draft after switching = %q, want empty", got)
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	model = updated.(shellModel)
 	if beta.replyTo == nil || beta.replyTo.MessageID != "beta-parent" {
 		t.Fatalf("beta replyTo = %#v, want beta-parent", beta.replyTo)
 	}
 	model.focus = focusComposer
 	beta.composerText = " /me beta waves "
-	updated, betaActionCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, betaActionCmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if betaActionCmd == nil {
 		t.Fatal("beta /me Enter returned nil command, want send command")
@@ -676,7 +679,7 @@ func TestLiveShellKeepsComposerSendStatePerChannel(t *testing.T) {
 	}
 
 	model.focus = focusChat
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	updated, _ = model.Update(tea.KeyPressMsg{Text: string([]rune{'['})})
 	model = updated.(shellModel)
 	if got, want := model.activeChannelName(), "alpha"; got != want {
 		t.Fatalf("active channel = %q, want %q", got, want)
@@ -695,7 +698,7 @@ func TestLiveShellKeepsComposerSendStatePerChannel(t *testing.T) {
 
 	model.focus = focusComposer
 	alpha.composerText = "alpha reply body"
-	updated, alphaRateLimitCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, alphaRateLimitCmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if alphaRateLimitCmd == nil {
 		t.Fatal("alpha reply Enter returned nil command, want send command")
@@ -716,24 +719,24 @@ func TestLiveShellKeepsComposerSendStatePerChannel(t *testing.T) {
 	}
 
 	model.focus = focusChat
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	updated, _ = model.Update(tea.KeyPressMsg{Text: string([]rune{']'})})
 	model = updated.(shellModel)
 	if got, want := model.activeChannelName(), "beta"; got != want {
 		t.Fatalf("active channel = %q, want %q", got, want)
 	}
-	if strings.Contains(model.View(), "alpha cooldown") {
-		t.Fatalf("beta view leaked alpha rate-limit feedback:\n%s", model.View())
+	if strings.Contains(ansi.Strip(model.View().Content), "alpha cooldown") {
+		t.Fatalf("beta view leaked alpha rate-limit feedback:\n%s", ansi.Strip(model.View().Content))
 	}
 	model.focus = focusComposer
 	beta.composerText = "beta failed send"
-	updated, betaFailureCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, betaFailureCmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if betaFailureCmd == nil {
 		t.Fatal("beta failed-send Enter returned nil command, want send command")
 	}
 
 	model.focus = focusChat
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	updated, _ = model.Update(tea.KeyPressMsg{Text: string([]rune{'['})})
 	model = updated.(shellModel)
 	alpha.composerText = "alpha fresh draft"
 	updated, _ = model.Update(betaFailureCmd().(composerSendCompletedMsg))
@@ -784,14 +787,14 @@ func TestLiveShellSidebarSwitchesChannelsAndPreservesDrafts(t *testing.T) {
 	beta.unread = 2
 	model.focus = focusChat
 
-	view := model.View()
+	view := ansi.Strip(model.View().Content)
 	for _, want := range []string{"Channels", "> * #alpha", "! #beta 2", "alpha draft"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("sidebar view missing %q:\n%s", want, view)
 		}
 	}
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	updated, cmd := model.Update(tea.KeyPressMsg{Text: string([]rune{']'})})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("channel switch returned command %#v, want nil", cmd)
@@ -808,14 +811,14 @@ func TestLiveShellSidebarSwitchesChannelsAndPreservesDrafts(t *testing.T) {
 	if got := beta.unread; got != 0 {
 		t.Fatalf("beta unread after activation = %d, want 0", got)
 	}
-	view = model.View()
+	view = ansi.Strip(model.View().Content)
 	for _, want := range []string{"> ! #beta", "beta draft"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("active beta view missing %q:\n%s", want, view)
 		}
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	updated, _ = model.Update(tea.KeyPressMsg{Text: string([]rune{'['})})
 	model = updated.(shellModel)
 	if got, want := model.activeChannelName(), "alpha"; got != want {
 		t.Fatalf("active channel after switch back = %q, want %q", got, want)
@@ -848,8 +851,8 @@ func TestLiveShellNotifiesSystemEventWhenComposerFocused(t *testing.T) {
 	if model.lastSystemNotification == nil || model.lastSystemNotification.Title != "Raid in #example" {
 		t.Fatalf("last notification = %#v, want raid summary", model.lastSystemNotification)
 	}
-	if !strings.Contains(model.View(), "notify: Raid in #example") {
-		t.Fatalf("view missing notification summary:\n%s", model.View())
+	if !strings.Contains(ansi.Strip(model.View().Content), "notify: Raid in #example") {
+		t.Fatalf("view missing notification summary:\n%s", ansi.Strip(model.View().Content))
 	}
 }
 
@@ -969,7 +972,7 @@ func TestLiveShellSelectsReplyContextAndEscCancelsWithoutLosingDraft(t *testing.
 	}
 	model.activeChannelState().composerText = "draft reply"
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("select reply returned command %#v, want nil", cmd)
@@ -978,12 +981,12 @@ func TestLiveShellSelectsReplyContextAndEscCancelsWithoutLosingDraft(t *testing.
 		t.Fatalf("replyTo = %#v, want parent-1 context", model.activeChannelState().replyTo)
 	}
 	for _, want := range []string{"Replying to viewer", "question for chat"} {
-		if !strings.Contains(model.View(), want) {
-			t.Fatalf("reply context view missing %q:\n%s", want, model.View())
+		if !strings.Contains(ansi.Strip(model.View().Content), want) {
+			t.Fatalf("reply context view missing %q:\n%s", want, ansi.Strip(model.View().Content))
 		}
 	}
 
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("esc returned command %#v, want nil", cmd)
@@ -994,8 +997,8 @@ func TestLiveShellSelectsReplyContextAndEscCancelsWithoutLosingDraft(t *testing.
 	if got, want := model.activeChannelState().composerText, "draft reply"; got != want {
 		t.Fatalf("composerText after esc = %q, want %q", got, want)
 	}
-	if strings.Contains(model.View(), "Replying to viewer") {
-		t.Fatalf("reply context still visible after esc:\n%s", model.View())
+	if strings.Contains(ansi.Strip(model.View().Content), "Replying to viewer") {
+		t.Fatalf("reply context still visible after esc:\n%s", ansi.Strip(model.View().Content))
 	}
 }
 
@@ -1024,7 +1027,7 @@ func TestLiveShellRStartsReplyModeAndReplySendUsesParentID(t *testing.T) {
 		},
 	}
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	updated, cmd := model.Update(tea.KeyPressMsg{Text: string([]rune{'r'})})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("r returned command %#v, want nil", cmd)
@@ -1034,7 +1037,7 @@ func TestLiveShellRStartsReplyModeAndReplySendUsesParentID(t *testing.T) {
 	}
 
 	model.activeChannelState().composerText = " thanks "
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("reply Enter returned nil command, want send command")
@@ -1078,7 +1081,7 @@ func TestLiveShellMeInputQueuesActionSend(t *testing.T) {
 	model.focus = focusComposer
 	model.activeChannelState().composerText = " /me waves at chat "
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("/me Enter returned nil command, want send command")
@@ -1116,7 +1119,7 @@ func TestLiveShellFailedReplyRestoresReplyContext(t *testing.T) {
 	model.activeChannelState().replyTo = &composerReplyContext{MessageID: "parent-1", Author: "viewer", Text: "original"}
 	model.activeChannelState().composerText = "reply body"
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	completed := cmd().(composerSendCompletedMsg)
 	updated, _ = model.Update(completed)
@@ -1140,14 +1143,14 @@ func TestLiveShellFailedMixedQueueDoesNotMisapplyReplyContext(t *testing.T) {
 	model.activeChannelState().replyTo = &composerReplyContext{MessageID: "parent-1", Author: "viewer", Text: "original"}
 	model.activeChannelState().composerText = "reply body"
 
-	updated, firstCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, firstCmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if firstCmd == nil {
 		t.Fatal("first reply Enter returned nil command, want send command")
 	}
 
 	model.activeChannelState().composerText = "plain followup"
-	updated, secondCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, secondCmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if secondCmd != nil {
 		t.Fatalf("queued follow-up returned command %#v while first send active, want nil", secondCmd)
@@ -1180,15 +1183,15 @@ func TestMockShellFastModeRevealsIncomingMessage(t *testing.T) {
 	if got, want := model.activeChannelState().revealQueue.Len(), 1; got != want {
 		t.Fatalf("reveal queue len = %d, want %d", got, want)
 	}
-	if strings.Contains(model.View(), "animated text arrives") {
-		t.Fatalf("incoming message rendered fully before ticks:\n%s", model.View())
+	if strings.Contains(ansi.Strip(model.View().Content), "animated text arrives") {
+		t.Fatalf("incoming message rendered fully before ticks:\n%s", ansi.Strip(model.View().Content))
 	}
 
-	initial := model.View()
+	initial := ansi.Strip(model.View().Content)
 	clock.Add(mockRevealDelay)
 	updated, _ = model.Update(mockAnimationTickMsg{})
 	model = updated.(shellModel)
-	if got := model.View(); got == initial {
+	if got := ansi.Strip(model.View().Content); got == initial {
 		t.Fatalf("first animation tick did not change view:\n%s", got)
 	}
 
@@ -1196,8 +1199,8 @@ func TestMockShellFastModeRevealsIncomingMessage(t *testing.T) {
 	if got := model.activeChannelState().revealQueue.Len(); got != 0 {
 		t.Fatalf("reveal queue len after completion = %d, want 0", got)
 	}
-	if !strings.Contains(model.View(), "animated text arrives") {
-		t.Fatalf("completed reveal missing full message:\n%s", model.View())
+	if !strings.Contains(ansi.Strip(model.View().Content), "animated text arrives") {
+		t.Fatalf("completed reveal missing full message:\n%s", ansi.Strip(model.View().Content))
 	}
 }
 
@@ -1216,8 +1219,8 @@ func TestMockShellOffModeRendersIncomingMessageWithoutRevealTick(t *testing.T) {
 	if got := model.activeChannelState().revealQueue.Len(); got != 0 {
 		t.Fatalf("off mode reveal queue len = %d, want 0", got)
 	}
-	if !strings.Contains(model.View(), "off mode is immediate") {
-		t.Fatalf("off mode view missing full message:\n%s", model.View())
+	if !strings.Contains(ansi.Strip(model.View().Content), "off mode is immediate") {
+		t.Fatalf("off mode view missing full message:\n%s", ansi.Strip(model.View().Content))
 	}
 }
 
@@ -1246,15 +1249,15 @@ func TestMockShellInputAndScrollRemainResponsiveDuringAnimation(t *testing.T) {
 		t.Fatalf("reveal queue len = %d, want 1", got)
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
 	model = updated.(shellModel)
 	if model.activeChannelState().scrollOffset == 0 {
 		t.Fatal("page up during animation left scrollOffset at 0")
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	model = updated.(shellModel)
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o', 'k'}})
+	updated, cmd := model.Update(tea.KeyPressMsg{Text: string([]rune{'o', 'k'})})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("composer input during animation returned command %#v, want nil", cmd)
@@ -1315,7 +1318,7 @@ func TestLiveShellHighThroughputChatStressHarness(t *testing.T) {
 
 	updated, _ = model.Update(tea.WindowSizeMsg{Width: 36, Height: 9})
 	model = updated.(shellModel)
-	view := model.View()
+	view := ansi.Strip(model.View().Content)
 	if got, want := lineCount(view), 9; got != want {
 		t.Fatalf("burst resized view line count = %d, want %d:\n%s", got, want, view)
 	}
@@ -1325,15 +1328,15 @@ func TestLiveShellHighThroughputChatStressHarness(t *testing.T) {
 		}
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
 	model = updated.(shellModel)
 	if model.activeChannelState().scrollOffset == 0 {
 		t.Fatal("page up during burst left scrollOffset at 0")
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	model = updated.(shellModel)
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("still responsive")})
+	updated, cmd := model.Update(tea.KeyPressMsg{Text: string([]rune("still responsive"))})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("composer input during burst returned command %#v, want nil", cmd)
@@ -1341,7 +1344,7 @@ func TestLiveShellHighThroughputChatStressHarness(t *testing.T) {
 	if got, want := model.activeChannelState().composerText, "still responsive"; got != want {
 		t.Fatalf("composer text during burst = %q, want %q", got, want)
 	}
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("Enter during burst returned nil command, want send command")
@@ -1364,7 +1367,7 @@ func TestMockShellScrolledBurstRendersStaticallyWithoutRevealBacklog(t *testing.
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 12})
 	model = updated.(shellModel)
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
 	model = updated.(shellModel)
 	if model.activeChannelState().scrollOffset == 0 {
 		t.Fatal("test setup failed: scrollOffset = 0 after page up")
@@ -1420,12 +1423,12 @@ func TestMockShellCompletingActiveRevealPreservesScrolledViewport(t *testing.T) 
 	if got := model.activeChannelState().revealQueue.Len(); got != 1 {
 		t.Fatalf("reveal queue len = %d, want 1", got)
 	}
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
 	model = updated.(shellModel)
 	if model.activeChannelState().scrollOffset == 0 {
 		t.Fatal("test setup failed: scrollOffset = 0 after page up")
 	}
-	beforeView := model.View()
+	beforeView := ansi.Strip(model.View().Content)
 	beforeOffset := model.activeChannelState().scrollOffset
 
 	driveRevealToCompletion(t, &model, clock)
@@ -1439,7 +1442,7 @@ func TestMockShellCompletingActiveRevealPreservesScrolledViewport(t *testing.T) 
 	if got := model.activeChannelState().scrollOffset; got != beforeOffset {
 		t.Fatalf("scrollOffset after active completion = %d, want %d", got, beforeOffset)
 	}
-	if afterView := model.View(); afterView != beforeView {
+	if afterView := ansi.Strip(model.View().Content); afterView != beforeView {
 		t.Fatalf("active reveal completion changed visible scrolled page:\nbefore:\n%s\nafter:\n%s", beforeView, afterView)
 	}
 }
@@ -1459,7 +1462,7 @@ func TestMockShellDuplicateIncomingMessageIDsCompleteIndependently(t *testing.T)
 	}
 
 	driveRevealToCompletion(t, &model, clock)
-	view := model.View()
+	view := ansi.Strip(model.View().Content)
 	for _, want := range []string{"first duplicate", "second duplicate"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("completed duplicate-ID reveal missing %q:\n%s", want, view)
@@ -1479,7 +1482,7 @@ func TestMockShellResizeDuringAnimationStaysWithinBounds(t *testing.T) {
 	updated, _ = model.Update(mockAnimationTickMsg{})
 	model = updated.(shellModel)
 	updated, _ = model.Update(tea.WindowSizeMsg{Width: 24, Height: 8})
-	view := updated.View()
+	view := ansi.Strip(updated.View().Content)
 
 	if got, want := lineCount(view), 8; got != want {
 		t.Fatalf("resized active view line count = %d, want %d:\n%s", got, want, view)
@@ -1535,7 +1538,7 @@ func TestMockShellNarrowLayoutStaysWithinBounds(t *testing.T) {
 	})
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 24, Height: 8})
-	view := updated.View()
+	view := ansi.Strip(updated.View().Content)
 
 	if got, want := lineCount(view), 8; got != want {
 		t.Fatalf("narrow view line count = %d, want %d:\n%s", got, want, view)
@@ -1583,7 +1586,7 @@ func TestMockShellChannelSidebarResponsiveLayouts(t *testing.T) {
 			updated, _ := model.Update(tea.WindowSizeMsg{Width: tt.width, Height: tt.height})
 			rendered := updated
 			layout := rendered.(shellModel).layout()
-			view := rendered.View()
+			view := ansi.Strip(rendered.View().Content)
 
 			if got, want := lineCount(view), tt.height; got != want {
 				t.Fatalf("line count = %d, want %d:\n%s", got, want, view)
@@ -1627,7 +1630,7 @@ func TestThemeSettingsOpensPreviewsAndPersists(t *testing.T) {
 	model.width, model.height = 88, 18
 	originalTheme := model.theme
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("open theme settings returned command %#v, want nil", cmd)
@@ -1635,7 +1638,7 @@ func TestThemeSettingsOpensPreviewsAndPersists(t *testing.T) {
 	if !model.themeSettings.open {
 		t.Fatal("themeSettings.open = false, want true")
 	}
-	view := model.View()
+	view := ansi.Strip(model.View().Content)
 	if !strings.Contains(view, "Theme") || !strings.Contains(view, "claude (active)") {
 		t.Fatalf("theme settings view missing expected content:\n%s", view)
 	}
@@ -1650,7 +1653,7 @@ func TestThemeSettingsOpensPreviewsAndPersists(t *testing.T) {
 		}
 	}
 	for model.themeSettings.selected != nordIndex {
-		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 		model = updated.(shellModel)
 	}
 	if model.theme != theme.Presets()["nord"] {
@@ -1660,7 +1663,7 @@ func TestThemeSettingsOpensPreviewsAndPersists(t *testing.T) {
 		t.Fatal("effectiveConfig.ThemeName changed before persisting, want unchanged until enter")
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if model.themeSettings.open {
 		t.Fatal("themeSettings.open after enter = true, want false")
@@ -1689,15 +1692,15 @@ func TestThemeSettingsEscRevertsPreviewWithoutPersisting(t *testing.T) {
 	originalTheme := model.theme
 	originalThemeName := model.effectiveConfig.Features.ThemeName
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	model = updated.(shellModel)
 	if model.theme == originalTheme {
 		t.Fatal("moving selection did not change live preview theme")
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	model = updated.(shellModel)
 	if model.themeSettings.open {
 		t.Fatal("themeSettings.open after esc = true, want false")
@@ -1719,9 +1722,9 @@ func TestThemeSettingsAndCommandPaletteAreMutuallyExclusive(t *testing.T) {
 	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 18
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
 	if !model.themeSettings.open || model.palette.open {
 		t.Fatalf("expected theme settings open and palette closed; theme=%v palette=%v", model.themeSettings.open, model.palette.open)
@@ -1734,15 +1737,15 @@ func TestThemeSettingsRendersAsFullScreenPage(t *testing.T) {
 	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 24
 
-	dashboard := ansi.Strip(model.View())
+	dashboard := ansi.Strip(model.View().Content)
 	if !strings.Contains(dashboard, "Chat · #alpha") {
 		t.Fatalf("dashboard missing chat pane before opening themes:\n%s", dashboard)
 	}
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
 
-	page := ansi.Strip(model.View())
+	page := ansi.Strip(model.View().Content)
 	if strings.Contains(page, "Chat · #alpha") {
 		t.Fatalf("theme page still renders the chat pane, want a full-screen replacement:\n%s", page)
 	}
@@ -1770,9 +1773,9 @@ func TestThemeSettingsRendersAsFullScreenPage(t *testing.T) {
 	}
 
 	// Every entry is reachable: End scrolls the window to the far end.
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnd})
 	model = updated.(shellModel)
-	if end := ansi.Strip(model.View()); !strings.Contains(end, names[len(names)-1]) {
+	if end := ansi.Strip(model.View().Content); !strings.Contains(end, names[len(names)-1]) {
 		t.Fatalf("theme page after end missing the last entry %q:\n%s", names[len(names)-1], end)
 	}
 }
@@ -1783,10 +1786,10 @@ func TestThemeSettingsHomeEndJumpToListEnds(t *testing.T) {
 	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 24
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnd})
 	model = updated.(shellModel)
 	names := themeSettingsNames()
 	if model.themeSettings.selected != len(names)-1 {
@@ -1797,7 +1800,7 @@ func TestThemeSettingsHomeEndJumpToListEnds(t *testing.T) {
 		t.Fatalf("theme after end = %+v, want %+v", model.theme, last)
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyHome})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyHome})
 	model = updated.(shellModel)
 	if model.themeSettings.selected != 0 {
 		t.Fatalf("selected after home = %d, want 0", model.themeSettings.selected)
@@ -1810,7 +1813,7 @@ func TestEmotePickerOpensFiltersExecutesAndCloses(t *testing.T) {
 	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 18
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("open emote picker returned command %#v, want nil", cmd)
@@ -1818,14 +1821,14 @@ func TestEmotePickerOpensFiltersExecutesAndCloses(t *testing.T) {
 	if !model.emotePicker.open {
 		t.Fatal("emotePicker.open = false, want true")
 	}
-	view := model.View()
+	view := ansi.Strip(model.View().Content)
 	for _, want := range []string{"Emote search", "Kappa"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("emote picker view missing %q:\n%s", want, view)
 		}
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("champ")})
+	updated, _ = model.Update(tea.KeyPressMsg{Text: string([]rune("champ"))})
 	model = updated.(shellModel)
 	if got, want := model.emotePicker.query, "champ"; got != want {
 		t.Fatalf("emote picker query = %q, want %q", got, want)
@@ -1835,7 +1838,7 @@ func TestEmotePickerOpensFiltersExecutesAndCloses(t *testing.T) {
 		t.Fatalf("filtered entries = %#v, want only PogChamp", entries)
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if model.emotePicker.open {
 		t.Fatal("emotePicker.open after enter = true, want false")
@@ -1851,9 +1854,9 @@ func TestEmotePickerEscCancelsWithoutInserting(t *testing.T) {
 	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 18
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	model = updated.(shellModel)
 	if model.emotePicker.open {
 		t.Fatal("emotePicker.open after esc = true, want false")
@@ -1869,19 +1872,19 @@ func TestEmotePickerAndCommandPaletteAreMutuallyExclusive(t *testing.T) {
 	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 18
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
 	if !model.palette.open {
 		t.Fatal("palette.open = false after ctrl+p, want true")
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
 	if !model.emotePicker.open || model.palette.open {
 		t.Fatalf("expected emote picker open and palette closed; emotePicker=%v palette=%v", model.emotePicker.open, model.palette.open)
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
 	if !model.palette.open || model.emotePicker.open {
 		t.Fatalf("expected palette open and emote picker closed; palette=%v emotePicker=%v", model.palette.open, model.emotePicker.open)
@@ -1896,7 +1899,7 @@ func TestCommandPaletteOpensFiltersExecutesAndCloses(t *testing.T) {
 	model.width = 88
 	model.height = 15
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("open palette returned command %#v, want nil", cmd)
@@ -1904,7 +1907,7 @@ func TestCommandPaletteOpensFiltersExecutesAndCloses(t *testing.T) {
 	if !model.palette.open {
 		t.Fatal("palette open = false, want true")
 	}
-	view := model.View()
+	view := ansi.Strip(model.View().Content)
 	for _, want := range []string{"Command", "Focus composer", "focus=palette"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("palette view missing %q:\n%s", want, view)
@@ -1914,7 +1917,7 @@ func TestCommandPaletteOpensFiltersExecutesAndCloses(t *testing.T) {
 		t.Fatalf("palette view line count = %d, want %d:\n%s", got, want, view)
 	}
 
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("gamma")})
+	updated, cmd = model.Update(tea.KeyPressMsg{Text: string([]rune("gamma"))})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("palette filter returned command %#v, want nil", cmd)
@@ -1927,7 +1930,7 @@ func TestCommandPaletteOpensFiltersExecutesAndCloses(t *testing.T) {
 		t.Fatalf("filtered commands = %#v, want only switch to gamma", commands)
 	}
 
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("palette channel switch returned command %#v, want nil without visible assets", cmd)
@@ -1948,9 +1951,9 @@ func TestCommandPaletteFilteringDoesNotMutateComposerReplyOrSelection(t *testing
 	model.activeChannelState().replyTo = replyContextFromMessage(model.activeChannelState().messages[2])
 	beforeReply := *model.activeChannelState().replyTo
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("help")})
+	updated, cmd := model.Update(tea.KeyPressMsg{Text: string([]rune("help"))})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("palette filter returned command %#v, want nil", cmd)
@@ -1961,7 +1964,7 @@ func TestCommandPaletteFilteringDoesNotMutateComposerReplyOrSelection(t *testing
 	if got, want := model.palette.query, "help"; got != want {
 		t.Fatalf("palette query = %q, want %q", got, want)
 	}
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("palette escape returned command %#v, want nil", cmd)
@@ -1979,11 +1982,11 @@ func TestCommandPaletteFilteringDoesNotMutateComposerReplyOrSelection(t *testing
 		t.Fatalf("replyTo after palette esc = %#v, want %#v", model.activeChannelState().replyTo, beforeReply)
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("focus chat")})
+	updated, _ = model.Update(tea.KeyPressMsg{Text: string([]rune("focus chat"))})
 	model = updated.(shellModel)
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("focus chat command returned command %#v, want nil", cmd)
@@ -2009,11 +2012,11 @@ func TestCommandPaletteAndKeyboardShortcutsClearAndReconnect(t *testing.T) {
 	beforeReply := *state.replyTo
 	model.focus = focusComposer
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("clear local")})
+	updated, _ = model.Update(tea.KeyPressMsg{Text: string([]rune("clear local"))})
 	model = updated.(shellModel)
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("clear local command returned command %#v, want nil", cmd)
@@ -2032,12 +2035,12 @@ func TestCommandPaletteAndKeyboardShortcutsClearAndReconnect(t *testing.T) {
 	// TestClearChatAsksBeforeDiscardingHistory. The palette entry above does
 	// not, because choosing it from a list is already deliberate.
 	model.activeChannelState().messages = numberedMockMessages("example", 2)
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	updated, cmd = model.Update(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("ctrl+l returned command %#v, want nil", cmd)
 	}
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	updated, cmd = model.Update(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("confirming ctrl+l returned command %#v, want nil", cmd)
@@ -2046,11 +2049,11 @@ func TestCommandPaletteAndKeyboardShortcutsClearAndReconnect(t *testing.T) {
 		t.Fatalf("messages after confirmed ctrl+l = %d, want 0", got)
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("reconnect")})
+	updated, _ = model.Update(tea.KeyPressMsg{Text: string([]rune("reconnect"))})
 	model = updated.(shellModel)
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("palette reconnect returned nil command, want reconnect command")
@@ -2073,7 +2076,7 @@ func TestCommandPaletteAndKeyboardShortcutsClearAndReconnect(t *testing.T) {
 		t.Fatalf("status detail after reconnect completion = %q, want waiting feedback", model.activeChannelState().status.Detail)
 	}
 
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	updated, cmd = model.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("ctrl+r returned nil command, want reconnect command")
@@ -2091,7 +2094,7 @@ func TestCommandPaletteAndKeyboardShortcutsClearAndReconnect(t *testing.T) {
 	}
 
 	mockModel := newMockModel("example", config.Default())
-	updated, cmd = mockModel.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	updated, cmd = mockModel.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
 	mockModel = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("unsupported ctrl+r returned command %#v, want nil", cmd)
@@ -2115,7 +2118,7 @@ func TestMockShellKeyboardMessageFiltersPreserveChannelState(t *testing.T) {
 	state.replyTo = replyContextFromMessage(state.messages[0])
 	beforeReply := *state.replyTo
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	updated, cmd := model.Update(tea.KeyPressMsg{Text: string([]rune{'1'})})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("mention filter toggle returned command %#v, want nil without asset services", cmd)
@@ -2139,7 +2142,7 @@ func TestMockShellKeyboardMessageFiltersPreserveChannelState(t *testing.T) {
 		t.Fatalf("selected inspect message = %#v, %v; want hidden ordinary selection preserved", selected, ok)
 	}
 
-	chatRows := strings.Join(model.chatRows(model.layout()), "\n")
+	chatRows := ansi.Strip(strings.Join(model.chatRows(model.layout()), "\n"))
 	if !strings.Contains(chatRows, "hello @twi_bot") {
 		t.Fatalf("mention-filtered chat missing mention:\n%s", chatRows)
 	}
@@ -2149,7 +2152,7 @@ func TestMockShellKeyboardMessageFiltersPreserveChannelState(t *testing.T) {
 		}
 	}
 
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	updated, cmd = model.Update(tea.KeyPressMsg{Text: string([]rune{'1'})})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("mention filter toggle-off returned command %#v, want nil without asset services", cmd)
@@ -2157,7 +2160,7 @@ func TestMockShellKeyboardMessageFiltersPreserveChannelState(t *testing.T) {
 	if model.activeChannelState().messageFilters.active() {
 		t.Fatalf("filters after toggle-off = %q, want none", model.activeChannelState().messageFilters.summary())
 	}
-	if chatRows := strings.Join(model.chatRows(model.layout()), "\n"); !strings.Contains(chatRows, "ordinary viewer chatter") || !strings.Contains(chatRows, "hello @twi_bot") {
+	if chatRows := ansi.Strip(strings.Join(model.chatRows(model.layout()), "\n")); !strings.Contains(chatRows, "ordinary viewer chatter") || !strings.Contains(chatRows, "hello @twi_bot") {
 		t.Fatalf("unfiltered chat missing restored history:\n%s", chatRows)
 	}
 }
@@ -2167,7 +2170,7 @@ func TestMockShellComposerFocusedNumbersDoNotToggleMessageFilters(t *testing.T) 
 	model.focus = focusComposer
 
 	for _, r := range []rune{'1', '2', '3', '4', '0'} {
-		updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		updated, cmd := model.Update(tea.KeyPressMsg{Text: string([]rune{r})})
 		model = updated.(shellModel)
 		if cmd != nil {
 			t.Fatalf("composer numeric key %q returned command %#v, want nil", r, cmd)
@@ -2189,11 +2192,11 @@ func TestCommandPaletteTogglesAndResetsMessageFilters(t *testing.T) {
 	model.activeChannelState().replyTo = replyContextFromMessage(model.activeChannelState().messages[0])
 	beforeReply := *model.activeChannelState().replyTo
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("roles")})
+	updated, _ = model.Update(tea.KeyPressMsg{Text: string([]rune("roles"))})
 	model = updated.(shellModel)
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("palette role filter returned command %#v, want nil without asset services", cmd)
@@ -2201,7 +2204,7 @@ func TestCommandPaletteTogglesAndResetsMessageFilters(t *testing.T) {
 	if !model.activeChannelState().messageFilters.enabled(messageFilterRoles) {
 		t.Fatal("role filter is not active after palette command")
 	}
-	chatRows := strings.Join(model.chatRows(model.layout()), "\n")
+	chatRows := ansi.Strip(strings.Join(model.chatRows(model.layout()), "\n"))
 	if !strings.Contains(chatRows, "vip update") {
 		t.Fatalf("role-filtered chat missing role message:\n%s", chatRows)
 	}
@@ -2211,11 +2214,11 @@ func TestCommandPaletteTogglesAndResetsMessageFilters(t *testing.T) {
 		}
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("reset filters")})
+	updated, _ = model.Update(tea.KeyPressMsg{Text: string([]rune("reset filters"))})
 	model = updated.(shellModel)
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("palette reset filters returned command %#v, want nil without asset services", cmd)
@@ -2244,13 +2247,13 @@ func TestMessageFilterTogglesPreserveActiveSendQueueAndFeedback(t *testing.T) {
 	model.focus = focusComposer
 	model.activeChannelState().composerText = "first message"
 
-	updated, firstCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, firstCmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if firstCmd == nil {
 		t.Fatal("first Enter returned nil command, want active send command")
 	}
 	model.activeChannelState().composerText = "second message"
-	updated, secondCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, secondCmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if secondCmd != nil {
 		t.Fatalf("second Enter returned command %#v while first send active, want queued only", secondCmd)
@@ -2269,7 +2272,7 @@ func TestMessageFilterTogglesPreserveActiveSendQueueAndFeedback(t *testing.T) {
 
 	model.focus = focusChat
 	for _, r := range []rune{'1', '1'} {
-		updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		updated, cmd := model.Update(tea.KeyPressMsg{Text: string([]rune{r})})
 		model = updated.(shellModel)
 		if cmd != nil {
 			t.Fatalf("filter toggle %q returned command %#v without asset services, want nil", r, cmd)
@@ -2301,7 +2304,7 @@ func TestMessageFiltersArePerChannelAcrossSwitching(t *testing.T) {
 	beta.messages[1].Fragments = []twitch.MessageFragment{{Type: twitch.FragmentMention, Text: "@twi_bot"}}
 	beta.messages[2].Text = "beta vip update"
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	updated, _ := model.Update(tea.KeyPressMsg{Text: string([]rune{'1'})})
 	model = updated.(shellModel)
 	if !alpha.messageFilters.enabled(messageFilterMentions) {
 		t.Fatal("alpha mention filter is not active")
@@ -2310,7 +2313,7 @@ func TestMessageFiltersArePerChannelAcrossSwitching(t *testing.T) {
 		t.Fatalf("beta filters = %q, want none before switching", beta.messageFilters.summary())
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	updated, _ = model.Update(tea.KeyPressMsg{Text: string([]rune{']'})})
 	model = updated.(shellModel)
 	if got, want := model.activeChannelName(), "beta"; got != want {
 		t.Fatalf("active channel = %q, want %q", got, want)
@@ -2318,20 +2321,20 @@ func TestMessageFiltersArePerChannelAcrossSwitching(t *testing.T) {
 	if model.activeChannelState().messageFilters.active() {
 		t.Fatalf("beta filters after switch = %q, want none", model.activeChannelState().messageFilters.summary())
 	}
-	if view := model.View(); !strings.Contains(view, "beta ordinary chatter") || !strings.Contains(view, "beta vip update") {
+	if view := ansi.Strip(model.View().Content); !strings.Contains(view, "beta ordinary chatter") || !strings.Contains(view, "beta vip update") {
 		t.Fatalf("unfiltered beta view missing messages:\n%s", view)
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	updated, _ = model.Update(tea.KeyPressMsg{Text: string([]rune{'2'})})
 	model = updated.(shellModel)
 	if !beta.messageFilters.enabled(messageFilterRoles) {
 		t.Fatal("beta role filter is not active")
 	}
-	if view := model.View(); !strings.Contains(view, "beta vip update") || strings.Contains(view, "beta ordinary chatter") {
+	if view := ansi.Strip(model.View().Content); !strings.Contains(view, "beta vip update") || strings.Contains(view, "beta ordinary chatter") {
 		t.Fatalf("role-filtered beta view mismatch:\n%s", view)
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	updated, _ = model.Update(tea.KeyPressMsg{Text: string([]rune{'['})})
 	model = updated.(shellModel)
 	if got, want := model.activeChannelName(), "alpha"; got != want {
 		t.Fatalf("active channel = %q, want %q", got, want)
@@ -2339,16 +2342,16 @@ func TestMessageFiltersArePerChannelAcrossSwitching(t *testing.T) {
 	if !model.activeChannelState().messageFilters.enabled(messageFilterMentions) {
 		t.Fatalf("alpha filters after return = %q, want mentions", model.activeChannelState().messageFilters.summary())
 	}
-	if view := model.View(); !strings.Contains(view, "hello @twi_bot") || strings.Contains(view, "ordinary viewer chatter") {
+	if view := ansi.Strip(model.View().Content); !strings.Contains(view, "hello @twi_bot") || strings.Contains(view, "ordinary viewer chatter") {
 		t.Fatalf("mention-filtered alpha view mismatch:\n%s", view)
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'0'}})
+	updated, _ = model.Update(tea.KeyPressMsg{Text: string([]rune{'0'})})
 	model = updated.(shellModel)
 	if model.activeChannelState().messageFilters.active() {
 		t.Fatalf("alpha filters after reset = %q, want none", model.activeChannelState().messageFilters.summary())
 	}
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	updated, _ = model.Update(tea.KeyPressMsg{Text: string([]rune{']'})})
 	model = updated.(shellModel)
 	if !model.activeChannelState().messageFilters.enabled(messageFilterRoles) {
 		t.Fatalf("beta filters after alpha reset = %q, want roles still active", model.activeChannelState().messageFilters.summary())
@@ -2375,7 +2378,7 @@ func TestMessageFiltersAllowKeyboardSelectionOfActiveReveal(t *testing.T) {
 		t.Fatalf("filtered active reveal rows include hidden static message:\n%s", rows)
 	}
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	updated, cmd := model.Update(tea.KeyPressMsg{Text: string([]rune{'r'})})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("reply shortcut returned command %#v, want nil", cmd)
@@ -2403,7 +2406,7 @@ func TestMessageFiltersKeepNarrowAndWideLayoutsCoherent(t *testing.T) {
 			model.activeChannelState().messageFilters.toggle(messageFilterMentions)
 
 			updated, _ := model.Update(tea.WindowSizeMsg{Width: tt.width, Height: tt.height})
-			view := updated.View()
+			view := ansi.Strip(updated.View().Content)
 
 			if got, want := lineCount(view), tt.height; got != want {
 				t.Fatalf("filtered view line count = %d, want %d:\n%s", got, want, view)
@@ -2438,7 +2441,7 @@ func TestReconnectPreservesChannelStateAndReportsFailureAndRepeatedRequests(t *t
 	beta.composerText = "beta draft"
 	beta.unread = 2
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("ctrl+r returned nil command, want reconnect command")
@@ -2450,7 +2453,7 @@ func TestReconnectPreservesChannelStateAndReportsFailureAndRepeatedRequests(t *t
 		t.Fatalf("status after first reconnect request = %q, want %q", got, want)
 	}
 
-	updated, repeatedCmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	updated, repeatedCmd := model.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
 	if repeatedCmd != nil {
 		t.Fatalf("repeated reconnect returned command %#v, want nil", repeatedCmd)
@@ -2480,7 +2483,7 @@ func TestReconnectPreservesChannelStateAndReportsFailureAndRepeatedRequests(t *t
 
 	assertReconnectPreservedChannelState(t, model, beforeReply)
 
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	updated, cmd = model.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
 	if cmd == nil {
 		t.Fatal("second ctrl+r returned nil command, want reconnect command")
@@ -2506,7 +2509,7 @@ func TestMockShellTinyWidthsDoNotExceedWindowWidth(t *testing.T) {
 			model.activeChannelState().composerText = "😀表"
 
 			updated, _ := model.Update(tea.WindowSizeMsg{Width: width, Height: 8})
-			view := updated.View()
+			view := ansi.Strip(updated.View().Content)
 
 			if got, want := lineCount(view), 8; got != want {
 				t.Fatalf("tiny view line count = %d, want %d:\n%s", got, want, view)
@@ -2668,11 +2671,11 @@ func changedRevealFrames(t *testing.T, mode, text string) int {
 
 	changed := 0
 	for model.activeChannelState().revealQueue.Len() > 0 {
-		before := model.View()
+		before := ansi.Strip(model.View().Content)
 		clock.Add(mockRevealDelay)
 		updated, _ = model.Update(mockAnimationTickMsg{})
 		model = updated.(shellModel)
-		if after := model.View(); after != before {
+		if after := ansi.Strip(model.View().Content); after != before {
 			changed++
 		}
 		if changed > 1000 {
@@ -2850,13 +2853,13 @@ func TestCommandPaletteRevealProgressesThenSettles(t *testing.T) {
 	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 18
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
 	if !model.palette.open {
 		t.Fatal("palette open = false, want true")
 	}
 
-	partial := model.View()
+	partial := ansi.Strip(model.View().Content)
 	if strings.Contains(partial, "Focus composer") {
 		t.Fatalf("palette view fully revealed on first frame, want a partial typewriter reveal:\n%s", partial)
 	}
@@ -2867,7 +2870,7 @@ func TestCommandPaletteRevealProgressesThenSettles(t *testing.T) {
 		updated, _ = model.Update(animation.FrameMsg{At: now})
 		model = updated.(shellModel)
 	}
-	settled := model.View()
+	settled := ansi.Strip(model.View().Content)
 	if !strings.Contains(settled, "Focus composer") {
 		t.Fatalf("palette view never fully revealed after ticking:\n%s", settled)
 	}
@@ -2879,10 +2882,10 @@ func TestCommandPaletteFullyRevealedImmediatelyWhenAnimationOff(t *testing.T) {
 	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 18
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	model = updated.(shellModel)
-	if !strings.Contains(model.View(), "Focus composer") {
-		t.Fatalf("palette view not fully revealed with animation off:\n%s", model.View())
+	if !strings.Contains(ansi.Strip(model.View().Content), "Focus composer") {
+		t.Fatalf("palette view not fully revealed with animation off:\n%s", ansi.Strip(model.View().Content))
 	}
 }
 
@@ -2893,7 +2896,7 @@ func TestSplashCoversViewUntilDeadlineOrKeypress(t *testing.T) {
 	model.width, model.height = 88, 22
 	model.frames.splashUntil = time.Now().Add(splashDuration)
 
-	view := model.View()
+	view := ansi.Strip(model.View().Content)
 	if !strings.Contains(view, "twi") {
 		t.Fatalf("splash view missing wordmark:\n%s", view)
 	}
@@ -2901,13 +2904,13 @@ func TestSplashCoversViewUntilDeadlineOrKeypress(t *testing.T) {
 		t.Fatalf("splash view leaked normal dashboard content:\n%s", view)
 	}
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	updated, _ := model.Update(tea.KeyPressMsg{Text: string([]rune("x"))})
 	model = updated.(shellModel)
 	if model.splashActive() {
 		t.Fatal("splashActive() = true after keypress, want false")
 	}
-	if !strings.Contains(model.View(), "focus=chat") {
-		t.Fatalf("view after splash skip missing normal dashboard content:\n%s", model.View())
+	if !strings.Contains(ansi.Strip(model.View().Content), "focus=chat") {
+		t.Fatalf("view after splash skip missing normal dashboard content:\n%s", ansi.Strip(model.View().Content))
 	}
 }
 
@@ -2921,8 +2924,8 @@ func TestSplashClearsAfterDeadlineWithoutKeypress(t *testing.T) {
 	if model.splashActive() {
 		t.Fatal("splashActive() = true after deadline elapsed, want false")
 	}
-	if !strings.Contains(model.View(), "focus=chat") {
-		t.Fatalf("view after splash deadline missing normal dashboard content:\n%s", model.View())
+	if !strings.Contains(ansi.Strip(model.View().Content), "focus=chat") {
+		t.Fatalf("view after splash deadline missing normal dashboard content:\n%s", ansi.Strip(model.View().Content))
 	}
 }
 
@@ -2947,7 +2950,7 @@ func TestMainScreenHasNoPermanentEmotesSection(t *testing.T) {
 	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 88, 22
 
-	view := model.View()
+	view := ansi.Strip(model.View().Content)
 	if strings.Contains(view, "Emotes") || strings.Contains(view, "PogChamp") {
 		t.Fatalf("dashboard still renders an emotes section:\n%s", view)
 	}

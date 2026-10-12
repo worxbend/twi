@@ -3,7 +3,7 @@ package render
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/worxbend/twi/internal/textsafe"
 	"github.com/worxbend/twi/internal/twitch"
 )

@@ -17,9 +17,11 @@ import (
 	"github.com/worxbend/twi/internal/app"
 	"github.com/worxbend/twi/internal/assets"
 	"github.com/worxbend/twi/internal/auth"
+	"github.com/worxbend/twi/internal/chatservice"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/debuglog"
 	"github.com/worxbend/twi/internal/doctor"
+	"github.com/worxbend/twi/internal/history"
 	"github.com/worxbend/twi/internal/storage"
 	"github.com/worxbend/twi/internal/theme"
 	"github.com/worxbend/twi/internal/twitch"
@@ -31,6 +33,12 @@ const usage = `twi is a terminal Twitch chat client.
 
 Usage:
   twi chat [--channel name] [--channels a,b] [--mock] [--debug-log]
+  twi produce (-P) --channel name [--message TEXT] [--dry-run]
+  twi consume (-C) --channel name [--last N | --since TIME] [--follow]
+  twi record --channel name [--history PATH]
+  twi history status|prune|search|upgrade [--history PATH]
+  twi version
+  twi completion bash|zsh|fish
   twi config show
   twi config path
   twi doctor
@@ -71,12 +79,6 @@ Environment:
   TWI_DEBUG_LOG_PATH
 `
 
-var newLiveChatClient = func(ctx context.Context, cfg config.Config, holder *credentialHolder, logger debuglog.Logger, credentialStatus credentialLoadStatus) (app.ChatClient, error) {
-	return app.NewRestartableLiveChatClientWithOptions(ctx, liveIRCTransportFactory(cfg, holder, logger, credentialStatus), 0, app.LiveChatClientOptions{
-		DebugLogger: logger,
-	})
-}
-
 // liveIRCTransportFactory builds a transport from whatever credentials are
 // current, not from the ones present at startup.
 //
@@ -94,7 +96,17 @@ func liveIRCTransportFactory(cfg config.Config, holder *credentialHolder, logger
 // current right now, which is the whole point of the holder.
 func liveIRCConfig(cfg config.Config, holder *credentialHolder, logger debuglog.Logger, credentialStatus credentialLoadStatus) irc.Config {
 	creds := holder.current()
+	refresh, sharedCallback, validate := sharedIRCRefresh(cfg, holder, credentialStatus)
+	refreshedByManager := false
 	return irc.Config{
+		ValidateOAuth: validate,
+		RefreshOAuth: func(ctx context.Context, at time.Time) (irc.OAuthRefresh, error) {
+			result, err := refresh(ctx, at)
+			if err == nil {
+				refreshedByManager = true
+			}
+			return result, err
+		},
 		Username:     creds.Username,
 		OAuthToken:   creds.OAuthToken,
 		RefreshToken: creds.RefreshToken,
@@ -103,6 +115,10 @@ func liveIRCConfig(cfg config.Config, holder *credentialHolder, logger debuglog.
 		Channels:     cfg.DefaultChannels,
 		DebugLogger:  logger,
 		OnOAuthRefresh: func(ctx context.Context, refreshed irc.OAuthRefresh) error {
+			if refreshedByManager {
+				refreshedByManager = false
+				return sharedCallback(ctx, refreshed)
+			}
 			// Update the holder before persisting: a failed disk write must
 			// not leave the process using dead credentials, and the in-memory
 			// value is what the next reconnect reads.
@@ -120,21 +136,6 @@ func liveIRCConfig(cfg config.Config, holder *credentialHolder, logger debuglog.
 // follower and subscriber counts, /clip, stream markers, Stream Info and the
 // emote index all began returning 401 -- a failure mode that looks like
 // several unrelated features breaking at once.
-var newLiveClientOptionsWithHolder = func(cfg config.Config, holder *credentialHolder) app.ClientOptions {
-	tokenSource := holder.tokenSource()
-	return app.ClientOptions{
-		StreamStatusResolver: newStreamStatusResolver(cfg, tokenSource),
-		EmoteIndex:           newEmoteIndex(cfg, tokenSource),
-		ChannelManager:       newChannelManager(cfg, tokenSource),
-		GameLookup:           newGameLookup(cfg, tokenSource),
-		UserLookup:           newUserLookup(cfg, tokenSource),
-		MarkerManager:        newMarkerManager(cfg, tokenSource),
-		FollowerLookup:       newFollowerLookup(cfg, tokenSource),
-		SubscriptionLookup:   newSubscriptionLookup(cfg, tokenSource),
-		ClipManager:          newClipManager(cfg, tokenSource),
-		FollowedChannels:     newFollowedChannelLookup(cfg, tokenSource),
-	}
-}
 
 const (
 	// helixInteractiveTimeout bounds the Helix calls made while someone is
@@ -282,37 +283,6 @@ func newStreamStatusResolver(cfg config.Config, tokenSource func() string) twitc
 		func(c helix.ClientConfig) twitch.StreamLookup { return helix.NewStreamsClient(c) })
 }
 
-var runLiveChat = app.RunClientWithOptions
-
-var newDoctorTokenValidator = func() twitch.TokenValidator {
-	return helix.NewOAuthTokenValidator(helix.OAuthTokenValidatorConfig{
-		HTTPClient: &http.Client{Timeout: 2 * time.Second},
-	})
-}
-
-var newLiveTokenValidator = func() twitch.TokenValidator {
-	return newDoctorTokenValidator()
-}
-
-var doctorReachabilityProbe = doctor.ProbeTwitchIRCReachability
-
-var doctorCacheDir = func() string {
-	return ""
-}
-
-var buildDoctorReport = func(ctx context.Context, cfg config.Config, cfgErr error) doctor.Report {
-	return doctor.RunWithOptions(ctx, cfg, doctor.Options{
-		CacheDir:          doctorCacheDir(),
-		ConfigLoadError:   cfgErr,
-		ReachabilityProbe: doctorReachabilityProbe,
-		TokenValidator:    newDoctorTokenValidator(),
-	})
-}
-
-var newCredentialStore = func() (storage.CredentialStore, error) {
-	return storage.NewDefaultCredentialStore()
-}
-
 type credentialLoadStatus struct {
 	Path                string
 	Label               string
@@ -325,28 +295,62 @@ type credentialLoadStatus struct {
 }
 
 // Run executes the command line entrypoint. It returns a process exit code.
-func Run(args []string, stdout, stderr io.Writer) int {
+func (r *runner) Run(args []string, stdout, stderr io.Writer) int {
+	input := io.Reader(os.Stdin)
+	if len(args) > 0 && args[0] == "setup" {
+		input = r.setupInput
+	}
+	return r.RunContext(context.Background(), args, input, stdout, stderr)
+}
+
+// RunContext executes commands with caller-owned cancellation and streams.
+func (r *runner) RunContext(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) (code int) {
 	if len(args) == 0 {
 		fmt.Fprint(stdout, usage)
 		return 0
 	}
 
 	switch args[0] {
+	case "account", "config", "doctor", "login", "profile", "setup", "version", "completion":
+		stdout, stderr = dataStreams(ctx, stdout, stderr)
+		out, diagnostics := &trackedWriter{writer: stdout}, &trackedWriter{writer: stderr}
+		stdout, stderr = out, diagnostics
+		defer func() {
+			if out.err != nil || diagnostics.err != nil {
+				code = 7
+			}
+		}()
+	}
+	switch args[0] {
 	case "-h", "--help", "help":
 		fmt.Fprint(stdout, usage)
 		return 0
+	case "account":
+		return r.runAccount(ctx, args[1:], stdout, stderr)
+	case "produce", "-P":
+		return r.runProduce(ctx, args[1:], stdin, stdout, stderr)
+	case "consume", "-C":
+		return r.runConsume(ctx, args[1:], stdout, stderr)
+	case "record":
+		return r.runRecord(ctx, args[1:], stdout, stderr)
+	case "history":
+		return runHistory(ctx, args[1:], stdout, stderr)
+	case "version":
+		return runVersion(args[1:], stdout, stderr)
+	case "completion":
+		return runCompletion(args[1:], stdout, stderr)
 	case "chat":
-		return runChat(args[1:], stdout, stderr)
+		return r.runChatContext(ctx, args[1:], stdout, stderr)
 	case "config":
-		return runConfig(args[1:], stdout, stderr)
+		return r.runConfig(args[1:], stdout, stderr)
 	case "doctor":
-		return runDoctor(args[1:], stdout, stderr)
+		return r.runDoctorContext(ctx, args[1:], stdout, stderr)
 	case "login":
-		return runLogin(args[1:], stdout, stderr)
+		return r.runLoginContext(ctx, args[1:], stdout, stderr)
 	case "profile":
 		return runProfile(args[1:], stdout, stderr)
 	case "setup":
-		return runSetup(args[1:], stdout, stderr)
+		return r.runSetupContext(ctx, args[1:], stdin, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", args[0], usage)
 		return 2
@@ -355,10 +359,15 @@ func Run(args []string, stdout, stderr io.Writer) int {
 
 // chatOptions is the parsed command line of `twi chat`.
 type chatOptions struct {
-	channels   channelFlags
-	configPath string
-	mock       bool
-	debugFlags debugFlagOptions
+	allowSend     bool
+	account       string
+	recordHistory string
+	historyPath   string
+	transport     string
+	channels      channelFlags
+	configPath    string
+	mock          bool
+	debugFlags    debugFlagOptions
 }
 
 // parseChatFlags parses the `twi chat` command line. ok is false when the
@@ -369,10 +378,26 @@ func parseChatFlags(args []string, stderr io.Writer) (opts chatOptions, code int
 	fs.Var(&opts.channels, "channel", "Twitch channel to join; repeat for multiple channels")
 	fs.Var(&opts.channels, "channels", "comma-separated Twitch channels to join (adds to --channel)")
 	addConfigFlag(fs, &opts.configPath)
+	fs.StringVar(&opts.account, "account", "", "explicit named credential account")
+	fs.BoolVar(&opts.allowSend, "allow-send", false, "enable separately authenticated acknowledged Helix sends")
+	fs.StringVar(&opts.transport, "transport", "irc", "live reader transport: irc or eventsub")
+	fs.StringVar(&opts.historyPath, "history", "", "attach read-only to recorded history; does not start a recorder")
+	fs.StringVar(&opts.recordHistory, "record-history", "", "record observed TUI chat to a private history database")
 	fs.BoolVar(&opts.mock, "mock", false, "run against the built-in mock chat source")
 	addDebugFlags(fs, &opts.debugFlags)
 
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return opts, 0, false
+		}
+		return opts, 2, false
+	}
+	if opts.transport != "irc" && opts.transport != "eventsub" {
+		fmt.Fprintln(stderr, "transport must be irc or eventsub")
+		return opts, 2, false
+	}
+	if fs.NArg() > 0 {
+		fmt.Fprintln(stderr, "unexpected chat positional arguments")
 		return opts, 2, false
 	}
 	return opts, 0, true
@@ -394,48 +419,72 @@ func chatConfig(opts chatOptions, stderr io.Writer) (config.Config, bool) {
 	return cfg, true
 }
 
-func runChat(args []string, stdout, stderr io.Writer) int {
+func (r *runner) runChatContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	opts, code, ok := parseChatFlags(args, stderr)
 	if !ok {
 		return code
+	}
+	if err := r.selectAccount(opts.account); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if opts.mock && opts.allowSend {
+		fmt.Fprintln(stderr, "--mock conflicts with --allow-send")
+		return 2
+	}
+	if opts.mock && opts.recordHistory != "" {
+		fmt.Fprintln(stderr, "--mock conflicts with --record-history")
+		return 2
+	}
+	if opts.historyPath != "" && (opts.mock || opts.recordHistory != "") {
+		fmt.Fprintln(stderr, "--history conflicts with --mock and --record-history")
+		return 2
 	}
 	cfg, ok := chatConfig(opts, stderr)
 	if !ok {
 		return 1
 	}
-	if opts.mock {
-		return runMockChat(cfg, stdout, stderr)
+	if opts.historyPath != "" {
+		return r.runHistoryChat(ctx, cfg, opts.historyPath, stdout, stderr, opts.allowSend)
 	}
-	return runLiveChatSession(cfg, stdout, stderr)
+	if opts.mock {
+		return runMockChatContext(ctx, cfg, stdout, stderr)
+	}
+	if opts.transport == "eventsub" {
+		return r.runServiceChat(ctx, cfg, opts, stdout, stderr)
+	}
+	return r.runLiveChatSessionContext(ctx, cfg, stdout, stderr, opts)
 }
 
 // runMockChat drives the shell against the built-in mock chat source, which
 // needs no credentials and no network. It is how the UI is exercised without
 // a Twitch account.
-func runMockChat(cfg config.Config, stdout, stderr io.Writer) int {
+
+func runMockChatContext(ctx context.Context, cfg config.Config, stdout, stderr io.Writer) int {
 	logger, closeLog, ok := openDebugLoggerOrReport(cfg, stderr)
 	if !ok {
 		return 1
 	}
 	defer closeLog()
-	logger.Log(context.Background(), "cli.chat.start",
+	logger.Log(ctx, "cli.chat.start",
 		slog.Bool("mock", true),
 		slog.Int("channel_count", len(cfg.DefaultChannels)),
 	)
-	if err := app.RunMockWithOptions(stdout, cfg, app.ClientOptions{DebugLogger: logger}); err != nil {
-		logger.Log(context.Background(), "cli.chat.failed", slog.String("error", err.Error()))
+	if err := app.RunMockWithOptions(stdout, cfg, app.ClientOptions{DebugLogger: logger, Context: ctx}); err != nil {
+		logger.Log(ctx, "cli.chat.failed", slog.String("error", err.Error()))
 		fmt.Fprintf(stderr, "mock chat: %v\n", err)
 		return 1
 	}
-	logger.Log(context.Background(), "cli.chat.complete", slog.Bool("mock", true))
+	logger.Log(ctx, "cli.chat.complete", slog.Bool("mock", true))
 	return 0
 }
 
 // runLiveChatSession connects the shell to real Twitch chat: it loads stored
 // credentials, validates the token and resolves the login it belongs to, then
 // wires the transports and runs the UI.
-func runLiveChatSession(cfg config.Config, stdout, stderr io.Writer) int {
-	status, err := applyStoredCredentials(context.Background(), &cfg)
+
+func (r *runner) runLiveChatSessionContext(ctx context.Context, cfg config.Config, stdout, stderr io.Writer, settings ...chatOptions) (result int) {
+	status, err := r.applyStoredCredentials(ctx, &cfg)
 	if err != nil {
 		fmt.Fprintf(stderr, "load credentials: %s\n", config.RedactDisplayValue(err.Error()))
 		return 1
@@ -445,11 +494,11 @@ func runLiveChatSession(cfg config.Config, stdout, stderr io.Writer) int {
 		return 1
 	}
 	defer closeLog()
-	logger.Log(context.Background(), "cli.chat.start",
+	logger.Log(ctx, "cli.chat.start",
 		slog.Bool("mock", false),
 		slog.Int("channel_count", len(cfg.DefaultChannels)),
 	)
-	if !resolveLiveChatIdentity(&cfg, status, logger, stderr) {
+	if !r.resolveLiveChatIdentityContext(ctx, &cfg, status, logger, stderr) {
 		return 2
 	}
 
@@ -457,18 +506,59 @@ func runLiveChatSession(cfg config.Config, stdout, stderr io.Writer) int {
 	// refresh reaches all of them rather than only the connection that
 	// performed it.
 	holder := newCredentialHolder(cfg.Twitch)
-	client, err := newLiveChatClient(context.Background(), cfg, holder, logger, status)
+	var recorder *history.Attachment
+	var opts chatOptions
+	if len(settings) > 0 {
+		opts = settings[0]
+	}
+	if opts.recordHistory != "" {
+		var err error
+		recorder, err = history.OpenAttachment(ctx, opts.recordHistory, channelKeys(cfg.DefaultChannels), "irc")
+		if err != nil {
+			fmt.Fprintf(stderr, "history recorder: %s\n", config.RedactDisplayValue(err.Error()))
+			return 7
+		}
+		defer func() {
+			if err := recorder.Close(); err != nil {
+				fmt.Fprintf(stderr, "history recorder: %s\n", config.RedactDisplayValue(err.Error()))
+				result = 7
+			}
+		}()
+	}
+	var capture app.ChatRecorder
+	if recorder != nil {
+		capture = recorder
+	}
+	client, err := r.newLiveChatClient(ctx, cfg, holder, logger, status, capture)
 	if err != nil {
-		logger.Log(context.Background(), "cli.chat.failed", slog.String("error", err.Error()))
+		logger.Log(ctx, "cli.chat.failed", slog.String("error", err.Error()))
 		fmt.Fprintf(stderr, "start Twitch IRC chat: %v\n", err)
 		return 1
 	}
-	if err := runLiveChat(stdout, cfg, client, withDebugLogger(newLiveClientOptionsWithHolder(cfg, holder), logger)); err != nil {
-		logger.Log(context.Background(), "cli.chat.failed", slog.String("error", err.Error()))
+	if opts.allowSend {
+		sender, err := r.newAcknowledgedSender(ctx, cfg)
+		if err != nil {
+			_ = client.Close()
+			fmt.Fprintln(stderr, config.RedactDisplayValue(err.Error()))
+			return producerAuthErrorCode(err)
+		}
+		if ircSource, ok := client.(*app.ServiceIRCClient); ok {
+			client = &ircSendingSource{ServiceIRCClient: ircSource, sender: sender}
+		} else {
+			_ = client.Close()
+			fmt.Fprintln(stderr, "acknowledged sends require the shared IRC source")
+			return 2
+		}
+	}
+	options := withDebugLogger(r.newLiveClientOptionsWithHolder(cfg, holder), logger)
+	options.Context = ctx
+	options.Recorder = capture
+	if err := r.runLiveChat(stdout, cfg, client, options); err != nil {
+		logger.Log(ctx, "cli.chat.failed", slog.String("error", err.Error()))
 		fmt.Fprintf(stderr, "live chat: %v\n", err)
 		return 1
 	}
-	logger.Log(context.Background(), "cli.chat.complete", slog.Bool("mock", false))
+	logger.Log(ctx, "cli.chat.complete", slog.Bool("mock", false))
 	return 0
 }
 
@@ -476,14 +566,15 @@ func runLiveChatSession(cfg config.Config, stdout, stderr io.Writer) int {
 // resolves the login IRC should authenticate as into cfg, printing any
 // warnings along the way. ok is false when live chat cannot start and the
 // caller should exit with status 2.
-func resolveLiveChatIdentity(cfg *config.Config, status credentialLoadStatus, logger debuglog.Logger, stderr io.Writer) (ok bool) {
+
+func (r *runner) resolveLiveChatIdentityContext(ctx context.Context, cfg *config.Config, status credentialLoadStatus, logger debuglog.Logger, stderr io.Writer) (ok bool) {
 	if err := validateLiveChatConfig(*cfg); err != nil {
 		fmt.Fprintln(stderr, err)
 		return false
 	}
-	resolvedLogin, warning, err := validateLiveChatToken(context.Background(), *cfg, newLiveTokenValidator())
+	resolvedLogin, warning, err := validateLiveChatToken(ctx, *cfg, r.newLiveTokenValidator())
 	if err != nil {
-		logger.Log(context.Background(), "cli.chat.token_validation_failed", slog.String("error", err.Error()))
+		logger.Log(ctx, "cli.chat.token_validation_failed", slog.String("error", err.Error()))
 		if hint := credentialPrecedenceHint(status); hint != "" {
 			err = fmt.Errorf("%w %s", err, hint)
 		}
@@ -491,7 +582,7 @@ func resolveLiveChatIdentity(cfg *config.Config, status credentialLoadStatus, lo
 		return false
 	}
 	if warning != "" {
-		logger.Log(context.Background(), "cli.chat.token_validation_warning", slog.String("warning", warning))
+		logger.Log(ctx, "cli.chat.token_validation_warning", slog.String("warning", warning))
 		fmt.Fprintln(stderr, warning)
 	}
 	// The token owns the IRC identity; the config value is only a fallback for
@@ -504,7 +595,7 @@ func resolveLiveChatIdentity(cfg *config.Config, status credentialLoadStatus, lo
 		return false
 	}
 	if notice := refreshCapabilityWarning(cfg.Twitch); notice != "" {
-		logger.Log(context.Background(), "cli.chat.refresh_unavailable")
+		logger.Log(ctx, "cli.chat.refresh_unavailable")
 		fmt.Fprintln(stderr, notice)
 	}
 	return true
@@ -516,6 +607,9 @@ func resolveLiveChatIdentity(cfg *config.Config, status credentialLoadStatus, lo
 // so configuring it is optional and only ever used as a fallback when token
 // validation is unreachable.
 func validateLiveChatConfig(cfg config.Config) error {
+	if _, err := twitch.ParseChannels(cfg.DefaultChannels); err != nil {
+		return err
+	}
 	if strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
 		return errors.New("missing Twitch credentials: set TWI_TWITCH_OAUTH_TOKEN or TWITCH_ACCESS_TOKEN for live chat, or run `twi chat --mock`; OAuth token must include chat:read and chat:edit")
 	}
@@ -627,15 +721,22 @@ func addConfigFlag(fs *flag.FlagSet, dst *string) {
 
 // parseConfigPathFlag parses args with a flag set carrying only --config,
 // which is all the read-only config and profile subcommands accept.
-func parseConfigPathFlag(name string, args []string, stderr io.Writer) (string, bool) {
+func parseConfigPathFlag(name string, args []string, stderr io.Writer) (string, int, bool) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var cfgPath string
 	addConfigFlag(fs, &cfgPath)
 	if err := fs.Parse(args); err != nil {
-		return "", false
+		if errors.Is(err, flag.ErrHelp) {
+			return "", 0, false
+		}
+		return "", 2, false
 	}
-	return cfgPath, true
+	if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "unexpected positional arguments")
+		return "", 2, false
+	}
+	return cfgPath, 0, true
 }
 
 // loadConfigOrReport loads the env-merged config for a read-only subcommand,
@@ -653,7 +754,11 @@ func reportLoadConfigError(stderr io.Writer, err error) {
 	fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
 }
 
-func runConfig(args []string, stdout, stderr io.Writer) int {
+func (r *runner) runConfig(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		fmt.Fprintln(stdout, "usage: twi config show|path")
+		return 0
+	}
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, "usage: twi config show|path")
 		return 2
@@ -666,6 +771,9 @@ func runConfig(args []string, stdout, stderr io.Writer) int {
 		var cfgPath string
 		addConfigFlag(fs, &cfgPath)
 		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return 0
+			}
 			return 2
 		}
 		if fs.NArg() != 0 {
@@ -684,9 +792,9 @@ func runConfig(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, config.RedactDisplayValue(path))
 		return 0
 	case "show":
-		cfgPath, ok := parseConfigPathFlag("config show", args[1:], stderr)
+		cfgPath, code, ok := parseConfigPathFlag("config show", args[1:], stderr)
 		if !ok {
-			return 2
+			return code
 		}
 		cfg, ok := loadConfigOrReport(cfgPath, stderr)
 		if !ok {
@@ -694,7 +802,7 @@ func runConfig(args []string, stdout, stderr io.Writer) int {
 		}
 		// A broken credential store must not hide the config itself: warn and
 		// print what loaded, mirroring doctor's tolerance for the same error.
-		if _, err := applyStoredCredentials(context.Background(), &cfg); err != nil {
+		if _, err := r.applyStoredCredentials(context.Background(), &cfg); err != nil {
 			fmt.Fprintf(stderr, "warning: load credentials: %s\n", config.RedactDisplayValue(err.Error()))
 		}
 		fmt.Fprint(stdout, cfg.RedactedString())
@@ -712,6 +820,10 @@ const customProfileName = "custom"
 // runProfile implements `twi profile list|show|set <name>`, the theme
 // management surface documented alongside the Ctrl+T settings view.
 func runProfile(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		fmt.Fprintln(stdout, "usage: twi profile list|show|set <name>")
+		return 0
+	}
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, "usage: twi profile list|show|set <name>")
 		return 2
@@ -731,9 +843,9 @@ func runProfile(args []string, stdout, stderr io.Writer) int {
 }
 
 func runProfileList(args []string, stdout, stderr io.Writer) int {
-	cfgPath, ok := parseConfigPathFlag("profile list", args, stderr)
+	cfgPath, code, ok := parseConfigPathFlag("profile list", args, stderr)
 	if !ok {
-		return 2
+		return code
 	}
 	cfg, ok := loadConfigOrReport(cfgPath, stderr)
 	if !ok {
@@ -751,9 +863,9 @@ func runProfileList(args []string, stdout, stderr io.Writer) int {
 }
 
 func runProfileShow(args []string, stdout, stderr io.Writer) int {
-	cfgPath, ok := parseConfigPathFlag("profile show", args, stderr)
+	cfgPath, code, ok := parseConfigPathFlag("profile show", args, stderr)
 	if !ok {
-		return 2
+		return code
 	}
 	cfg, ok := loadConfigOrReport(cfgPath, stderr)
 	if !ok {
@@ -791,6 +903,9 @@ func runProfileSet(args []string, stdout, stderr io.Writer) int {
 	// The theme name is positional and flags may come before or after it:
 	// parse the leading flags, take the name, then parse what follows it.
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 2
 	}
 	if fs.NArg() == 0 {
@@ -799,6 +914,9 @@ func runProfileSet(args []string, stdout, stderr io.Writer) int {
 	}
 	name := strings.ToLower(strings.TrimSpace(fs.Arg(0)))
 	if err := fs.Parse(fs.Args()[1:]); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -873,17 +991,29 @@ func validHexColor(value string) bool {
 	return err == nil
 }
 
-func runDoctor(args []string, stdout, stderr io.Writer) int {
+func (r *runner) runDoctorContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	var cfgPath string
+	var cfgPath, account string
+	fs.StringVar(&account, "account", "", "explicit named credential account")
 	var debugFlags debugFlagOptions
 	addConfigFlag(fs, &cfgPath)
 	addDebugFlags(fs, &debugFlags)
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 2
 	}
 
+	if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "unexpected doctor positional arguments")
+		return 2
+	}
+	if err := r.selectAccount(account); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
 	environ := os.Environ()
 	overrides := config.Overrides{ConfigPath: cfgPath}
 	applyDebugFlagOverrides(&overrides, debugFlags)
@@ -898,22 +1028,22 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 	}
 	// applyStoredCredentials already records any load error on the status it
 	// returns, so the error result itself is only a signal to skip ahead.
-	credentialStatus, _ := applyStoredCredentials(context.Background(), &cfg)
+	credentialStatus, _ := r.applyStoredCredentials(ctx, &cfg)
 	logger, closeLog, ok := openDebugLoggerOrReport(cfg, stderr)
 	if !ok {
 		return 1
 	}
 	defer closeLog()
-	logger.Log(context.Background(), "cli.doctor.start")
+	logger.Log(ctx, "cli.doctor.start")
 
-	report := buildDoctorReport(context.Background(), cfg, loadErr)
+	report := r.buildDoctorReport(ctx, cfg, loadErr)
 	if credentialStatus.reportable() {
 		printDoctorCheck(stdout, credentialFileDoctorCheck(credentialStatus))
 	}
 	for _, check := range report.Checks {
 		printDoctorCheck(stdout, check)
 	}
-	logger.Log(context.Background(), "cli.doctor.complete", slog.Int("check_count", len(report.Checks)))
+	logger.Log(ctx, "cli.doctor.complete", slog.Int("check_count", len(report.Checks)))
 	return 0
 }
 
@@ -927,8 +1057,8 @@ func (s credentialLoadStatus) reportable() bool {
 	return s.Path != "" || s.Label != "" || s.Location != "" || s.Present || s.Err != nil
 }
 
-func applyStoredCredentials(ctx context.Context, cfg *config.Config) (credentialLoadStatus, error) {
-	store, err := newCredentialStore()
+func (r *runner) applyStoredCredentials(ctx context.Context, cfg *config.Config) (credentialLoadStatus, error) {
+	store, err := r.credentialStore()
 	status := credentialLoadStatus{}
 	if store != nil {
 		status.Path = credentialStorePath(store)
@@ -938,25 +1068,37 @@ func applyStoredCredentials(ctx context.Context, cfg *config.Config) (credential
 	}
 	if err != nil {
 		status.Err = err
-		if errors.Is(err, storage.ErrUnsupportedCredentialFilePlatform) {
+		if errors.Is(err, storage.ErrUnsupportedCredentialFilePlatform) && r.account == "" {
 			return status, nil
 		}
 		return status, err
 	}
 	if store == nil {
+		if r.account != "" {
+			return status, errors.New("named account credential store unavailable")
+		}
 		return status, nil
 	}
 
 	record, ok, err := store.LoadCredentials(ctx)
 	if err != nil {
 		status.Err = err
-		if errors.Is(err, storage.ErrUnsupportedCredentialFilePlatform) {
+		if errors.Is(err, storage.ErrUnsupportedCredentialFilePlatform) && r.account == "" {
 			return status, nil
 		}
 		return status, err
 	}
 	status.Present = ok
+	if r.account != "" && !ok {
+		return status, errors.New("named account has no saved credentials; run twi login --account NAME")
+	}
 	if ok {
+		if r.account != "" {
+			cfg.Twitch.Username = ""
+			cfg.Twitch.OAuthToken = ""
+			cfg.Twitch.RefreshToken = ""
+			cfg.Twitch.ClientID = ""
+		}
 		status.Record = record.Clone()
 		status.AccessTokenShadowed = record.AccessToken.Present() && strings.TrimSpace(cfg.Twitch.OAuthToken) != ""
 		applyCredentialRecord(cfg, record)
@@ -1144,17 +1286,109 @@ func (f *channelFlags) String() string {
 // --channel and --channels can share one accumulating flag value. Both may
 // be repeated, and both append rather than replace.
 func (f *channelFlags) Set(value string) error {
-	added := false
+	pending := channelFlags{}
+	supplied := false
+	seen := map[string]bool{}
+	for _, existing := range *f {
+		seen[twitch.ChannelKey(existing)] = true
+	}
 	for _, part := range strings.Split(value, ",") {
-		part = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(part), "#"))
+		part = twitch.NormalizeChannel(part)
 		if part == "" {
 			continue
 		}
-		*f = append(*f, part)
-		added = true
+		parsed, err := twitch.ParseChannel(part)
+		supplied = true
+		if err != nil {
+			return err
+		}
+		if !seen[parsed.String()] {
+			seen[parsed.String()] = true
+			pending = append(pending, part)
+		}
 	}
-	if !added {
+	if !supplied {
 		return errors.New("channel cannot be empty")
 	}
+	*f = append(*f, pending...)
 	return nil
+}
+
+func channelKeys(channels []string) []string {
+	keys := make([]string, len(channels))
+	for i, c := range channels {
+		keys[i] = twitch.ChannelKey(c)
+	}
+	return keys
+}
+
+func (r *runner) runHistoryChat(ctx context.Context, cfg config.Config, path string, stdout, stderr io.Writer, allowSend ...bool) int {
+	source, err := app.NewHistoryChatSource(ctx, path, cfg.DefaultChannels, cfg.Features.ScrollbackLimit)
+	if err != nil {
+		fmt.Fprintf(stderr, "history attachment: %s\n", config.RedactDisplayValue(err.Error()))
+		return 7
+	}
+	defer source.Close()
+	var display app.ChatSource = source
+	if len(allowSend) > 0 && allowSend[0] {
+		sender, err := r.newAcknowledgedSender(ctx, cfg)
+		if err != nil {
+			fmt.Fprintln(stderr, config.RedactDisplayValue(err.Error()))
+			return producerAuthErrorCode(err)
+		}
+		display = &historySendingSource{HistoryChatSource: source, acknowledgedSender: sender}
+		cfg.Twitch.Username = sender.delivery.Identity().Login
+	}
+	if err := r.runLiveChat(stdout, cfg, display, app.ClientOptions{Context: ctx, SourceDetail: "local history"}); err != nil {
+		fmt.Fprintf(stderr, "history chat: %s\n", config.RedactDisplayValue(err.Error()))
+		return 7
+	}
+	return 0
+}
+
+func (r *runner) runServiceChat(ctx context.Context, cfg config.Config, opts chatOptions, stdout, stderr io.Writer) (result int) {
+	var recorder *history.Attachment
+	if opts.recordHistory != "" {
+		var err error
+		recorder, err = history.OpenAttachment(ctx, opts.recordHistory, channelKeys(cfg.DefaultChannels), opts.transport)
+		if err != nil {
+			fmt.Fprintln(stderr, config.RedactDisplayValue(err.Error()))
+			return 7
+		}
+		defer func() {
+			if err := recorder.Close(); err != nil {
+				fmt.Fprintln(stderr, config.RedactDisplayValue(err.Error()))
+				result = 7
+			}
+		}()
+	}
+	var capture app.ChatRecorder
+	if recorder != nil {
+		capture = recorder
+	}
+	source, err := app.NewServiceChatSource(ctx, func(parent context.Context) (*chatservice.Service, error) {
+		return r.makeDataReader(parent, dataOptions{account: opts.account, channels: stringList(cfg.DefaultChannels), configPath: opts.configPath, connectTimeout: 30 * time.Second}, opts.transport)
+	}, opts.transport, capture)
+	if err != nil {
+		fmt.Fprintln(stderr, config.RedactDisplayValue(err.Error()))
+		return dataErrorCode(err)
+	}
+	defer source.Close()
+	if login := source.Identity().Login; login != "" {
+		cfg.Twitch.Username = login
+	}
+	var display app.ChatSource = source
+	if opts.allowSend {
+		sender, err := r.newAcknowledgedSender(ctx, cfg)
+		if err != nil {
+			fmt.Fprintln(stderr, config.RedactDisplayValue(err.Error()))
+			return producerAuthErrorCode(err)
+		}
+		display = &serviceSendingSource{ServiceChatSource: source, acknowledgedSender: sender}
+	}
+	if err := r.runLiveChat(stdout, cfg, display, app.ClientOptions{Context: ctx, Recorder: capture, SourceDetail: "Twitch " + opts.transport}); err != nil {
+		fmt.Fprintln(stderr, config.RedactDisplayValue(err.Error()))
+		return 7
+	}
+	return 0
 }

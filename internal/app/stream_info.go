@@ -8,7 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/rivo/uniseg"
 	"github.com/worxbend/twi/internal/twitch"
 )
@@ -276,33 +276,36 @@ func parseStreamInfoTags(raw string) []string {
 // handleStreamInfoKey handles all keys while the Stream Info tab is active
 // and no overlay (palette/inspect/theme/emotes) is open; see the KeyMsg
 // dispatch order in Update.
-func (m shellModel) handleStreamInfoKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
+func (m shellModel) handleStreamInfoKey(msg tea.KeyPressMsg) (shellModel, tea.Cmd) {
 	if m.streamInfo.editing {
-		switch msg.Type {
-		case tea.KeyEsc:
+		switch msg.String() {
+		case "esc":
 			m.streamInfo.editing = false
 			m.streamInfo.editBuffer = ""
-		case tea.KeyEnter:
+		case "enter":
 			m.commitStreamInfoEdit()
-		case tea.KeyBackspace:
+		case "backspace":
 			if n := len(m.streamInfo.editBuffer); n > 0 {
 				_, size := utf8.DecodeLastRuneInString(m.streamInfo.editBuffer)
 				m.streamInfo.editBuffer = m.streamInfo.editBuffer[:n-size]
 			}
-		case tea.KeySpace:
+		case "space":
 			m.streamInfo.editBuffer += " "
-		case tea.KeyRunes:
-			m.streamInfo.editBuffer += string(msg.Runes)
+		default:
+			if msg.Text == "" {
+				break
+			}
+			m.streamInfo.editBuffer += msg.Text
 		}
 		return m, nil
 	}
 
-	switch msg.Type {
-	case tea.KeyUp:
+	switch msg.String() {
+	case "up":
 		m.moveStreamInfoSelection(-1)
-	case tea.KeyDown, tea.KeyTab:
+	case "down", "tab":
 		m.moveStreamInfoSelection(1)
-	case tea.KeyEnter:
+	case "enter":
 		if m.streamInfo.selected == streamInfoFieldCategory {
 			if !m.streamInfo.loaded || m.streamInfo.loading {
 				return m, nil
@@ -310,11 +313,11 @@ func (m shellModel) handleStreamInfoKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
 			return m, m.openCategoryPicker()
 		}
 		m.startStreamInfoEdit()
-	case tea.KeyCtrlS:
+	case "ctrl+s":
 		if cmd := m.scheduleStreamInfoSave(); cmd != nil {
 			return m, cmd
 		}
-	case tea.KeyEsc:
+	case "esc":
 		m.streamInfo.saveErr = ""
 		m.streamInfo.saveOK = false
 		m.streamInfo.saveNoChanges = false

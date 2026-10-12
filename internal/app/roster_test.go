@@ -212,7 +212,7 @@ func TestChatPaneTitleAlwaysShowsActiveChatterCount(t *testing.T) {
 	model.width, model.height = 100, 24
 
 	// Without membership the count is marked approximate.
-	if got := ansi.Strip(model.View()); !strings.Contains(got, "👥 ~") {
+	if got := ansi.Strip(model.View().Content); !strings.Contains(got, "👥 ~") {
 		t.Fatalf("chat title missing approximate chatter count:\n%s", got)
 	}
 
@@ -222,7 +222,7 @@ func TestChatPaneTitleAlwaysShowsActiveChatterCount(t *testing.T) {
 	model = updated.(shellModel)
 
 	// Once membership arrives the count becomes exact and drops the "~".
-	view := ansi.Strip(model.View())
+	view := ansi.Strip(model.View().Content)
 	if !strings.Contains(view, "👥 1") || strings.Contains(view, "👥 ~") {
 		t.Fatalf("chat title should show an exact count once membership is seen:\n%s", view)
 	}

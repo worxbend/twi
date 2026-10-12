@@ -5,14 +5,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/theme"
 )
 
 func TestRenderRunsPreservesWidthAndText(t *testing.T) {
-	forceColorProfile(t)
 	tokens := theme.For(theme.DefaultPalette())
 	line := renderRuns(24, tokens.Surface,
 		run{text: "one", foreground: tokens.Accent, bold: true},
@@ -28,7 +27,6 @@ func TestRenderRunsPreservesWidthAndText(t *testing.T) {
 }
 
 func TestRenderRunsTruncatesOverflow(t *testing.T) {
-	forceColorProfile(t)
 	tokens := theme.For(theme.DefaultPalette())
 	line := renderRuns(5, tokens.Surface, run{text: "abcdefgh", foreground: tokens.Text})
 	if got := lipgloss.Width(line); got != 5 {
@@ -40,7 +38,6 @@ func TestRenderRunsTruncatesOverflow(t *testing.T) {
 }
 
 func TestStyleLineSpansKeepsTextAndColorsOnlyTheSpan(t *testing.T) {
-	forceColorProfile(t)
 	tokens := theme.For(theme.DefaultPalette())
 	plain := " *1:Chat  2:Info"
 	line := styleLineSpans(plain, 20,
@@ -62,7 +59,6 @@ func TestStyleLineSpansKeepsTextAndColorsOnlyTheSpan(t *testing.T) {
 }
 
 func TestProgressBarWidthAndFillStates(t *testing.T) {
-	forceColorProfile(t)
 	model := newMockModel("alpha", config.Default())
 	for _, fraction := range []float64{0, 0.37, 0.5, 1} {
 		bar := model.progressBar(16, fraction, model.canvasBackground(), 0)
@@ -81,7 +77,6 @@ func TestProgressBarWidthAndFillStates(t *testing.T) {
 }
 
 func TestProgressBarAdvancesInSubCellSteps(t *testing.T) {
-	forceColorProfile(t)
 	model := newMockModel("alpha", config.Default())
 	// 1/32 of a 16-cell bar is half a cell: no full glyph, one partial.
 	bar := model.progressBar(16, 1.0/32, model.canvasBackground(), 0)
@@ -121,7 +116,6 @@ func TestPickerSelectedLineMirrorsTheDrawnWindow(t *testing.T) {
 }
 
 func TestStyledPickerLinesKeepTextContiguous(t *testing.T) {
-	forceColorProfile(t)
 	model := newMockModel("alpha", config.Default())
 	lines := []string{" Command: quit", "> Quit  q / ctrl+c", "  Focus composer  tab"}
 	styled := model.stylePickerLines(lines, 30, 1)
@@ -142,7 +136,6 @@ func TestStyledPickerLinesKeepTextContiguous(t *testing.T) {
 }
 
 func TestStatusLineSemanticStates(t *testing.T) {
-	forceColorProfile(t)
 	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 120, 24
 
@@ -167,7 +160,6 @@ func TestStatusLineSemanticStates(t *testing.T) {
 }
 
 func TestHelpViewStylesKeycapsWithoutChangingText(t *testing.T) {
-	forceColorProfile(t)
 	model := newMockModel("alpha", config.Default())
 	model.helpExpanded = true
 	view := model.helpView(100, 5)

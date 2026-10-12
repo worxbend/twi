@@ -38,19 +38,15 @@ Live chat starts in `internal/cli`, which loads config, resolves credentials, va
 
 `internal/app` stores per-channel history, unread counts, composer drafts, reply context, selected-message inspect state, send status, scroll offsets, local filters, and connection state. Channel switching changes the active view without losing per-channel state. The open channel set is dynamic: the `/channels` picker adds and the sidebar removes channels at runtime, joining and parting through the optional `ChannelJoiner` transport capability rather than reconnecting, and an empty set is a normal state rather than an error.
 
-`internal/render` converts normalized messages into width-bounded rows. It handles timestamps, badges, usernames, mentions, replies, action messages, notices, deleted messages, emoji fallbacks, emote-token fallbacks, avatar initials, and image placeholder cells. Username color is a deterministic, case-normalized hash of the Twitch login (falling back to display name or author ID), selected for readable contrast against both message surfaces; the same author therefore keeps the same distinct color without UI-owned mutable color state.
+`internal/render` converts normalized messages into width-bounded rows. It handles timestamps, badges, usernames, mentions, replies, action messages, notices, deleted messages, emoji fallbacks, emote-token fallbacks, avatar initials. Username color is a deterministic, case-normalized hash of the Twitch login (falling back to display name or author ID), selected for readable contrast against both message surfaces; the same author therefore keeps the same distinct color without UI-owned mutable color state.
 
-## Asset Flow
+## Asset metadata flow
 
-Asset work is asynchronous and fallback-first:
-
-```text
-visible rows -> asset refs -> resolver -> downloader/cache -> preparer -> renderer -> fixed-width cells
-     |                                                                            |
-     +-------------------------- stable text fallback ----------------------------+
-```
-
-The visible chat row is useful before any asset finishes. Resolver, downloader, cache, preparer, and renderer failures keep initials, labels, tokens, or Unicode in place. Permanent failures are recorded by URL-free asset identity so the app avoids repeated failing work without storing private URLs in debug output.
+Helix global/channel emote metadata feeds asynchronous autocomplete through
+`internal/assets.EmoteIndex`. Message badges and emotes already carry normalized
+IRC/EventSub metadata. Rows render text, initials, badge labels, emote tokens,
+and native Unicode. There is no image downloader/cache/preparer or terminal
+image protocol in the shipped rendering path.
 
 ## Credential Flow
 
@@ -71,8 +67,7 @@ Debug logs are JSON lines written only when explicitly enabled. Callers send cur
 The project can grow without collapsing boundaries:
 
 - A future transport can implement the app-facing chat client without changing the renderer.
-- Additional image protocols can implement the image renderer boundary without changing Twitch normalization.
-- New asset providers can feed typed asset events without changing chat history state.
+- New metadata providers can extend autocomplete behind typed interfaces.
 - More diagnostics can emit redacted debug fields without exposing raw structs.
 
 Extension work should keep the same rule: the UI depends on internal interfaces and normalized models, not on external service types.
@@ -129,8 +124,34 @@ scheduling a second clock.
 
 The real-broadcast LIVE indicator (`internal/twitch.HelixStreamsClient`) and
 emote autocomplete (`internal/assets.EmoteIndex`) are wired independently of
-the image/asset stack decision in `internal/cli` (`newStreamStatusResolver`,
+rendering in `internal/cli` (`newStreamStatusResolver`,
 `newEmoteIndex`) since neither needs a disk cache or terminal image
 capability — only `stream_status_mode`/`emote_autocomplete_mode` and Twitch
 API credentials. Both are `nil`-able app-facing interfaces so `--mock` mode
 and credential-free runs degrade to simulated/sample data instead of failing.
+
+## Automation and durable history
+
+Producer, consumer, foreground recorder, and local history commands are implemented
+through UI-independent services and explicit public DTOs. See [Automation](automation.md) for
+capabilities, examples, coverage/cursor guarantees, retention, and validation limits.
+Live Twitch observation parity requires controlled credentialed validation.
+
+### Headless runtime ownership
+
+`internal/chatservice` owns live readiness, bounded ingestion, reconnect gaps,
+and periodic auth checks. Its reader port requires Connect/Close only; EventSub
+does not pretend to send. `internal/runtimeauth` validates capability scopes and
+coordinates token rotation using private account locks. `internal/sendquota`
+reserves global/account and canonical channel permits before producer/TUI sends.
+`internal/history` owns private SQLite WAL transactions, deduplication, retention,
+moderation redaction, coverage, and opaque cursors. `internal/automation` owns
+versioned public DTOs; `internal/output` encodes safe JSONL/text records. CLI
+composition supplies cancellation and streams without starting terminal state
+for headless commands. Existing TUI lifecycle facades preserve compatibility.
+
+IRC socket lifetime is managed by twi; the maintained go-twitch-irc parser still
+normalizes wire messages. Hidden library reconnects are not allowed to bypass
+authentication permits. Control writes and joins use separate bounded queues so
+rate waits preserve PING/PONG handling. IRC/EventSub reserve shared per-account
+channel leases before subscribing and release them after socket shutdown.

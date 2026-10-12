@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/worxbend/twi/internal/config"
 )
 
@@ -19,11 +19,10 @@ func mouseFocusModel(t *testing.T) shellModel {
 }
 
 func leftClick(model shellModel, x, y int) shellModel {
-	updated, _ := model.Update(tea.MouseMsg(tea.MouseEvent{
+	updated, _ := model.Update(tea.MouseClickMsg(tea.Mouse{
 		X:      x,
 		Y:      y,
-		Button: tea.MouseButtonLeft,
-		Action: tea.MouseActionPress,
+		Button: tea.MouseLeft,
 	}))
 	return updated.(shellModel)
 }

@@ -4,16 +4,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/worxbend/twi/internal/sendquota"
 	"github.com/worxbend/twi/internal/twitch"
 )
 
-// Twitch's chat limits for a normal (non-moderator) account. Exceeding them
-// gets the connection dropped, not just the message rejected, so twi refuses
-// locally rather than finding out from the server.
-//
-// Moderators and broadcasters get a higher allowance in their own channel,
-// but twi cannot always know its role at send time, and being conservative
-// costs a moderator nothing they would notice while typing by hand.
+// All destinations share the normal account bucket; proven privileged
+// destinations may continue into the documented larger 100/30s bucket.
 const (
 	chatSendLimit  = 20
 	chatSendWindow = 30 * time.Second
@@ -48,6 +44,9 @@ func newSendLimiter(now func() time.Time) *sendLimiter {
 // A rejection names which rule was hit, because "slow down" and "Twitch will
 // reject this as a duplicate" call for different responses from the sender.
 func (l *sendLimiter) allow(channel, text string) error {
+	return l.allowForRole(channel, text, sendquota.RoleNormal)
+}
+func (l *sendLimiter) allowForRole(channel, text string, role sendquota.Role) error {
 	if l == nil {
 		return nil
 	}
@@ -57,7 +56,11 @@ func (l *sendLimiter) allow(channel, text string) error {
 	now := l.now()
 	l.prune(now)
 
-	if len(l.sent) >= l.limit {
+	limit := l.limit
+	if role.Privileged() {
+		limit = 100
+	}
+	if len(l.sent) >= limit {
 		return twitch.ErrRateLimited
 	}
 	key := channel + "\x00" + text

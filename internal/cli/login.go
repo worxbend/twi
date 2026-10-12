@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -41,7 +42,7 @@ Starts Twitch OAuth login for:
   channel:read:subscriptions   show your subscriber count in the status line
   clips:edit                   create clips of your active stream (/clip)
 
-Required for a real login:
+Required for authorization-code login:
   TWI_TWITCH_CLIENT_ID or TWITCH_CLIENT_ID
   TWI_TWITCH_CLIENT_SECRET or TWITCH_CLIENT_SECRET
 
@@ -54,6 +55,13 @@ Behavior:
   saved credentials disabled, so use environment variables or a private flat
   config file there. Environment variables and flat config credentials still
   take precedence when present.
+
+  --device uses Twitch's device grant flow and displays the activation URL and
+  user code for consent in another browser. It does not open a local browser or
+  listen for a callback. The private device code and tokens are never printed.
+  Device login requires a client ID; confidential clients use their configured
+  client secret. An explicitly selected --account never falls back to another
+  account's environment credentials.
 
   The redirect URI defaults to --redirect-uri's flag default unless
   twitch_redirect_url (or TWI_TWITCH_REDIRECT_URL / TWITCH_REDIRECT_URL) is
@@ -70,22 +78,11 @@ type loginCallbackWaiter interface {
 	Close() error
 }
 
-var newLoginFlow = func() auth.LoginFlow {
-	return auth.NewTwitchOAuthLoginFlow(auth.TwitchOAuthLoginFlowConfig{})
-}
-
-var newLoginContext = func(timeout time.Duration) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), timeout)
-}
-
-var newLoginCallbackWaiter = func(redirectURI string) (loginCallbackWaiter, error) {
-	return newLocalLoginCallbackWaiter(redirectURI)
-}
-
-var openLoginBrowser = openBrowser
-
 // loginOptions is the parsed command line of `twi login`.
 type loginOptions struct {
+	device      bool
+	account     string
+	capability  string
 	configPath  string
 	redirectURI string
 	// redirectURIExplicit records whether --redirect-uri was actually
@@ -105,23 +102,36 @@ func parseLoginFlags(args []string, stdout, stderr io.Writer) (opts loginOptions
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	addConfigFlag(fs, &opts.configPath)
+	fs.BoolVar(&opts.device, "device", false, "authorize on another browser using Twitch's device code flow; no localhost callback")
+	fs.StringVar(&opts.capability, "capability", "tui", "authorization capability: tui, chat-read, chat-send, eventsub-read, moderation-read, validation")
 	fs.StringVar(&opts.redirectURI, "redirect-uri", defaultLoginRedirectURI, "localhost OAuth callback URL registered for the Twitch app")
+	fs.StringVar(&opts.account, "account", "", "save credentials to an explicit named account")
 	fs.DurationVar(&opts.timeout, "timeout", defaultLoginTimeout, "maximum time to wait for browser authorization and callback")
 	fs.BoolVar(&opts.dryRun, "dry-run", false, "explain login requirements without opening a browser, listening for a callback, or contacting Twitch")
 	fs.BoolVar(&opts.writeDefaultConfig, "write-default-config", false, "write a starter config.toml at the effective config path first, only if it does not already exist (skipped during --dry-run)")
 	addDebugFlags(fs, &opts.debugFlags)
 	fs.Usage = func() {
-		fmt.Fprint(stderr, loginUsage)
+		fmt.Fprint(fs.Output(), loginUsage)
 		fs.PrintDefaults()
 	}
 
-	if printUsageOnHelpRequest(fs, loginUsage, args, stdout) {
-		return opts, 0, false
-	}
+	var parseOutput bytes.Buffer
+	fs.SetOutput(&parseOutput)
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fs.SetOutput(stdout)
+			fs.Usage()
+			return opts, 0, false
+		}
+		_, _ = io.Copy(stderr, &parseOutput)
 		return opts, 2, false
 	}
+	fs.SetOutput(stderr)
 	if rejectPositionalArgs(fs, "login", stderr) {
+		return opts, 2, false
+	}
+	if _, valid := auth.CapabilityScopes(opts.capability); !valid {
+		fmt.Fprintln(stderr, "unknown login capability")
 		return opts, 2, false
 	}
 	if opts.timeout <= 0 {
@@ -133,13 +143,21 @@ func parseLoginFlags(args []string, stdout, stderr io.Writer) (opts loginOptions
 			opts.redirectURIExplicit = true
 		}
 	})
+	if opts.device && opts.redirectURIExplicit {
+		fmt.Fprintln(stderr, "--device cannot be combined with --redirect-uri")
+		return opts, 2, false
+	}
 	return opts, 0, true
 }
 
-func runLogin(args []string, stdout, stderr io.Writer) int {
+func (r *runner) runLoginContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	opts, code, ok := parseLoginFlags(args, stdout, stderr)
 	if !ok {
 		return code
+	}
+	if err := r.selectAccount(opts.account); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
 	}
 	overrides := config.Overrides{ConfigPath: opts.configPath}
 	applyDebugFlagOverrides(&overrides, opts.debugFlags)
@@ -181,12 +199,19 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 	)
 
 	if opts.dryRun {
-		printLoginDryRun(stdout, cfg, redirectURI, opts.timeout)
+		if opts.device {
+			fmt.Fprintf(stdout, "Device login for scopes: %s\nNo browser, callback listener, or network request during dry-run.\n", strings.Join(auth.ScopeValues(loginCapabilityScopes(opts.capability)), ", "))
+			return 0
+		}
+		printLoginDryRun(stdout, cfg, redirectURI, opts.timeout, opts.capability)
 		logger.Log(context.Background(), "cli.login.complete", slog.Bool("dry_run", true))
 		return 0
 	}
 
-	return loginAndSaveCredentials(cfg, opts, redirectURI, logger, stdout, stderr)
+	if opts.device {
+		return r.deviceLoginAndSave(ctx, cfg, opts, stdout, stderr)
+	}
+	return r.loginAndSaveCredentialsContext(ctx, cfg, opts, redirectURI, logger, stdout, stderr)
 }
 
 // loginAndSaveCredentials performs the interactive half of `twi login`: it
@@ -197,12 +222,12 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 // It is separate from runLogin so the command's setup -- flags, config, the
 // debug log, --dry-run -- can be read without the OAuth handshake in the way,
 // and so the handshake itself reads as one sequence of steps.
-func loginAndSaveCredentials(cfg config.Config, opts loginOptions, redirectURI string, logger debuglog.Logger, stdout, stderr io.Writer) int {
+func (r *runner) loginAndSaveCredentialsContext(parent context.Context, cfg config.Config, opts loginOptions, redirectURI string, logger debuglog.Logger, stdout, stderr io.Writer) int {
 	request := auth.LoginRequest{
 		ClientID:     strings.TrimSpace(cfg.Twitch.ClientID),
 		ClientSecret: auth.NewSecret(cfg.Twitch.ClientSecret),
 		RedirectURI:  strings.TrimSpace(redirectURI),
-		Scopes:       auth.LoginScopes(),
+		Scopes:       loginCapabilityScopes(opts.capability),
 	}
 	// The redactor starts with the secrets already in the config and is
 	// extended as the login learns more of them, so every message printed or
@@ -221,7 +246,7 @@ func loginAndSaveCredentials(cfg config.Config, opts loginOptions, redirectURI s
 		return 2
 	}
 
-	store, err := newCredentialStore()
+	store, err := r.credentialStore()
 	if err == nil && store == nil {
 		err = errors.New(credentialStoreUnavailableMsg)
 	}
@@ -230,17 +255,19 @@ func loginAndSaveCredentials(cfg config.Config, opts loginOptions, redirectURI s
 		return 1
 	}
 
-	waiter, err := newLoginCallbackWaiter(request.RedirectURI)
+	waiter, err := r.newLoginCallbackWaiter(request.RedirectURI)
 	if err != nil {
 		reportFailure("cli.login.callback_unavailable", "prepare login callback", err)
 		return 2
 	}
 	defer waiter.Close()
 
-	ctx, cancel := newLoginContext(opts.timeout)
+	ctx, cancel := r.newLoginContext(opts.timeout)
+	stopParent := context.AfterFunc(parent, cancel)
+	defer stopParent()
 	defer cancel()
 
-	flow := newLoginFlow()
+	flow := r.newLoginFlow()
 	challenge, err := flow.BeginLogin(ctx, request)
 	if err != nil {
 		reportFailure("cli.login.begin_failed", "start login", err)
@@ -258,7 +285,7 @@ func loginAndSaveCredentials(cfg config.Config, opts loginOptions, redirectURI s
 	fmt.Fprintln(stdout, "A browser window will open. Approve the requested scopes, then return to this terminal.")
 	fmt.Fprintln(stdout, "Tokens will be validated, saved privately, and never printed.")
 
-	if err := openLoginBrowser(ctx, challenge.AuthorizationURL.Reveal()); err != nil {
+	if err := r.openLoginBrowser(ctx, challenge.AuthorizationURL.Reveal()); err != nil {
 		reportFailure("cli.login.browser_failed", "open browser", err)
 		return 1
 	}
@@ -295,7 +322,7 @@ func loginAndSaveCredentials(cfg config.Config, opts loginOptions, redirectURI s
 		return 1
 	}
 	logger.Log(context.Background(), "cli.login.save_succeeded")
-	printLoginSuccess(stdout, result, redactor)
+	printLoginSuccess(stdout, result, redactor, r.account)
 	logger.Log(context.Background(), "cli.login.complete", slog.Bool("dry_run", false))
 	return 0
 }
@@ -318,30 +345,6 @@ func writeDefaultConfigIfMissing(cfg config.Config) (wrote bool, err error) {
 		return false, err
 	}
 	return true, nil
-}
-
-// hasHelpArg reports whether args ask for help: a -h/--help flag anywhere,
-// or a leading bare "help". A "help" appearing later is a flag value (for
-// example --username help), not a help request.
-func hasHelpArg(args []string) bool {
-	for i, arg := range args {
-		if arg == "-h" || arg == "--help" || (i == 0 && arg == "help") {
-			return true
-		}
-	}
-	return false
-}
-
-// printUsageOnHelpRequest prints the full usage to stdout and reports true
-// when args ask for help; parse functions return immediately in that case.
-func printUsageOnHelpRequest(fs *flag.FlagSet, usage string, args []string, stdout io.Writer) bool {
-	if !hasHelpArg(args) {
-		return false
-	}
-	fmt.Fprint(stdout, usage)
-	fs.SetOutput(stdout)
-	fs.PrintDefaults()
-	return true
 }
 
 // rejectPositionalArgs reports and rejects leftover positional arguments,
@@ -372,11 +375,11 @@ func validateLoginConfig(request auth.LoginRequest) error {
 	return nil
 }
 
-func printLoginDryRun(stdout io.Writer, cfg config.Config, redirectURI string, timeout time.Duration) {
+func printLoginDryRun(stdout io.Writer, cfg config.Config, redirectURI string, timeout time.Duration, capability ...string) {
 	redactor := newTwitchSecretRedactor(cfg)
 
 	fmt.Fprintln(stdout, "Twitch OAuth login dry run")
-	fmt.Fprintf(stdout, "Requested scopes: %s\n", strings.Join(auth.ScopeValues(auth.LoginScopes()), ", "))
+	fmt.Fprintf(stdout, "Requested scopes: %s\n", strings.Join(auth.ScopeValues(loginCapabilityScopes(capability...)), ", "))
 	fmt.Fprintf(stdout, "Redirect URI: %s\n", redactor.Redact(redirectURI))
 	fmt.Fprintf(stdout, "Timeout: %s\n", timeout)
 	fmt.Fprintf(stdout, "Client ID: %s\n", presentMissing(cfg.Twitch.ClientID))
@@ -393,7 +396,7 @@ func presentMissing(value string) string {
 	return "present"
 }
 
-func printLoginSuccess(stdout io.Writer, result auth.LoginResult, redactor auth.Redactor) {
+func printLoginSuccess(stdout io.Writer, result auth.LoginResult, redactor auth.Redactor, account ...string) {
 	login := strings.TrimSpace(result.Identity.Login)
 	if login == "" {
 		login = strings.TrimSpace(result.Identity.DisplayName)
@@ -402,14 +405,18 @@ func printLoginSuccess(stdout io.Writer, result auth.LoginResult, redactor auth.
 		login = "unknown"
 	}
 	fmt.Fprintf(stdout, "Login succeeded for Twitch user: %s\n", redactor.Redact(login))
-	fmt.Fprintf(stdout, "Granted scopes: %s\n", strings.Join(auth.ScopeValues(result.Scopes), ", "))
+	fmt.Fprintf(stdout, "Granted scopes: %s\n", redactor.Redact(strings.Join(auth.ScopeValues(result.Scopes), ", ")))
 	if result.Tokens.RefreshAvailable() {
 		fmt.Fprintln(stdout, "Refresh token: received")
 	} else {
 		fmt.Fprintln(stdout, "Refresh token: not returned")
 	}
 	fmt.Fprintln(stdout, "Credentials saved to the private credential store.")
-	fmt.Fprintln(stdout, "Environment variables and flat config credentials still take precedence when present.")
+	if len(account) > 0 && account[0] != "" {
+		fmt.Fprintf(stdout, "Select these credentials with --account %s.\n", account[0])
+	} else {
+		fmt.Fprintln(stdout, "Environment variables and flat config credentials still take precedence when present.")
+	}
 }
 
 func printLoginError(stderr io.Writer, action string, err error, redactor auth.Redactor) {
@@ -533,9 +540,8 @@ func validateLocalLoginRedirectURI(rawRedirectURI string) (*url.URL, error) {
 // browser command to fail: xdg-open and open exit immediately on success, so
 // a quick non-zero exit means the handoff failed and must be reported rather
 // than logged as a successful open.
-var browserExitGracePeriod = 500 * time.Millisecond
 
-func openBrowser(ctx context.Context, targetURL string) error {
+func (r *runner) openBrowser(ctx context.Context, targetURL string) error {
 	targetURL = strings.TrimSpace(targetURL)
 	if targetURL == "" {
 		return errors.New("authorization URL is empty")
@@ -572,7 +578,7 @@ func openBrowser(ctx context.Context, targetURL string) error {
 				return fmt.Errorf("browser command %s: %w", candidate[0], err)
 			}
 			return nil
-		case <-time.After(browserExitGracePeriod):
+		case <-time.After(r.browserExitGracePeriod):
 			// Still running: it is a real browser holding the window open.
 			return nil
 		case <-ctx.Done():
@@ -584,4 +590,13 @@ func openBrowser(ctx context.Context, targetURL string) error {
 		return errors.New("automatic browser opening is not supported in this environment")
 	}
 	return fmt.Errorf("automatic browser opening is not supported in this environment; tried %s", strings.Join(attempted, ", "))
+}
+
+func loginCapabilityScopes(capability ...string) []auth.Scope {
+	value := "tui"
+	if len(capability) > 0 {
+		value = capability[0]
+	}
+	scopes, _ := auth.CapabilityScopes(value)
+	return scopes
 }

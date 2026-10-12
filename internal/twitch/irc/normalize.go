@@ -249,6 +249,7 @@ func NormalizeDisconnect(err error, at time.Time) twitch.Event {
 		Connection: twitch.ConnectionEvent{
 			Type: twitch.ConnectionEventDisconnect,
 			At:   at,
+			Err:  err,
 		},
 	}
 }

@@ -140,3 +140,78 @@ Skipped or environment-limited checks:
   validation. The app has model-level tests for mouse wheel, sidebar click,
   composer click, message click, and disabled-mouse behavior; this pass
   manually covered the equivalent keyboard workflows.
+
+## 2026-10-12 automation implementation
+
+Credential-free checks used isolated temporary config/cache/state directories and
+removed Twitch credential variables from child environments. No live chat was
+sent or recorded.
+
+- Ten native process cases passed: version/completion, producer JSONL dry-run and
+  mixed outcomes, literal mode-alias message text, missing history, command help,
+  conflicting root aliases, and multichannel mock TUI.
+- Blocked-input producer SIGINT/SIGTERM returned 130/143 within five seconds.
+  An undrained output pipe terminated within three seconds on deadline/SIGTERM.
+- Linux PTY with `TERM=xterm-256color`: mock channels one/two launched at110x30,
+  resized to80x24 through SIGWINCH, accepted theme-picker keys, and exited143 on
+  SIGTERM. Alternate-screen transitions appeared in captured output. No terminal
+  emulator product/version was available; this is PTY behavior, not a visual
+  cross-emulator regression claim.
+- Docker Engine29.9.0 built the nonroot image. Network-disabled, read-only
+  container dry-run production, help, doctor, and two-channel mock smokes passed
+  with private temporary config/cache/state mounts. Doctor correctly reported
+  unavailable network/credentials.
+- CGO-disabled binaries built for Linux and Darwin amd64/arm64. Existing
+  Snap manifest remains; a new Snap package/publish run was not performed.
+- Credentialed self-message, live moderation/shared-chat parity, real token
+  rotation across Twitch sessions, and EventSub live subscription costs remain
+  controlled-channel release checks. Scripted HTTP/WebSocket and local
+  multiprocess quota tests cover those implementation boundaries offline.
+
+## 2026-10-12 final PLAN completion evidence
+
+This later pass supersedes the earlier implementation snapshot above. Native
+Bubble Tea v2 PTY checks passed at 80x24, 32x12, and 120x30, including paste,
+Unicode, focus, mouse protocol, resize, and terminal restoration on q, Ctrl+C,
+and SIGTERM. Final release checks include four static targets, CycloneDX SBOMs,
+unsigned provenance, nonroot Docker recorder signals/permissions, isolated real
+ENOSPC, and an actual Snap package with payload/metadata smoke checks.
+
+Controlled live EventSub tests on the authorized `worxbend` channel passed:
+readiness, acknowledged send/reply, 500 Unicode scalar values, same-account
+recording, reply identity, FTS search, SIGTERM143, and clean capture closure.
+EventSub TUI launch/input/restoration also passed all three PTY exit paths
+with the existing read grant and no composer sends. Three marked test messages
+were sent by the separate acknowledged producer suite. Their deletion and IRC live validation
+require the additional official OAuth grant; browser consent is unavailable in
+this runtime. Installed Snap launcher testing requires interactive host sudo.
+See [automation validation](automation-validation.md) and
+[release evidence](release.md) for commands and exact verification boundaries.
+
+## 2026-10-12 follow-up unfinished-work closure
+
+The additional device grant saved a validated `worxbend` account privately. Both
+IRC and EventSub real suites passed sending/replies/Unicode500, recording,
+exact-ID deletion, FTS and persisted-body redaction, SIGTERM143 and clean capture
+boundaries. EventSub also observed enhanced moderation actor identity. Earlier
+three messages and nine new messages were deleted204; no test messages remain
+from these suites. Private curated reports are in `/tmp/twi-live-eventsub-moderation.json`,
+`/tmp/twi-live-irc-moderation.json`, and `/tmp/twi-live-send-modes.json`.
+
+Real EventSub subscriptions recovered after forced socket closure with a capture
+gap and bounded cancellation (`/tmp/twi-live-reconnect-reviewed.json`). Two real
+recorders recovered the same invalid access token with one persisted OAuth
+rotation, validated identity, and clean shutdowns (`/tmp/twi-live-auth-rotation.json`).
+The rotated credential pair remains in the private named account.
+
+App source-only and explicit-all sends were exercised in a verified standalone
+room. Native IRC actions reported unconfirmed writes and were observed as
+normalized action messages by the separate EventSub recorder. The user explicitly
+skipped multi-room shared-chat validation; standalone delivery does not establish
+propagation across rooms.
+
+Installed Snap launcher checks passed in a checksum-verified Ubuntu24 KVM guest
+with actual snapd installation, launcher checks, and removal. The host remained
+unchanged. Supervisor examples use explicit systemd/launchd/Compose templates;
+parsers passed and no service was installed. See [operations](operations.md),
+[TUI profiles](tui-performance.md), and [hosted validation](hosted-validation.md).

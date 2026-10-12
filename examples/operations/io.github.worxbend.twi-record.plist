@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>io.github.worxbend.twi-record</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/YOUR_USER/.local/bin/twi</string>
+    <string>record</string>
+    <string>--account</string><string>recorder</string>
+    <string>--channel</string><string>YOUR_CHANNEL</string>
+    <string>--transport</string><string>irc</string>
+    <string>--history</string><string>/Users/YOUR_USER/.local/state/twi/history.sqlite3</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>/Users/YOUR_USER</string>
+    <key>XDG_STATE_HOME</key><string>/Users/YOUR_USER/.local/state</string>
+    <key>XDG_CACHE_HOME</key><string>/Users/YOUR_USER/.cache</string>
+  </dict>
+  <key>Umask</key><integer>63</integer>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>ExitTimeOut</key><integer>20</integer>
+  <key>StandardOutPath</key><string>/Users/YOUR_USER/Library/Logs/twi/record-stdout.log</string>
+  <key>StandardErrorPath</key><string>/Users/YOUR_USER/Library/Logs/twi/record-stderr.log</string>
+</dict>
+</plist>

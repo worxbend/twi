@@ -1,6 +1,6 @@
 package app
 
-import tea "github.com/charmbracelet/bubbletea"
+import tea "charm.land/bubbletea/v2"
 
 // filterList is the "type to narrow, arrow to pick" state that every
 // searchable overlay in the shell needs: the command palette, the emote
@@ -92,22 +92,23 @@ func (l *filterList) clearQuery() {
 // The return value reports whether the key was one of the shared ones, leaving
 // each overlay's own handler to deal with the keys that are specific to it:
 // escape, enter, and any command it has to run after the query changed.
-func handleFilterListKey(msg tea.KeyMsg, list *filterList, count int) (handled bool) {
-	switch msg.Type {
-	case tea.KeyUp:
+func handleFilterListKey(msg tea.KeyPressMsg, list *filterList, count int) (handled bool) {
+	switch msg.String() {
+	case "up":
 		list.move(-1, count)
-	case tea.KeyDown, tea.KeyTab:
+	case "down", "tab":
 		list.move(1, count)
-	case tea.KeyBackspace, tea.KeyCtrlH:
+	case "backspace", "ctrl+h":
 		list.deleteRune()
-	case tea.KeyCtrlU:
+	case "ctrl+u":
 		list.clearQuery()
-	case tea.KeySpace:
+	case "space":
 		list.insert([]rune{' '})
-	case tea.KeyRunes:
-		list.insert(msg.Runes)
 	default:
-		return false
+		if msg.Text == "" {
+			return false
+		}
+		list.insert([]rune(msg.Text))
 	}
 	return true
 }

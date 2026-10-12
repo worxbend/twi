@@ -13,7 +13,6 @@ import (
 
 func moderationTestModel(t *testing.T) shellModel {
 	t.Helper()
-	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
@@ -142,7 +141,6 @@ func TestModerationChatClearedEmptiesBuffer(t *testing.T) {
 // TestModerationTargetsNamedChannelNotActive guards the multi-channel case: a
 // deletion in a background channel must not redact the channel on screen.
 func TestModerationTargetsNamedChannelNotActive(t *testing.T) {
-	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	cfg.DefaultChannels = []string{"example", "other"}

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/twitch"
@@ -152,7 +152,7 @@ func TestDifferentAuthorAppendPreservesScrolledViewport(t *testing.T) {
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 12})
 	model = updated.(shellModel)
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
 	model = updated.(shellModel)
 	state := model.activeChannelState()
 	if state.scrollOffset == 0 {
@@ -192,7 +192,6 @@ func visibleChatPage(model shellModel) string {
 }
 
 func TestMessageGroupSeparatorPreservesResponsiveWidth(t *testing.T) {
-	forceColorProfile(t)
 	model := newMockModel("alpha", config.Default())
 	notice := chatRowBlock{message: twitch.ChatMessage{Type: twitch.MessageTypeNotice}}
 	named := chatRowBlock{message: twitch.ChatMessage{AuthorLogin: "alice", DisplayName: "Alice", Type: twitch.MessageTypeChat}}

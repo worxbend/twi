@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/twitch"
@@ -13,7 +13,6 @@ import (
 
 func clearTestModel(t *testing.T) shellModel {
 	t.Helper()
-	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	model := newMockModelWithClock("example", cfg, &appFakeClock{now: time.Now()})
@@ -25,7 +24,7 @@ func clearTestModel(t *testing.T) shellModel {
 	return model
 }
 
-func pressKey(model shellModel, key tea.KeyMsg) shellModel {
+func pressKey(model shellModel, key tea.KeyPressMsg) shellModel {
 	updated, _ := model.Update(key)
 	return updated.(shellModel)
 }
@@ -35,7 +34,7 @@ func pressKey(model shellModel, key tea.KeyMsg) shellModel {
 // running during a live broadcast.
 func TestClearChatAsksBeforeDiscardingHistory(t *testing.T) {
 	model := clearTestModel(t)
-	model = pressKey(model, tea.KeyMsg{Type: tea.KeyCtrlL})
+	model = pressKey(model, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 
 	if got := len(model.activeChannelState().messages); got != 2 {
 		t.Fatalf("a single ctrl+L discarded %d messages; it must ask first", 2-got)
@@ -50,8 +49,8 @@ func TestClearChatAsksBeforeDiscardingHistory(t *testing.T) {
 
 func TestClearChatProceedsOnSecondPress(t *testing.T) {
 	model := clearTestModel(t)
-	model = pressKey(model, tea.KeyMsg{Type: tea.KeyCtrlL})
-	model = pressKey(model, tea.KeyMsg{Type: tea.KeyCtrlL})
+	model = pressKey(model, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
+	model = pressKey(model, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 
 	if got := len(model.activeChannelState().messages); got != 0 {
 		t.Fatalf("messages remaining = %d, want 0 after a confirmed clear", got)
@@ -65,13 +64,13 @@ func TestClearChatProceedsOnSecondPress(t *testing.T) {
 // trap that an unrelated keystroke springs later.
 func TestClearChatCancelsOnAnyOtherKey(t *testing.T) {
 	model := clearTestModel(t)
-	model = pressKey(model, tea.KeyMsg{Type: tea.KeyCtrlL})
-	model = pressKey(model, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	model = pressKey(model, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
+	model = pressKey(model, tea.KeyPressMsg{Text: string([]rune{'j'})})
 
 	if model.pendingClearChat {
 		t.Fatal("an unrelated key left the clear confirmation armed")
 	}
-	model = pressKey(model, tea.KeyMsg{Type: tea.KeyCtrlL})
+	model = pressKey(model, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 	if got := len(model.activeChannelState().messages); got != 2 {
 		t.Fatalf("messages = %d, want 2; a cancelled confirmation must not carry over", got)
 	}

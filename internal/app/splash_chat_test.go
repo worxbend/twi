@@ -5,15 +5,14 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/worxbend/twi/internal/config"
 )
 
 func splashTestModel(t *testing.T, width, height int) (shellModel, time.Time) {
 	t.Helper()
-	forceColorProfile(t)
 	model := newMockModel("alpha", config.Default())
 	model.width, model.height = width, height
 	start := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
@@ -105,7 +104,6 @@ func TestSplashChatScrollsToTheNewest(t *testing.T) {
 }
 
 func TestSplashChatRowsAreExactlyContentWidth(t *testing.T) {
-	forceColorProfile(t)
 	model := newMockModel("alpha", config.Default())
 	for _, width := range []int{24, 40, 54, 72} {
 		for _, fraction := range []float64{0.2, 0.5, 0.8, 1.0} {
@@ -132,7 +130,6 @@ func TestSplashChatIsOmittedWhenThereIsNoRoom(t *testing.T) {
 }
 
 func TestSplashChatIsOmittedOnNarrowTerminals(t *testing.T) {
-	forceColorProfile(t)
 	model := newMockModel("alpha", config.Default())
 	if rows := model.splashChatRows(0.5, 12, splashChatMaxRows); len(rows) != 0 {
 		t.Fatalf("rendered %d chat rows at 12 columns, want none", len(rows))
@@ -167,7 +164,7 @@ func TestSplashIsSkippable(t *testing.T) {
 	if !model.splashActive() {
 		t.Fatal("test setup: splash is not active")
 	}
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	updated, _ := model.Update(tea.KeyPressMsg{Text: string([]rune{'x'})})
 	if updated.(shellModel).splashActive() {
 		t.Fatal("splash survived a keypress; a ten-second wait must be escapable")
 	}
@@ -228,7 +225,6 @@ func TestTruncateToFractionKeepsGraphemesWhole(t *testing.T) {
 
 func splashChatRowsPlain(t *testing.T, fraction float64) []string {
 	t.Helper()
-	forceColorProfile(t)
 	model := newMockModel("alpha", config.Default())
 	rows := model.splashChatRows(fraction, 54, splashChatMaxRows)
 	plain := make([]string, 0, len(rows))

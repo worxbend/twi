@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/worxbend/twi/internal/twitch"
 )
 
@@ -63,30 +63,33 @@ func (m *shellModel) closeCategoryPicker() {
 	m.categoryPicker = categoryPickerState{generation: m.categoryPicker.generation + 1}
 }
 
-func (m shellModel) handleCategoryPickerKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyEsc:
+func (m shellModel) handleCategoryPickerKey(msg tea.KeyPressMsg) (shellModel, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
 		m.closeCategoryPicker()
 		return m, nil
-	case tea.KeyEnter:
+	case "enter":
 		return m.commitCategoryPickerSelection()
-	case tea.KeyUp:
+	case "up":
 		m.categoryPicker.move(-1, len(m.categoryPickerEntries()))
 		return m, nil
-	case tea.KeyDown, tea.KeyTab:
+	case "down", "tab":
 		m.categoryPicker.move(1, len(m.categoryPickerEntries()))
 		return m, nil
-	case tea.KeyBackspace, tea.KeyCtrlH:
+	case "backspace", "ctrl+h":
 		m.categoryPicker.deleteRune()
 		return m, m.debounceCategorySearch()
-	case tea.KeyCtrlU:
+	case "ctrl+u":
 		m.categoryPicker.clearQuery()
 		return m, m.debounceCategorySearch()
-	case tea.KeySpace:
+	case "space":
 		m.categoryPicker.insert([]rune{' '})
 		return m, m.debounceCategorySearch()
-	case tea.KeyRunes:
-		m.categoryPicker.insert(msg.Runes)
+	default:
+		if msg.Text == "" {
+			break
+		}
+		m.categoryPicker.insert([]rune(msg.Text))
 		return m, m.debounceCategorySearch()
 	}
 	return m, nil

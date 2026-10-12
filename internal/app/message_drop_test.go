@@ -97,7 +97,6 @@ func (f *fakeDropCounter) DroppedMessages() uint64 { return f.dropped }
 // an acceptable trade if the user finds out from the UI rather than from a
 // viewer asking why their message was ignored.
 func TestStatusLineShowsDroppedMessages(t *testing.T) {
-	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	model := newMockModelWithClock("example", cfg, &appFakeClock{now: time.Now()})
@@ -110,7 +109,6 @@ func TestStatusLineShowsDroppedMessages(t *testing.T) {
 }
 
 func TestStatusLineOmitsDropCounterWhenNothingDropped(t *testing.T) {
-	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	model := newMockModelWithClock("example", cfg, &appFakeClock{now: time.Now()})
@@ -124,7 +122,6 @@ func TestStatusLineOmitsDropCounterWhenNothingDropped(t *testing.T) {
 // TestStatusLineHandlesSourcesThatCannotDrop covers mock mode and fakes, which
 // do not implement the capability at all.
 func TestStatusLineHandlesSourcesThatCannotDrop(t *testing.T) {
-	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
 	model := newMockModelWithClock("example", cfg, &appFakeClock{now: time.Now()})

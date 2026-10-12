@@ -16,7 +16,7 @@ func TestDashboardPanesExposeIconTitlesAndComposerIdentity(t *testing.T) {
 	model.width, model.height = 140, 24
 	model.appendActivity(activityEntry{Kind: activityFollow, Text: "NewViewer followed"})
 
-	plain := ansi.Strip(model.View())
+	plain := ansi.Strip(model.View().Content)
 	for _, want := range []string{
 		"💬 Chat · #alpha",
 		"📡 Channels",

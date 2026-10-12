@@ -24,7 +24,7 @@ var _ twitch.ClipManager = (*ClipsClient)(nil)
 func NewClipsClient(cfg ClipsClientConfig) *ClipsClient {
 	return &ClipsClient{
 		endpoint:  endpointOrDefault(cfg.Endpoint, defaultHelixClipsURL),
-		transport: newTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken),
+		transport: newTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken, cfg.RetryPolicy),
 	}
 }
 

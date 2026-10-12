@@ -10,8 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/worxbend/twi/internal/animation"
-	"github.com/worxbend/twi/internal/render"
 	"github.com/worxbend/twi/internal/theme"
 	"github.com/worxbend/twi/internal/twitch"
 )
@@ -78,8 +76,8 @@ type FeatureConfig struct {
 	// ScrollbackLimit caps how many messages each channel retains. Chat is
 	// unbounded upstream, and every retained message is re-rendered on each
 	// repaint, so an uncapped buffer degrades the frame time of a long
-	// session until the UI cannot keep up with the animation tick. Zero or
-	// negative disables trimming and restores the old unbounded behavior.
+	// session until the UI cannot keep up with the animation tick. Nonpositive
+	// values use DefaultScrollbackLimit to keep memory bounded.
 	ScrollbackLimit int
 }
 
@@ -153,12 +151,12 @@ func Default() Config {
 		Features: FeatureConfig{
 			EnableMouse:           true,
 			AvatarMode:            "initials",
-			AnimationMode:         string(animation.ModeFast),
+			AnimationMode:         "fast",
 			ThemeName:             theme.DefaultThemeName,
 			StreamStatusMode:      "auto",
 			EmoteAutocompleteMode: "auto",
-			MessageLayout:         string(render.DefaultLayoutMode),
-			BadgeMode:             string(render.DefaultBadgeMode),
+			MessageLayout:         "inline",
+			BadgeMode:             "glyph",
 			HighlightEmotes:       true,
 			FullUsername:          false,
 			ScrollbackLimit:       DefaultScrollbackLimit,

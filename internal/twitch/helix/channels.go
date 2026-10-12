@@ -28,7 +28,7 @@ var _ twitch.ChannelManager = (*ChannelsClient)(nil)
 func NewChannelsClient(cfg ChannelsClientConfig) *ChannelsClient {
 	return &ChannelsClient{
 		endpoint:  endpointOrDefault(cfg.Endpoint, defaultHelixChannelsURL),
-		transport: newTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken),
+		transport: newTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken, cfg.RetryPolicy),
 	}
 }
 

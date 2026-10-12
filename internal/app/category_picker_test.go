@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/twitch"
 )
@@ -24,7 +24,7 @@ func TestCategoryPickerReopenInvalidatesInFlightSearch(t *testing.T) {
 
 	// Close, change the category, reopen: the first open's search is still in
 	// flight and must not overwrite the new session's results.
-	updated, _ := model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, _ := model.handleCategoryPickerKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	model = updated
 	model.streamInfo.category = "Fortnite"
 	fresh := model.openCategoryPicker()().(categoryPickerResultsMsg)
@@ -52,10 +52,10 @@ func TestCategoryPickerEscInvalidatesInFlightWork(t *testing.T) {
 	inFlight := model.openCategoryPicker()().(categoryPickerResultsMsg)
 
 	// Type to schedule a debounce, then close before either lands.
-	updated, debounceCmd := model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	updated, debounceCmd := model.handleCategoryPickerKey(tea.KeyPressMsg{Text: string([]rune{'s'})})
 	model = updated
 	pendingDebounce := debounceCmd().(categoryPickerDebounceMsg)
-	updated, _ = model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, _ = model.handleCategoryPickerKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	model = updated
 
 	updated, cmd := model.applyCategoryPickerDebounce(pendingDebounce)

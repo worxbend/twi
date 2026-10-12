@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/rivo/uniseg"
 	"github.com/worxbend/twi/internal/twitch"
 )
@@ -19,8 +19,8 @@ func (m *shellModel) handleMouse(msg tea.MouseMsg) (shellModel, tea.Cmd) {
 	}
 
 	layout := m.layout()
-	event := tea.MouseEvent(msg)
-	if m.mouseInChatRegion(event, layout) && !m.anyOverlayOpen() {
+	event := msg.Mouse()
+	if _, wheel := msg.(tea.MouseWheelMsg); wheel && m.mouseInChatRegion(event, layout) && !m.anyOverlayOpen() {
 		switch {
 		case isMouseWheelUp(event):
 			m.scrollBy(3)
@@ -31,7 +31,7 @@ func (m *shellModel) handleMouse(msg tea.MouseMsg) (shellModel, tea.Cmd) {
 		}
 	}
 
-	if !isMouseLeftPress(event) {
+	if _, click := msg.(tea.MouseClickMsg); !click || event.Button != tea.MouseLeft {
 		return *m, nil
 	}
 
@@ -77,25 +77,19 @@ func (m *shellModel) handleMouse(msg tea.MouseMsg) (shellModel, tea.Cmd) {
 
 // isMouseWheelUp reports whether the event is one notch of the wheel away
 // from the newest message.
-func isMouseWheelUp(event tea.MouseEvent) bool {
-	return event.Button == tea.MouseButtonWheelUp
+func isMouseWheelUp(event tea.Mouse) bool {
+	return event.Button == tea.MouseWheelUp
 }
 
 // isMouseWheelDown reports whether the event is one notch of the wheel back
 // towards the newest message.
-func isMouseWheelDown(event tea.MouseEvent) bool {
-	return event.Button == tea.MouseButtonWheelDown
-}
-
-// isMouseLeftPress reports whether the event is the primary button going
-// down. Releases and drags are ignored so that one click acts once.
-func isMouseLeftPress(event tea.MouseEvent) bool {
-	return event.Button == tea.MouseButtonLeft && event.Action == tea.MouseActionPress
+func isMouseWheelDown(event tea.Mouse) bool {
+	return event.Button == tea.MouseWheelDown
 }
 
 // mouseInChatRegion reports whether the cursor is inside the chat pane,
 // borders included.
-func (m shellModel) mouseInChatRegion(event tea.MouseEvent, layout shellLayout) bool {
+func (m shellModel) mouseInChatRegion(event tea.Mouse, layout shellLayout) bool {
 	chatTop := layout.tabBarHeight + layout.statusHeight
 	chatLeft := layout.sidebarWidth
 	chatRight := layout.sidebarWidth + layout.chatWidth
@@ -108,7 +102,7 @@ func (m shellModel) mouseInChatRegion(event tea.MouseEvent, layout shellLayout) 
 // mouseInComposer reports whether the cursor is inside the composer strip at
 // the bottom of the window. The composer spans the full width, so only the
 // row really decides.
-func (m shellModel) mouseInComposer(event tea.MouseEvent, layout shellLayout) bool {
+func (m shellModel) mouseInComposer(event tea.Mouse, layout shellLayout) bool {
 	composerTop := layout.tabBarHeight + layout.statusHeight + layout.chatHeight
 	return event.X >= 0 &&
 		event.X < layout.width &&
@@ -119,7 +113,7 @@ func (m shellModel) mouseInComposer(event tea.MouseEvent, layout shellLayout) bo
 // messageAtMouse resolves the chat message drawn under the cursor, if any.
 // Clicks on the pane border, on a group separator, or below the last message
 // resolve to nothing.
-func (m shellModel) messageAtMouse(event tea.MouseEvent, layout shellLayout) (twitch.ChatMessage, bool) {
+func (m shellModel) messageAtMouse(event tea.Mouse, layout shellLayout) (twitch.ChatMessage, bool) {
 	if !m.mouseInChatRegion(event, layout) || layout.chatContentHeight <= 0 {
 		return twitch.ChatMessage{}, false
 	}
@@ -180,7 +174,7 @@ func selectableMessage(message twitch.ChatMessage) (twitch.ChatMessage, bool) {
 // tabAtMouse resolves which tab-bar entry sits under the cursor by rebuilding
 // the same label run tabBarTabs renders, so the hit boxes cannot drift from
 // what is drawn.
-func (m shellModel) tabAtMouse(event tea.MouseEvent, layout shellLayout) (shellTab, bool) {
+func (m shellModel) tabAtMouse(event tea.Mouse, layout shellLayout) (shellTab, bool) {
 	if layout.tabBarHeight <= 0 || event.Y != 0 {
 		return 0, false
 	}
@@ -224,7 +218,7 @@ func (m shellModel) tabAtMouse(event tea.MouseEvent, layout shellLayout) (shellT
 // whether the click landed on that row's close affordance rather than its
 // name. The affordance is only drawn on the focused, highlighted row, so a
 // click can only close what the user can see is closable.
-func (m shellModel) sidebarRowAtMouse(event tea.MouseEvent, layout shellLayout) (index int, closeHit bool, ok bool) {
+func (m shellModel) sidebarRowAtMouse(event tea.Mouse, layout shellLayout) (index int, closeHit bool, ok bool) {
 	if layout.sidebarWidth <= 0 || event.X < 0 || event.X >= layout.sidebarWidth {
 		return 0, false, false
 	}
@@ -248,7 +242,7 @@ func (m shellModel) sidebarRowAtMouse(event tea.MouseEvent, layout shellLayout) 
 // palette, emote picker, or channel picker) sits under the cursor. All three
 // render a one-line header followed by their entries, so one hit test covers
 // them.
-func overlayRowAtMouse(event tea.MouseEvent, top, height, contentHeight int, framed bool) (int, bool) {
+func overlayRowAtMouse(event tea.Mouse, top, height, contentHeight int, framed bool) (int, bool) {
 	if height <= 0 || contentHeight <= 1 {
 		return 0, false
 	}
@@ -274,7 +268,7 @@ func (m shellModel) overlayTop(layout shellLayout) int {
 // handleOverlayMouse routes a click inside an open bottom overlay to that
 // overlay's selection, then runs it - matching the keyboard flow where
 // moving the selection and pressing enter are one gesture with a mouse.
-func (m shellModel) handleOverlayMouse(event tea.MouseEvent, layout shellLayout) (shellModel, tea.Cmd, bool) {
+func (m shellModel) handleOverlayMouse(event tea.Mouse, layout shellLayout) (shellModel, tea.Cmd, bool) {
 	top := m.overlayTop(layout)
 	switch {
 	case m.palette.open && layout.paletteHeight > 0:

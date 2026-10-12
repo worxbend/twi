@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/twitch"
 )
@@ -50,7 +50,7 @@ func TestEmptyChannelSetRendersEmptyStateAndRefusesSends(t *testing.T) {
 		t.Fatal("channels.empty() = false for a channel-less start, want true")
 	}
 
-	view := model.View()
+	view := model.View().Content
 	for _, want := range []string{"No channels open.", "/channels", "no channel open"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("empty-state view missing %q:\n%s", want, view)
@@ -61,7 +61,7 @@ func TestEmptyChannelSetRendersEmptyStateAndRefusesSends(t *testing.T) {
 	// transport with an empty channel name.
 	model.activeChannelState().composerText = "hello"
 	model.focus = focusComposer
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("send with no channel returned command %#v, want nil", cmd)
@@ -119,7 +119,7 @@ func TestComposerChannelsCommandOpensPickerOrNamedChannel(t *testing.T) {
 	model.focus = focusComposer
 
 	model.activeChannelState().composerText = "/channels"
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if !model.channelPicker.open {
 		t.Fatal("channelPicker.open after /channels = false, want true")
@@ -130,7 +130,7 @@ func TestComposerChannelsCommandOpensPickerOrNamedChannel(t *testing.T) {
 
 	model.channelPicker = channelPickerState{}
 	model.activeChannelState().composerText = "/channels #alpha"
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if model.channelPicker.open {
 		t.Fatal("channelPicker.open after /channels <name> = true, want false")
@@ -191,7 +191,7 @@ func TestChannelPickerEnterOpensSelection(t *testing.T) {
 	model.followedChannelList = []twitch.FollowedChannel{{BroadcasterLogin: "gamma"}}
 	model.channelPicker = channelPickerState{open: true}
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated.(shellModel)
 	if model.channelPicker.open {
 		t.Fatal("channelPicker.open after enter = true, want false")

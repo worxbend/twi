@@ -3,7 +3,7 @@ package app
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/worxbend/twi/internal/assets"
 )
 
@@ -26,12 +26,12 @@ func (m *shellModel) toggleEmotePicker() {
 	m.emotePicker = emotePickerState{open: true}
 }
 
-func (m shellModel) handleEmotePickerKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyEsc:
+func (m shellModel) handleEmotePickerKey(msg tea.KeyPressMsg) (shellModel, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
 		m.emotePicker = emotePickerState{}
 		return m, nil
-	case tea.KeyEnter:
+	case "enter":
 		return m.executeEmotePickerSelection()
 	}
 	handleFilterListKey(msg, &m.emotePicker.filterList, len(m.visibleEmotePickerEntries()))

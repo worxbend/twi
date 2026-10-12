@@ -1,0 +1,13 @@
+{
+  "verified_at": "2026-10-12",
+  "actions": {
+    "actions/checkout": {"tag": "v7.0.1", "commit": "3d3c42e5aac5ba805825da76410c181273ba90b1"},
+    "actions/setup-go": {"tag": "v7.0.0", "commit": "b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"},
+    "actions/upload-artifact": {"tag": "v7.0.2", "commit": "cf430e030ddbb5b0abf93d22962f4752f3646cd9"},
+    "actions/configure-pages": {"tag": "v6.0.0", "commit": "45bfe0192ca1faeb007ade9deae92b16b8254a0d"},
+    "actions/upload-pages-artifact": {"tag": "v5.0.0", "commit": "fc324d3547104276b827a68afc52ff2a11cc49c9"},
+    "actions/deploy-pages": {"tag": "v5.0.1", "commit": "368f82528645a54fb793d4d04e342629a3f51346"},
+    "snapcore/action-build": {"tag": "v1.3.0", "commit": "3bdaa03e1ba6bf59a65f84a751d943d549a54e79"},
+    "snapcore/action-publish": {"tag": "v1.2.0", "commit": "214b86e5ca036ead1668c79afb81e550e6c54d40"}
+  }
+}

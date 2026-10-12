@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/worxbend/twi/internal/config"
 )
@@ -78,11 +78,10 @@ func TestWheelStillScrollsChatWithNoOverlayOpen(t *testing.T) {
 	model.activeChannelState().messages = numberedMockMessages("alpha", 40)
 	layout := model.layout()
 
-	updated, _ := model.Update(tea.MouseMsg(tea.MouseEvent{
+	updated, _ := model.Update(tea.MouseWheelMsg(tea.Mouse{
 		X:      layout.sidebarWidth + 2,
 		Y:      layout.tabBarHeight + layout.statusHeight + 1,
-		Button: tea.MouseButtonWheelUp,
-		Action: tea.MouseActionPress,
+		Button: tea.MouseWheelUp,
 	}))
 	model = updated.(shellModel)
 	if model.activeChannelState().scrollOffset == 0 {
@@ -104,11 +103,10 @@ func TestMockShellMouseEventsWhenEnabled(t *testing.T) {
 	chatX := layout.sidebarWidth + 2
 	contentY := layout.tabBarHeight + layout.statusHeight + 1
 
-	updated, cmd := model.Update(tea.MouseMsg{
+	updated, cmd := model.Update(tea.MouseWheelMsg{
 		X:      chatX,
 		Y:      contentY,
-		Button: tea.MouseButtonWheelUp,
-		Action: tea.MouseActionPress,
+		Button: tea.MouseWheelUp,
 	})
 	model = updated.(shellModel)
 	if cmd != nil {
@@ -117,17 +115,16 @@ func TestMockShellMouseEventsWhenEnabled(t *testing.T) {
 	if model.activeChannelState().scrollOffset == 0 {
 		t.Fatal("mouse wheel up left scrollOffset at 0")
 	}
-	if !strings.Contains(model.View(), "message-08") {
-		t.Fatalf("mouse-scrolled viewport missing older row:\n%s", model.View())
+	if !strings.Contains(model.View().Content, "message-08") {
+		t.Fatalf("mouse-scrolled viewport missing older row:\n%s", model.View().Content)
 	}
 
 	sidebarContentY := layout.tabBarHeight + layout.statusHeight + 1
 	betaY := sidebarContentY + 1
-	updated, cmd = model.Update(tea.MouseMsg{
+	updated, cmd = model.Update(tea.MouseClickMsg{
 		X:      2,
 		Y:      betaY,
-		Button: tea.MouseButtonLeft,
-		Action: tea.MouseActionPress,
+		Button: tea.MouseLeft,
 	})
 	model = updated.(shellModel)
 	if cmd != nil {
@@ -148,11 +145,10 @@ func TestMockShellMouseEventsWhenEnabled(t *testing.T) {
 	}
 
 	composerY := layout.tabBarHeight + layout.statusHeight + layout.chatHeight + 1
-	updated, _ = model.Update(tea.MouseMsg{
+	updated, _ = model.Update(tea.MouseClickMsg{
 		X:      10,
 		Y:      composerY,
-		Button: tea.MouseButtonLeft,
-		Action: tea.MouseActionPress,
+		Button: tea.MouseLeft,
 	})
 	model = updated.(shellModel)
 	if got, want := model.focus, focusComposer; got != want {
@@ -165,11 +161,10 @@ func TestMockShellMouseEventsWhenEnabled(t *testing.T) {
 	model.activeChannelState().scrollOffset = 0
 	layout = model.layout()
 	latestY := layout.tabBarHeight + layout.statusHeight + 1 + layout.chatContentHeight - 1
-	updated, _ = model.Update(tea.MouseMsg{
+	updated, _ = model.Update(tea.MouseClickMsg{
 		X:      layout.sidebarWidth + 4,
 		Y:      latestY,
-		Button: tea.MouseButtonLeft,
-		Action: tea.MouseActionPress,
+		Button: tea.MouseLeft,
 	})
 	model = updated.(shellModel)
 	if model.activeChannelState().replyTo == nil || model.activeChannelState().replyTo.MessageID != "mock-11" {
@@ -191,11 +186,11 @@ func TestMockShellMouseEventsIgnoredWhenDisabled(t *testing.T) {
 	model = updated.(shellModel)
 	layout := model.layout()
 
-	events := []tea.MouseMsg{
-		{X: layout.sidebarWidth + 2, Y: layout.tabBarHeight + layout.statusHeight + 1, Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress},
-		{X: 2, Y: layout.tabBarHeight + layout.statusHeight + 3, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress},
-		{X: 10, Y: layout.tabBarHeight + layout.statusHeight + layout.chatHeight + 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress},
-		{X: layout.sidebarWidth + 4, Y: layout.tabBarHeight + layout.statusHeight + 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress},
+	events := []tea.MouseWheelMsg{
+		{X: layout.sidebarWidth + 2, Y: layout.tabBarHeight + layout.statusHeight + 1, Button: tea.MouseWheelUp},
+		{X: 2, Y: layout.tabBarHeight + layout.statusHeight + 3, Button: tea.MouseLeft},
+		{X: 10, Y: layout.tabBarHeight + layout.statusHeight + layout.chatHeight + 1, Button: tea.MouseLeft},
+		{X: layout.sidebarWidth + 4, Y: layout.tabBarHeight + layout.statusHeight + 1, Button: tea.MouseLeft},
 	}
 	for _, event := range events {
 		updated, cmd := model.Update(event)

@@ -32,7 +32,7 @@ var _ twitch.SubscriptionLookup = (*SubscriptionsClient)(nil)
 func NewSubscriptionsClient(cfg SubscriptionsClientConfig) *SubscriptionsClient {
 	return &SubscriptionsClient{
 		endpoint:  endpointOrDefault(cfg.Endpoint, defaultHelixSubscriptionsURL),
-		transport: newTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken),
+		transport: newTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken, cfg.RetryPolicy),
 	}
 }
 

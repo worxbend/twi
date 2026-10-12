@@ -8,28 +8,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/lipgloss"
 	gempir "github.com/gempir/go-twitch-irc/v4"
-	"github.com/muesli/termenv"
 	"github.com/worxbend/twi/internal/theme"
 	"github.com/worxbend/twi/internal/twitch"
 	"github.com/worxbend/twi/internal/twitch/irc"
 )
-
-// forceColorProfile pins lipgloss's default renderer to TrueColor for the
-// duration of the test and restores whatever profile was active before.
-// Setting env vars alone isn't reliable here: lipgloss/termenv detect and
-// cache the profile once per process, so whichever test in this package
-// first touches lipgloss rendering can lock in "no color" for every test
-// that runs after it in the same `go test` binary.
-func forceColorProfile(t *testing.T) {
-	t.Helper()
-	original := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() {
-		lipgloss.SetColorProfile(original)
-	})
-}
 
 func TestFragmentWithDefaultBackgroundFillsOnlyWhenUnset(t *testing.T) {
 	withoutBackground := Fragment{Kind: FragmentText, Text: "hi", Style: FragmentStyle{Foreground: "#ffffff"}}
@@ -65,7 +48,6 @@ func backgroundOnlySGRCode(t *testing.T, hex string) string {
 }
 
 func TestTerminalStringWithBackgroundAppliesPastEmbeddedResets(t *testing.T) {
-	forceColorProfile(t)
 	background := "#111018"
 	backgroundCode := backgroundOnlySGRCode(t, background)
 
@@ -94,7 +76,6 @@ func TestTerminalStringWithBackgroundAppliesPastEmbeddedResets(t *testing.T) {
 }
 
 func TestTerminalStringWithBackgroundPreservesExplicitFragmentBackground(t *testing.T) {
-	forceColorProfile(t)
 	defaultCode := backgroundOnlySGRCode(t, "#111018")
 	explicitCode := backgroundOnlySGRCode(t, "#9146ff")
 

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/worxbend/twi/internal/auth"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/debuglog"
@@ -706,8 +706,8 @@ func TestLiveShellConsumesClientMessagesAndConnectionStates(t *testing.T) {
 	}
 	updated, _ := model.Update(chatClientConnectionStateMsg{state: state, ok: true})
 	model = updated.(shellModel)
-	if !strings.Contains(model.View(), "reconnecting") || !strings.Contains(model.View(), "Twitch requested reconnect") {
-		t.Fatalf("view missing reconnect state:\n%s", model.View())
+	if !strings.Contains(model.View().Content, "reconnecting") || !strings.Contains(model.View().Content, "Twitch requested reconnect") {
+		t.Fatalf("view missing reconnect state:\n%s", model.View().Content)
 	}
 
 	msg := twitch.ChatMessage{
@@ -724,13 +724,13 @@ func TestLiveShellConsumesClientMessagesAndConnectionStates(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("client message did not schedule next client read")
 	}
-	if !strings.Contains(model.View(), "live shell message") {
-		t.Fatalf("view missing live message:\n%s", model.View())
+	if !strings.Contains(model.View().Content, "live shell message") {
+		t.Fatalf("view missing live message:\n%s", model.View().Content)
 	}
 
 	updated, _ = model.Update(tea.WindowSizeMsg{Width: 64, Height: 12})
-	if got, want := lineCount(updated.View()), 12; got != want {
-		t.Fatalf("live shell line count = %d, want %d:\n%s", got, want, updated.View())
+	if got, want := lineCount(updated.View().Content), 12; got != want {
+		t.Fatalf("live shell line count = %d, want %d:\n%s", got, want, updated.View().Content)
 	}
 }
 
@@ -785,7 +785,7 @@ func TestLiveShellKeepsPerChannelHistoryStatusUnreadAndSwitching(t *testing.T) {
 	if got, want := beta.unread, 1; got != want {
 		t.Fatalf("beta unread = %d, want %d", got, want)
 	}
-	view := model.View()
+	view := model.View().Content
 	for _, want := range []string{"#alpha connected", "alpha connected", "unread=1", "alpha active history"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("active alpha view missing %q:\n%s", want, view)
@@ -795,7 +795,7 @@ func TestLiveShellKeepsPerChannelHistoryStatusUnreadAndSwitching(t *testing.T) {
 		t.Fatalf("inactive beta history leaked into alpha view:\n%s", view)
 	}
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	updated, cmd := model.Update(tea.KeyPressMsg{Text: string([]rune{']'})})
 	model = updated.(shellModel)
 	if cmd != nil {
 		t.Fatalf("channel switch returned command %#v, want nil without visible assets", cmd)
@@ -806,7 +806,7 @@ func TestLiveShellKeepsPerChannelHistoryStatusUnreadAndSwitching(t *testing.T) {
 	if got := beta.unread; got != 0 {
 		t.Fatalf("beta unread after activation = %d, want 0", got)
 	}
-	view = model.View()
+	view = model.View().Content
 	for _, want := range []string{"#beta reconnecting", "beta reconnecting", "beta inactive history"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("active beta view missing %q:\n%s", want, view)
@@ -816,12 +816,12 @@ func TestLiveShellKeepsPerChannelHistoryStatusUnreadAndSwitching(t *testing.T) {
 		t.Fatalf("alpha history or stale unread leaked into beta view:\n%s", view)
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	updated, _ = model.Update(tea.KeyPressMsg{Text: string([]rune{']'})})
 	model = updated.(shellModel)
 	if got, want := model.activeChannelName(), "alpha"; got != want {
 		t.Fatalf("active channel after wrap = %q, want %q", got, want)
 	}
-	if view := model.View(); !strings.Contains(view, "alpha active history") || strings.Contains(view, "beta inactive history") {
+	if view := model.View().Content; !strings.Contains(view, "alpha active history") || strings.Contains(view, "beta inactive history") {
 		t.Fatalf("wrapped alpha view has wrong history:\n%s", view)
 	}
 }
@@ -868,7 +868,7 @@ func TestLiveShellRoutesInactiveMessagesWithoutStealingFocusOrScroll(t *testing.
 	if got, want := beta.messages[0].Channel, "beta"; got != want {
 		t.Fatalf("beta message channel = %q, want normalized %q", got, want)
 	}
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "unread=1") {
 		t.Fatalf("active view missing unread indicator:\n%s", view)
 	}

@@ -39,7 +39,7 @@ var _ twitch.FollowedChannelLookup = (*FollowedChannelsClient)(nil)
 func NewFollowedChannelsClient(cfg FollowedChannelsClientConfig) *FollowedChannelsClient {
 	return &FollowedChannelsClient{
 		endpoint:  endpointOrDefault(cfg.Endpoint, defaultHelixFollowedChannelsURL),
-		transport: newTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken),
+		transport: newTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken, cfg.RetryPolicy),
 	}
 }
 

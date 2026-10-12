@@ -5,8 +5,8 @@ This document summarizes the development workflow and architecture for `twi`. It
 ## Current State
 
 - `PLAN.md` is the source of truth for architecture, milestones, and quality gates.
-- The current stable Go version was verified as `go1.26.4` on 2026-07-01.
-- The Go module uses `go 1.26` and `toolchain go1.26.4`.
+- The current stable Go version was verified as `go1.27.2` on 2026-10-11.
+- The Go module uses `go 1.27.0` and `toolchain go1.27.2`.
 - `govulncheck` and `staticcheck` are pinned as Go module tools.
 - Use Go modules only. Do not use GOPATH workflows.
 - Ready behavior: a deterministic non-network Bubble Tea mock shell, config path/show commands, and text/initials/Unicode/badge/emote-token fallback rendering.
@@ -268,3 +268,20 @@ Follow-ups:
 ```
 
 Prefer vertical slices that end in runnable behavior. Keep docs updated when behavior changes, especially around auth, config, text-fallback rendering, and command availability.
+
+## Automation and durable history
+
+Producer, consumer, foreground recorder, and local history commands are implemented
+through UI-independent services and explicit public DTOs. See [Automation](automation.md) for
+capabilities, examples, coverage/cursor guarantees, retention, and validation limits.
+Live Twitch observation parity requires controlled credentialed validation.
+
+## Measured rendering baseline (2026-10-12)
+
+On Linux amd64, AMD Ryzen 7 5700X, `go test ./internal/app -run '^$'
+-bench 'BenchmarkView|BenchmarkMaxScrollOffset' -benchtime=100x -benchmem`:
+View at 100/1000/5000 messages measured 1.78/2.51/8.39 ms and
+0.42/0.90/3.00 MB per operation. MaxScrollOffset measured
+0.37/4.68/10.78 ms at the same sizes. These are one local workload baseline,
+not universal performance promises. Existing rendering caches stay unchanged.
+The [history workload baseline](history-benchmark.md) measures capture/replay.

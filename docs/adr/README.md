@@ -9,11 +9,11 @@ agreement with the current code.
 
 Two things in this directory cannot be taken at face value.
 
-**`PLAN.md` is not in the repository.** ADRs 0001, 0003, 0004, 0005, and 0006
-cite it as the source of a requirement. It was an untracked working document
+**Older ADR citations refer to an earlier unpublished `PLAN.md`.** ADRs 0001, 0003, 0004, 0005, and 0006
+cite it as the source of a requirement. That earlier plan was an untracked working document
 (`.gitignore` line 43) and was never published, so those citations are
 historical context rather than references a contributor can follow. Treat the
-stated requirement as the ADR author's summary of it.
+stated requirement as the ADR author's summary of it. The current [automation plan](../../PLAN.md) is a separate document.
 
 **Some ADRs describe designs that were never built.** Check the code before
 relying on an ADR's specifics. `go list -deps ./internal/<pkg>` settles any
@@ -38,3 +38,7 @@ question about which packages actually depend on which.
 - **0003 — Use Kitty graphics as the first image protocol.** Superseded.
   Terminal-graphics image rendering was removed in commit `22f5af9`; assets
   render as text, initials, and Unicode fallbacks only.
+
+- **0007 — Automation commands/output.** Accepted; explicit CLI modes and schema v1 DTOs.
+- **0008 — Local history/coverage/cursors.** Accepted; SQLite WAL capture and replay.
+- **0009 — Acceptance/auth/transport.** Accepted; Helix receipts, capability auth, and explicit EventSub reads.

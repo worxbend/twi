@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/twitch"
 )
@@ -32,15 +32,15 @@ func TestChannelPickerKeyWrapsSelectionAroundTheEntryList(t *testing.T) {
 		t.Fatalf("picker shows %d entries, want at least 2 for a wrap test", last+1)
 	}
 
-	model, _ = model.handleChannelPickerKey(tea.KeyMsg{Type: tea.KeyUp})
+	model, _ = model.handleChannelPickerKey(tea.KeyPressMsg{Code: tea.KeyUp})
 	if model.channelPicker.selected != last {
 		t.Fatalf("up from the first row = %d, want %d (the last row)", model.channelPicker.selected, last)
 	}
-	model, _ = model.handleChannelPickerKey(tea.KeyMsg{Type: tea.KeyDown})
+	model, _ = model.handleChannelPickerKey(tea.KeyPressMsg{Code: tea.KeyDown})
 	if model.channelPicker.selected != 0 {
 		t.Fatalf("down from the last row = %d, want 0", model.channelPicker.selected)
 	}
-	model, _ = model.handleChannelPickerKey(tea.KeyMsg{Type: tea.KeyTab})
+	model, _ = model.handleChannelPickerKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	if model.channelPicker.selected != 1 {
 		t.Fatalf("tab = %d, want 1 (tab moves like down)", model.channelPicker.selected)
 	}
@@ -51,7 +51,7 @@ func TestChannelPickerTypingFiltersAndReturnsToTheTopRow(t *testing.T) {
 	model.channelPicker.selected = 2
 
 	for _, r := range "gam" {
-		model, _ = model.handleChannelPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		model, _ = model.handleChannelPickerKey(tea.KeyPressMsg{Text: string([]rune{r})})
 	}
 	if model.channelPicker.query != "gam" {
 		t.Fatalf("query = %q, want %q", model.channelPicker.query, "gam")
@@ -72,15 +72,15 @@ func TestChannelPickerBackspaceRemovesAWholeRune(t *testing.T) {
 	model := openChannelPickerModel(t)
 	model.channelPicker.query = "日本語"
 
-	model, _ = model.handleChannelPickerKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	model, _ = model.handleChannelPickerKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if model.channelPicker.query != "日本" {
 		t.Fatalf("query after backspace = %q, want %q", model.channelPicker.query, "日本")
 	}
-	model, _ = model.handleChannelPickerKey(tea.KeyMsg{Type: tea.KeyCtrlH})
+	model, _ = model.handleChannelPickerKey(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
 	if model.channelPicker.query != "日" {
 		t.Fatalf("query after ctrl+h = %q, want %q", model.channelPicker.query, "日")
 	}
-	model, _ = model.handleChannelPickerKey(tea.KeyMsg{Type: tea.KeyCtrlU})
+	model, _ = model.handleChannelPickerKey(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
 	if model.channelPicker.query != "" {
 		t.Fatalf("query after ctrl+u = %q, want empty", model.channelPicker.query)
 	}
@@ -92,9 +92,9 @@ func TestChannelPickerBackspaceRemovesAWholeRune(t *testing.T) {
 func TestChannelPickerSpaceTypesIntoTheQuery(t *testing.T) {
 	model := openChannelPickerModel(t)
 	for _, r := range "delta" {
-		model, _ = model.handleChannelPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		model, _ = model.handleChannelPickerKey(tea.KeyPressMsg{Text: string([]rune{r})})
 	}
-	model, _ = model.handleChannelPickerKey(tea.KeyMsg{Type: tea.KeySpace})
+	model, _ = model.handleChannelPickerKey(tea.KeyPressMsg{Code: tea.KeySpace})
 	if model.channelPicker.query != "delta " {
 		t.Fatalf("query after space = %q, want %q", model.channelPicker.query, "delta ")
 	}
@@ -115,13 +115,13 @@ func TestChannelPickerLeavesAnOutOfRangeSelectionAlone(t *testing.T) {
 	beyond := len(model.channelPickerEntries()) + 50
 	model.channelPicker.selected = beyond
 
-	model, _ = model.handleChannelPickerKey(tea.KeyMsg{Type: tea.KeyLeft})
+	model, _ = model.handleChannelPickerKey(tea.KeyPressMsg{Code: tea.KeyLeft})
 	if model.channelPicker.selected != beyond {
 		t.Fatalf("selected after an ignored key = %d, want %d (unchanged)", model.channelPicker.selected, beyond)
 	}
 
 	before := model.activeChannelName()
-	model, _ = model.handleChannelPickerKey(tea.KeyMsg{Type: tea.KeyEnter})
+	model, _ = model.handleChannelPickerKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if model.channelPicker.open {
 		t.Fatal("channelPicker.open after enter = true, want closed")
 	}
@@ -134,7 +134,7 @@ func TestChannelPickerEscClosesAndClearsTheQuery(t *testing.T) {
 	model := openChannelPickerModel(t)
 	model.channelPicker.query = "gam"
 
-	model, _ = model.handleChannelPickerKey(tea.KeyMsg{Type: tea.KeyEsc})
+	model, _ = model.handleChannelPickerKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if model.channelPicker.open || model.channelPicker.query != "" {
 		t.Fatalf("picker after esc = %#v, want closed and empty", model.channelPicker)
 	}

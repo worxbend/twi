@@ -77,6 +77,13 @@ go run ./cmd/twi chat --mock --channel demo   # 👈 no credentials, no network,
 <p align="center"><img src="docs/assets/screenshots/theme-picker.svg" alt="Full-screen theme picker" width="880"></p>
 </details>
 
+## Automation and recorded history
+
+Use `twi produce` (`-P`), `twi consume` (`-C`), and foreground `twi record`
+for shell workflows. History requires an earlier recorder; it never backfills
+arbitrary Twitch chat. See [Automation](docs/automation.md) for commands, schemas,
+coverage, retention, cursors, and exit codes.
+
 ## 🤔 Why It Exists
 
 Most chat workflows force you back into a browser tab when the rest of your work is already in a terminal. `twi` keeps chat close to your shell, preserves keyboard-first workflows, and treats credentials like production secrets instead of casual config strings.
@@ -544,8 +551,7 @@ one as you move the selection. `up`/`down` and `home`/`end` move, `enter` saves,
 The status bar's LIVE indicator reflects the channel's real Twitch broadcast
 status (polled via Helix "Get Streams" every 60s when `stream_status_mode`
 and Twitch API credentials allow it) — not just the local IRC connection.
-REC reflects `debug_logging` (twi's own debug-log recording), since twi has
-no other "recording" concept. The "chat" throughput figure is derived from
+REC reflects `debug_logging` (twi's own debug-log recording), and is separate from the foreground `twi record` history collector. The "chat" throughput figure is derived from
 actual incoming chat-message bytes, not stream encode bitrate, which Twitch
 does not expose through any public API.
 

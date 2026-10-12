@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -34,19 +34,25 @@ type transport struct {
 	httpClient       *http.Client
 	clientID         string
 	oauthTokenSource func() string
+	retry            RetryPolicy
 }
 
 // newTransport builds the shared plumbing from the fields every Helix
 // client config carries. A nil httpClient falls back to a client with a
 // timeout so a zero-valued config still produces a usable client.
-func newTransport(httpClient *http.Client, clientID string, tokenSource func() string, staticToken string) transport {
+func newTransport(httpClient *http.Client, clientID string, tokenSource func() string, staticToken string, policy ...*RetryPolicy) transport {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: defaultHTTPTimeout}
+	}
+	var selected *RetryPolicy
+	if len(policy) > 0 {
+		selected = policy[0]
 	}
 	return transport{
 		httpClient:       httpClient,
 		clientID:         strings.TrimSpace(clientID),
 		oauthTokenSource: resolveTokenSource(tokenSource, staticToken),
+		retry:            normalizeRetryPolicy(selected),
 	}
 }
 
@@ -142,18 +148,7 @@ type errorLabels struct {
 // responseError turns a non-2xx Helix response into an error whose message is
 // safe to display, reading a bounded amount of the body for detail.
 func (t transport) responseError(resp *http.Response, labels errorLabels) error {
-	detail, err := readSmallBody(resp.Body)
-	if err != nil {
-		return credentialSafeUserError(labels.readAction, err, t.token())
-	}
-	if detail != "" {
-		detail = ": " + detail
-	}
-	wrapped := credentialSafeUserError(
-		labels.action,
-		fmt.Errorf("twitch %s returned HTTP %d%s", labels.endpoint, resp.StatusCode, detail),
-		t.token(),
-	)
+	wrapped := t.httpError(resp, labels)
 	if reason, ok := labels.channelAPIReasons[resp.StatusCode]; ok {
 		return twitch.NewChannelAPIError(reason, resp.StatusCode, wrapped)
 	}
@@ -178,10 +173,12 @@ type ClientConfig struct {
 	OAuthTokenSource func() string
 	// Endpoint overrides the Twitch URL the adapter calls, which is how a
 	// test points one at its own server. It defaults to the real endpoint.
-	Endpoint   string
-	HTTPClient *http.Client
-	ClientID   string
-	OAuthToken string
+	Endpoint       string
+	HTTPClient     *http.Client
+	ClientID       string
+	OAuthToken     string
+	RetryPolicy    *RetryPolicy
+	RequestTimeout time.Duration
 }
 
 // The per-adapter configuration names. They are aliases rather than distinct
@@ -214,19 +211,38 @@ type (
 func getJSON[T any](ctx context.Context, t transport, endpoint string, labels errorLabels) (T, error) {
 	var decoded T
 
-	req, err := t.newGetRequest(ctx, endpoint, "create Twitch "+labels.subject+" request")
-	if err != nil {
-		return decoded, err
-	}
-	resp, err := t.httpClient.Do(req)
-	if err != nil {
-		return decoded, credentialSafeUserError(labels.action, err, t.token())
+	var err error
+	var resp *http.Response
+	for attempt := 0; ; attempt++ {
+		req, requestErr := t.newGetRequest(ctx, endpoint, "create Twitch "+labels.subject+" request")
+		if requestErr != nil {
+			return decoded, requestErr
+		}
+		resp, err = t.httpClient.Do(req)
+		if err != nil {
+			return decoded, credentialSafeUserError(labels.action, err, t.token())
+		}
+		if isSuccess(resp) {
+			break
+		}
+		failure := t.responseError(resp, labels)
+		closeErr := resp.Body.Close()
+		if closeErr != nil {
+			return decoded, credentialSafeUserError("close Twitch error response", closeErr, t.token())
+		}
+		var httpFailure *HTTPError
+		if !errors.As(failure, &httpFailure) || !httpFailure.RetryableRead() || !t.retry.Wait || attempt >= t.retry.MaxRetries {
+			return decoded, failure
+		}
+		delay := rateDelay(httpFailure, t.retry.Now())
+		if delay > t.retry.MaxDelay {
+			return decoded, failure
+		}
+		if err = t.retry.WaitFunc(ctx, delay); err != nil {
+			return decoded, err
+		}
 	}
 	defer resp.Body.Close()
-
-	if !isSuccess(resp) {
-		return decoded, t.responseError(resp, labels)
-	}
 	if err := jsonbody.Decode(resp.Body, maxResponseBodySize, &decoded); err != nil {
 		return decoded, credentialSafeUserError("decode Twitch "+labels.subject+" response", err, t.token())
 	}

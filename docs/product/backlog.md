@@ -479,11 +479,10 @@ Follow-ups: Add config migration when schema changes.
 
 ### Phase 6: Release, Operations, And Quality Gates
 
-Task: Add CI for formatting, tests, vet, race, static analysis, and vulnerability checks.
+Task: Add CI for formatting, tests, vet, race, static analysis, and vulnerability checks. Status: implemented.
 Owner lane: QA/release engineer.
 Goal: Make the documented quality gate automatic.
-Context: Tools are pinned, but no CI workflow is part of the current source
-tree.
+Context: `.github/workflows/ci.yml` implements the credential-free quality gate.
 Files likely touched: `.github/workflows/*`, `docs/development.md`,
 `README.md`.
 Implementation notes: Keep network-heavy or credentialed checks separate from
@@ -493,7 +492,7 @@ Acceptance criteria: Pull requests run `go fmt`/diff check, `go vet ./...`,
 `go tool govulncheck ./...` where feasible.
 Verification: GitHub Actions run; local equivalent commands.
 Risks: Latest Go/toolchain availability can lag in hosted runners.
-Follow-ups: Add release workflow after the gates are stable.
+Follow-ups: Hosted execution remains a separate validation record. Release and Snap workflows already exist.
 
 Task: Add release packaging. Status: implemented for the dry-run artifact path;
 final release-candidate validation remains tracked separately.
@@ -549,3 +548,10 @@ Follow-ups: Add structured bug-report bundle only after privacy review.
   values in errors, config output, doctor output, logs, tests, and snapshots.
 - Prefer `go fmt ./...`, `go vet ./...`, and `go test ./...` as the default
   handoff gate; add race/static/vulnerability checks for wider changes.
+
+## Automation and durable history
+
+Producer, consumer, foreground recorder, and local history commands are implemented
+through UI-independent services and explicit public DTOs. See [Automation](../automation.md) for
+capabilities, examples, coverage/cursor guarantees, retention, and validation limits.
+Live Twitch observation parity requires controlled credentialed validation.

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/render"
 )
@@ -17,23 +17,7 @@ import (
 // more plain (unescaped) whitespace characters and then another escape
 // sequence — the exact signature of centering an already-styled span by
 // padding it afterward instead of padding the plain text before styling it.
-var unstyledGapAfterReset = regexp.MustCompile(`\x1b\[0m\s{2,}\x1b\[`)
-
-// forceColorProfile pins lipgloss's default renderer to TrueColor for the
-// duration of the test and restores whatever profile was active before.
-// Setting env vars alone (CLICOLOR_FORCE, COLORTERM) isn't reliable here:
-// lipgloss/termenv detect and cache the profile once per process, so
-// whichever test in this package first touches lipgloss rendering can lock
-// in "no color" for every test that runs after it in the same `go test`
-// binary, regardless of env vars set later.
-func forceColorProfile(t *testing.T) {
-	t.Helper()
-	original := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() {
-		lipgloss.SetColorProfile(original)
-	})
-}
+var unstyledGapAfterReset = regexp.MustCompile(`\x1b\[(?:0)?m\s{2,}\x1b\[`)
 
 // backgroundOnlySGRCode learns which SGR code this environment's detected
 // color profile actually renders hex as (truecolor, 256-color, or ANSI16),
@@ -50,7 +34,6 @@ func backgroundOnlySGRCode(t *testing.T, hex string) string {
 }
 
 func TestTerminalRowStringPaddingCarriesExplicitBackground(t *testing.T) {
-	forceColorProfile(t)
 	background := "#111018"
 	backgroundCode := backgroundOnlySGRCode(t, background)
 
@@ -69,7 +52,6 @@ func TestTerminalRowStringPaddingCarriesExplicitBackground(t *testing.T) {
 }
 
 func TestBackgroundStyledLineWrapsPlainTextOnly(t *testing.T) {
-	forceColorProfile(t)
 	background := "#111018"
 	backgroundCode := backgroundOnlySGRCode(t, background)
 
@@ -86,7 +68,6 @@ func TestBackgroundStyledLineWrapsPlainTextOnly(t *testing.T) {
 }
 
 func TestSplashViewWordmarkAndTaglineCarryExplicitBackground(t *testing.T) {
-	forceColorProfile(t)
 	cfg := config.Default()
 	background := newMockModel("alpha", cfg).canvasBackground()
 	backgroundCode := backgroundOnlySGRCode(t, background)
@@ -95,7 +76,7 @@ func TestSplashViewWordmarkAndTaglineCarryExplicitBackground(t *testing.T) {
 	model.width, model.height = 88, 22
 	model.frames.splashUntil = time.Now().Add(splashDuration)
 
-	view := model.View()
+	view := model.View().Content
 	// The wordmark/tagline/progress-bar lines are each rendered independently
 	// (their own lipgloss.Style.Render call, each ending in its own ANSI
 	// reset) before being joined; the outer splash Background() wrap alone
@@ -106,7 +87,6 @@ func TestSplashViewWordmarkAndTaglineCarryExplicitBackground(t *testing.T) {
 }
 
 func TestSplashViewWordmarkLineHasNoUnstyledGapBetweenResets(t *testing.T) {
-	forceColorProfile(t)
 	cfg := config.Default()
 	model := newMockModel("alpha", cfg)
 	model.width, model.height = 88, 22
@@ -137,7 +117,6 @@ func TestSplashViewWordmarkLineHasNoUnstyledGapBetweenResets(t *testing.T) {
 }
 
 func TestCenteredPlainLineStyledAsOneUnstyledFreeSpan(t *testing.T) {
-	forceColorProfile(t)
 	style := lipgloss.NewStyle().Foreground(lipgloss.Color("#d97757")).Background(lipgloss.Color("#1a1523")).Bold(true)
 
 	// Fixed correct usage: pad the plain text first, then style the result
@@ -146,7 +125,7 @@ func TestCenteredPlainLineStyledAsOneUnstyledFreeSpan(t *testing.T) {
 	if lipgloss.Width(fixed) != 26 {
 		t.Fatalf("centeredPlainLine visible width = %d, want 26", lipgloss.Width(fixed))
 	}
-	if strings.Count(fixed, "\x1b[0m") != 1 || !strings.HasSuffix(fixed, "\x1b[0m") {
+	if strings.Count(fixed, "\x1b[m") != 1 || !strings.HasSuffix(fixed, "\x1b[m") {
 		t.Fatalf("styling centered plain text left unstyled padding outside the span: %q", fixed)
 	}
 
@@ -156,13 +135,12 @@ func TestCenteredPlainLineStyledAsOneUnstyledFreeSpan(t *testing.T) {
 	// unstyled — demonstrated here for contrast.
 	buggy := lipgloss.JoinVertical(lipgloss.Center, style.Render("twi"), strings.Repeat("x", 26))
 	wordmarkLine := strings.SplitN(buggy, "\n", 2)[0]
-	if strings.HasSuffix(wordmarkLine, "\x1b[0m") {
+	if strings.HasSuffix(wordmarkLine, "\x1b[m") {
 		t.Fatal("expected the pad-after-styling approach to leave trailing unstyled padding, but it didn't — centeredPlainLine's fix may no longer be necessary, or this test's premise is stale")
 	}
 }
 
 func TestBorderedFramesApplyBackgroundToBorderCharacters(t *testing.T) {
-	forceColorProfile(t)
 	cfg := config.Default()
 	background := newMockModel("alpha", cfg).canvasBackground()
 	backgroundCode := backgroundOnlySGRCode(t, background)
@@ -183,77 +161,34 @@ func TestBorderedFramesApplyBackgroundToBorderCharacters(t *testing.T) {
 	}
 }
 
-func TestThemeBackgroundSequenceOnlyWhenInteractive(t *testing.T) {
-	model := newMockModel("alpha", config.Default())
-	if got := model.themeBackgroundSequence(); got != "" {
-		t.Fatalf("themeBackgroundSequence() without terminalOutput = %q, want empty", got)
-	}
-
-	var buf bytes.Buffer
-	model.terminalOutput = &buf
-	want := "\x1b]11;" + model.canvasBackground() + "\x07"
-	if got := model.themeBackgroundSequence(); got != want {
-		t.Fatalf("themeBackgroundSequence() = %q, want %q", got, want)
+func TestViewDeclaresTerminalModesAndThemeBackground(t *testing.T) {
+	for _, splash := range []bool{false, true} {
+		model := newMockModel("alpha", config.Default())
+		model.width, model.height = 88, 22
+		var output bytes.Buffer
+		model.terminalOutput = &output
+		if splash {
+			model.frames.splashUntil = time.Now().Add(splashDuration)
+		}
+		view := model.View()
+		if !view.AltScreen || !view.ReportFocus || view.MouseMode != tea.MouseModeCellMotion || view.DisableBracketedPasteMode {
+			t.Fatalf("terminal modes = %#v", view)
+		}
+		want := lipgloss.Color(model.canvasBackground())
+		if view.BackgroundColor != want {
+			t.Fatalf("background = %v, want %v", view.BackgroundColor, want)
+		}
+		if strings.Contains(view.Content, "\x1b]11;") {
+			t.Fatal("terminal background escaped into content")
+		}
 	}
 }
 
-func TestViewEmbedsThemeBackgroundSequenceWhenInteractive(t *testing.T) {
-	var buf bytes.Buffer
+func TestNoninteractiveViewDoesNotChangeTerminalBackground(t *testing.T) {
 	model := newMockModel("alpha", config.Default())
-	model.width, model.height = 88, 22
-	model.terminalOutput = &buf
-
+	model.mouseEnabled = false
 	view := model.View()
-	want := "\x1b]11;" + model.canvasBackground() + "\x07"
-	if !strings.HasPrefix(view, want) {
-		t.Fatalf("View() does not start with theme background sequence %q:\n%s", want, view)
-	}
-}
-
-func TestViewOmitsThemeBackgroundSequenceWhenNotInteractive(t *testing.T) {
-	model := newMockModel("alpha", config.Default())
-	model.width, model.height = 88, 22
-
-	view := model.View()
-	if strings.Contains(view, "\x1b]11;") {
-		t.Fatalf("non-interactive View() unexpectedly includes OSC 11 sequence:\n%s", view)
-	}
-}
-
-func TestViewEmbedsThemeBackgroundSequenceDuringSplash(t *testing.T) {
-	var buf bytes.Buffer
-	model := newMockModel("alpha", config.Default())
-	model.width, model.height = 88, 22
-	model.terminalOutput = &buf
-	model.frames.splashUntil = time.Now().Add(splashDuration)
-
-	view := model.View()
-	want := "\x1b]11;" + model.canvasBackground() + "\x07"
-	if !strings.HasPrefix(view, want) {
-		t.Fatalf("splash View() does not start with theme background sequence %q:\n%s", want, view)
-	}
-}
-
-func TestPrimeTerminalBackgroundEmitsOSC11(t *testing.T) {
-	var buf bytes.Buffer
-	primeTerminalBackground(&buf, "#111018")
-	if got, want := buf.String(), "\x1b]11;#111018\x07"; got != want {
-		t.Fatalf("primeTerminalBackground output = %q, want %q", got, want)
-	}
-}
-
-func TestPrimeTerminalBackgroundNoopWithEmptyColor(t *testing.T) {
-	var buf bytes.Buffer
-	primeTerminalBackground(&buf, "")
-	if buf.Len() != 0 {
-		t.Fatalf("primeTerminalBackground with empty color wrote %q, want nothing", buf.String())
-	}
-}
-
-func TestResetTerminalBackgroundEmitsOSC111(t *testing.T) {
-	var buf bytes.Buffer
-	resetTerminalBackground(&buf)
-	if got, want := buf.String(), "\x1b]111\x07"; got != want {
-		t.Fatalf("resetTerminalBackground output = %q, want %q", got, want)
+	if view.BackgroundColor != nil || view.MouseMode != tea.MouseModeNone {
+		t.Fatalf("terminal modes = %#v", view)
 	}
 }

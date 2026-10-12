@@ -7,7 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/worxbend/twi/internal/twitch"
 )
 
@@ -166,36 +166,39 @@ func miscErrorMessage(err error) string {
 	}
 }
 
-func (m shellModel) handleMiscKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
+func (m shellModel) handleMiscKey(msg tea.KeyPressMsg) (shellModel, tea.Cmd) {
 	if m.misc.editing {
-		switch msg.Type {
-		case tea.KeyEsc:
+		switch msg.String() {
+		case "esc":
 			m.misc.editing = false
 			m.misc.editBuffer = ""
-		case tea.KeyEnter:
+		case "enter":
 			description := m.misc.editBuffer
 			m.misc.editing = false
 			m.misc.editBuffer = ""
 			return m, m.scheduleCreateMarker(description)
-		case tea.KeyBackspace:
+		case "backspace":
 			if n := len(m.misc.editBuffer); n > 0 {
 				_, size := utf8.DecodeLastRuneInString(m.misc.editBuffer)
 				m.misc.editBuffer = m.misc.editBuffer[:n-size]
 			}
-		case tea.KeySpace:
+		case "space":
 			m.misc.editBuffer += " "
-		case tea.KeyRunes:
-			m.misc.editBuffer += string(msg.Runes)
+		default:
+			if msg.Text == "" {
+				break
+			}
+			m.misc.editBuffer += msg.Text
 		}
 		return m, nil
 	}
 
-	switch msg.Type {
-	case tea.KeyUp:
+	switch msg.String() {
+	case "up":
 		m.moveMiscSelection(-1)
-	case tea.KeyDown, tea.KeyTab:
+	case "down", "tab":
 		m.moveMiscSelection(1)
-	case tea.KeyEnter:
+	case "enter":
 		if !m.misc.loaded || m.misc.loading || m.misc.creating {
 			return m, nil
 		}
@@ -203,7 +206,7 @@ func (m shellModel) handleMiscKey(msg tea.KeyMsg) (shellModel, tea.Cmd) {
 		m.misc.editBuffer = ""
 		m.misc.createErr = ""
 		m.misc.createOK = false
-	case tea.KeyEsc:
+	case "esc":
 		m.misc.createErr = ""
 		m.misc.createOK = false
 	}

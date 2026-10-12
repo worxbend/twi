@@ -59,16 +59,17 @@ type EventKind string
 // not an adapter's private enum, and a future transport's failures reaching
 // the user as silence is a worse outcome than one unused constant.
 const (
-	EventMessage    EventKind = "message"
-	EventNotice     EventKind = "notice"
-	EventUserNotice EventKind = "user_notice"
-	EventRoomState  EventKind = "room_state"
-	EventModeration EventKind = "moderation"
-	EventUserState  EventKind = "user_state"
-	EventMembership EventKind = "membership"
-	EventConnection EventKind = "connection"
-	EventRaw        EventKind = "raw"
-	EventError      EventKind = "error"
+	EventChannelReady EventKind = "channel_ready"
+	EventMessage      EventKind = "message"
+	EventNotice       EventKind = "notice"
+	EventUserNotice   EventKind = "user_notice"
+	EventRoomState    EventKind = "room_state"
+	EventModeration   EventKind = "moderation"
+	EventUserState    EventKind = "user_state"
+	EventMembership   EventKind = "membership"
+	EventConnection   EventKind = "connection"
+	EventRaw          EventKind = "raw"
+	EventError        EventKind = "error"
 )
 
 type Notice struct {
@@ -91,21 +92,26 @@ type Notice struct {
 }
 
 type UserNotice struct {
-	ID          string
-	Channel     string
-	RoomID      string
-	Timestamp   time.Time
-	AuthorLogin string
-	AuthorID    string
-	DisplayName string
-	AuthorColor string
-	Badges      []Badge
-	Text        string
-	SystemText  string
-	MessageID   string
-	Params      map[string]string
-	Emotes      []Emote
-	Fragments   []MessageFragment
+	SourceBadges       []Badge
+	DeliveryID         string
+	SourceChannelID    string
+	SourceChannelLogin string
+	SourceMessageID    string
+	ID                 string
+	Channel            string
+	RoomID             string
+	Timestamp          time.Time
+	AuthorLogin        string
+	AuthorID           string
+	DisplayName        string
+	AuthorColor        string
+	Badges             []Badge
+	Text               string
+	SystemText         string
+	MessageID          string
+	Params             map[string]string
+	Emotes             []Emote
+	Fragments          []MessageFragment
 	// RawTags is retained only for diagnostics/debug views.
 	RawTags map[string]string
 }
@@ -119,15 +125,27 @@ type RoomState struct {
 }
 
 type ModerationEvent struct {
-	Type            ModerationType
-	Channel         string
-	RoomID          string
-	Timestamp       time.Time
-	TargetUserID    string
-	TargetLogin     string
-	TargetMessageID string
-	BanDuration     time.Duration
-	Text            string
+	// Parameters contains only curated action-specific settings, never raw payloads or deleted bodies.
+	Parameters         map[string]string
+	ModeratorName      string
+	TargetName         string
+	ExpiresAt          time.Time
+	SourceChannelID    string
+	SourceChannelLogin string
+	Action             string
+	ModeratorID        string
+	ModeratorLogin     string
+	Reason             string
+	DeliveryID         string
+	Type               ModerationType
+	Channel            string
+	RoomID             string
+	Timestamp          time.Time
+	TargetUserID       string
+	TargetLogin        string
+	TargetMessageID    string
+	BanDuration        time.Duration
+	Text               string
 	// RawTags is retained only for diagnostics/debug views.
 	RawTags map[string]string
 }
@@ -135,10 +153,12 @@ type ModerationEvent struct {
 type ModerationType string
 
 const (
-	ModerationChatCleared    ModerationType = "chat_cleared"
-	ModerationUserBanned     ModerationType = "user_banned"
-	ModerationUserTimedOut   ModerationType = "user_timed_out"
-	ModerationMessageDeleted ModerationType = "message_deleted"
+	ModerationAction              ModerationType = "moderation_action"
+	ModerationChatCleared         ModerationType = "chat_cleared"
+	ModerationUserMessagesCleared ModerationType = "user_messages_cleared"
+	ModerationUserBanned          ModerationType = "user_banned"
+	ModerationUserTimedOut        ModerationType = "user_timed_out"
+	ModerationMessageDeleted      ModerationType = "message_deleted"
 )
 
 type UserState struct {

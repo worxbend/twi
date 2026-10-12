@@ -34,7 +34,7 @@ var _ twitch.FollowerLookup = (*FollowersClient)(nil)
 func NewFollowersClient(cfg FollowersClientConfig) *FollowersClient {
 	return &FollowersClient{
 		endpoint:  endpointOrDefault(cfg.Endpoint, defaultHelixChannelFollowersURL),
-		transport: newTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken),
+		transport: newTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken, cfg.RetryPolicy),
 	}
 }
 

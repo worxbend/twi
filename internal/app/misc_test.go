@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/twitch"
 	"github.com/worxbend/twi/internal/twitch/helix"
@@ -39,12 +39,12 @@ func TestTabSwitchAltThreeOpensMiscTab(t *testing.T) {
 	model := newMockModel("example", config.Default())
 	model.width, model.height = 88, 20
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}, Alt: true})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: '3', Mod: tea.ModAlt})
 	model = updated.(shellModel)
 	if model.activeTab != tabMisc {
 		t.Fatalf("activeTab after alt+3 = %v, want tabMisc", model.activeTab)
 	}
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "*3:Misc") {
 		t.Fatalf("view missing active misc tab marker:\n%s", view)
 	}
@@ -126,18 +126,18 @@ func TestMiscCreateMarkerFlow(t *testing.T) {
 	model.selfBroadcasterID = "123"
 	model.misc.loaded = true
 
-	updated, _ := model.handleMiscKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := model.handleMiscKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated
 	if !model.misc.editing {
 		t.Fatal("editing = false after enter, want true")
 	}
 
 	for _, r := range "big play" {
-		updated, _ = model.handleMiscKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		updated, _ = model.handleMiscKey(tea.KeyPressMsg{Text: string([]rune{r})})
 		model = updated
 	}
 
-	updated, cmd := model.handleMiscKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.handleMiscKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = updated
 	if model.misc.editing {
 		t.Fatal("editing = true after commit, want false")

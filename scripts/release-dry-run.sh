@@ -6,7 +6,7 @@ usage() {
 Usage: scripts/release-dry-run.sh [--out DIR] [--image NAME] [--targets LIST] [--skip-docker]
 
 Build trimmed twi binaries for the supported release targets, emit SHA-256
-checksums beside each binary, smoke the native binary, build the Docker image,
+checksums, CycloneDX SBOMs and provenance beside each binary, smoke the native binary, build the Docker image,
 and smoke the container. LIST is a space-separated GOOS/GOARCH list.
 
 Environment overrides:
@@ -69,6 +69,22 @@ done
 
 cd "$repo_root"
 
+# Reject unsupported or duplicate targets before creating output files.
+target_count=0
+seen_targets=
+for selected_target in $targets; do
+ case "$selected_target" in
+  linux/amd64|linux/arm64|darwin/amd64|darwin/arm64) ;;
+  *) echo "unsupported release target: $selected_target" >&2; exit 2 ;;
+ esac
+ case " $seen_targets " in
+  *" $selected_target "*) echo "duplicate release target: $selected_target" >&2; exit 2 ;;
+ esac
+ seen_targets="$seen_targets $selected_target"
+ target_count=$((target_count+1))
+done
+if [ "$target_count" -eq 0 ]; then echo "at least one release target is required" >&2; exit 2; fi
+
 runtime_dir=$(mktemp -d "${TMPDIR:-/tmp}/twi-release-runtime.XXXXXX")
 cleanup() {
 	rm -rf "$runtime_dir"
@@ -81,11 +97,16 @@ if [ -z "$toolchain" ]; then
 	exit 1
 fi
 go_version=${TWI_RELEASE_GO_VERSION:-"${toolchain#go}"}
+release_version=${TWI_RELEASE_VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo development)}
+case "$release_version" in
+ *[!a-zA-Z0-9._+-]*) echo "release version contains unsupported characters" >&2; exit 2 ;;
+esac
 
 export GOTOOLCHAIN=${GOTOOLCHAIN:-auto}
 export TERM=${TERM:-xterm-256color}
 export XDG_CONFIG_HOME="$runtime_dir/config"
 export XDG_CACHE_HOME="$runtime_dir/cache"
+export XDG_STATE_HOME="$runtime_dir/state"
 export TWI_TWITCH_USERNAME=
 export TWI_TWITCH_OAUTH_TOKEN=
 export TWI_TWITCH_REFRESH_TOKEN=
@@ -97,7 +118,7 @@ export TWITCH_REFRESH_TOKEN=
 export TWITCH_CLIENT_ID=
 export TWITCH_CLIENT_SECRET=
 
-mkdir -p "$out_dir" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
+mkdir -p "$out_dir" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME"
 
 checksum_file() {
 	file=$1
@@ -124,6 +145,8 @@ verify_checksum() {
 	fi
 }
 
+"$script_dir/check-toolchain.sh"
+
 native_goos=$(go env GOOS)
 native_goarch=$(go env GOARCH)
 native_bin=
@@ -145,7 +168,7 @@ for target in $targets; do
 
 	echo "building $target -> $bin"
 	env CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
-		go build -trimpath -ldflags="-s -w" -o "$bin" ./cmd/twi
+		go build -trimpath -ldflags="-s -w -X github.com/worxbend/twi/internal/cli.buildVersion=$release_version" -o "$bin" ./cmd/twi
 	checksum_file "$bin"
 	verify_checksum "$bin"
 
@@ -153,6 +176,14 @@ for target in $targets; do
 		native_bin=$bin
 	fi
 done
+
+cp "$script_dir/install.sh" "$out_dir/install.sh"
+python3 "$script_dir/release-metadata.py" "$out_dir" --version "$release_version"
+if command -v sha256sum >/dev/null 2>&1; then
+ (cd "$out_dir" && sha256sum -c SHA256SUMS)
+else
+ (cd "$out_dir" && shasum -a 256 -c SHA256SUMS)
+fi
 
 if [ -n "$native_bin" ]; then
 	echo "smoking native binary $native_bin"
@@ -170,7 +201,7 @@ if [ "$skip_docker" -eq 0 ]; then
 	fi
 
 	echo "building Docker image $image with Go $go_version"
-	docker build --build-arg "GO_VERSION=$go_version" -t "$image" "$repo_root"
+	docker build --build-arg "GO_VERSION=$go_version" --build-arg "TWI_VERSION=$release_version" -t "$image" "$repo_root"
 
 	echo "smoking Docker image $image"
 	docker run --rm \
@@ -209,6 +240,8 @@ if [ "$skip_docker" -eq 0 ]; then
 		-e TWITCH_CLIENT_ID= \
 		-e TWITCH_CLIENT_SECRET= \
 		"$image" chat --mock --channel example >/dev/null
+	TWI_HISTORY_SMOKE_IMAGE="$image" "$script_dir/history-disk-full-smoke.sh"
+	"$script_dir/container-recorder-smoke.sh" "$image"
 else
 	echo "skipping Docker build and smoke checks"
 fi

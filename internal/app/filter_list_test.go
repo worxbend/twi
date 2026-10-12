@@ -4,7 +4,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestFilterListMoveWrapsAroundBothEnds(t *testing.T) {
@@ -129,7 +129,7 @@ func TestFilterListDeleteRuneMatchesByteSlicing(t *testing.T) {
 func TestHandleFilterListKeyCoversTheSharedKeys(t *testing.T) {
 	tests := []struct {
 		name         string
-		msg          tea.KeyMsg
+		msg          tea.KeyPressMsg
 		start        filterList
 		count        int
 		wantQuery    string
@@ -137,56 +137,56 @@ func TestHandleFilterListKeyCoversTheSharedKeys(t *testing.T) {
 	}{
 		{
 			name:         "up wraps to the last row",
-			msg:          tea.KeyMsg{Type: tea.KeyUp},
+			msg:          tea.KeyPressMsg{Code: tea.KeyUp},
 			start:        filterList{selected: 0},
 			count:        4,
 			wantSelected: 3,
 		},
 		{
 			name:         "down advances",
-			msg:          tea.KeyMsg{Type: tea.KeyDown},
+			msg:          tea.KeyPressMsg{Code: tea.KeyDown},
 			start:        filterList{selected: 0},
 			count:        4,
 			wantSelected: 1,
 		},
 		{
 			name:         "tab advances like down",
-			msg:          tea.KeyMsg{Type: tea.KeyTab},
+			msg:          tea.KeyPressMsg{Code: tea.KeyTab},
 			start:        filterList{selected: 0},
 			count:        4,
 			wantSelected: 1,
 		},
 		{
 			name:      "runes are appended",
-			msg:       tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("ok")},
+			msg:       tea.KeyPressMsg{Text: string([]rune("ok"))},
 			start:     filterList{query: "so", selected: 2},
 			count:     4,
 			wantQuery: "sook",
 		},
 		{
 			name:      "space is typed, not swallowed",
-			msg:       tea.KeyMsg{Type: tea.KeySpace},
+			msg:       tea.KeyPressMsg{Code: tea.KeySpace},
 			start:     filterList{query: "two", selected: 2},
 			count:     4,
 			wantQuery: "two ",
 		},
 		{
 			name:      "backspace trims a rune",
-			msg:       tea.KeyMsg{Type: tea.KeyBackspace},
+			msg:       tea.KeyPressMsg{Code: tea.KeyBackspace},
 			start:     filterList{query: "pog🎉", selected: 2},
 			count:     4,
 			wantQuery: "pog",
 		},
 		{
 			name:      "ctrl+h is backspace on terminals that send it",
-			msg:       tea.KeyMsg{Type: tea.KeyCtrlH},
+			msg:       tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl},
 			start:     filterList{query: "pog", selected: 2},
 			count:     4,
 			wantQuery: "po",
 		},
 		{
 			name:      "ctrl+u clears the query",
-			msg:       tea.KeyMsg{Type: tea.KeyCtrlU},
+			msg:       tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl},
 			start:     filterList{query: "pog", selected: 2},
 			count:     4,
 			wantQuery: "",
@@ -197,7 +197,7 @@ func TestHandleFilterListKeyCoversTheSharedKeys(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			list := test.start
 			if !handleFilterListKey(test.msg, &list, test.count) {
-				t.Fatalf("handleFilterListKey(%v) reported the key as unhandled", test.msg.Type)
+				t.Fatalf("handleFilterListKey(%v) reported the key as unhandled", test.msg.Code)
 			}
 			if list.query != test.wantQuery {
 				t.Fatalf("query = %q, want %q", list.query, test.wantQuery)
@@ -212,9 +212,9 @@ func TestHandleFilterListKeyCoversTheSharedKeys(t *testing.T) {
 func TestHandleFilterListKeyLeavesOtherKeysAlone(t *testing.T) {
 	// Escape and enter mean something different in every overlay, so the
 	// shared helper must report them as unhandled and touch nothing.
-	for _, keyType := range []tea.KeyType{tea.KeyEsc, tea.KeyEnter, tea.KeyLeft, tea.KeyHome} {
+	for _, keyType := range []rune{tea.KeyEsc, tea.KeyEnter, tea.KeyLeft, tea.KeyHome} {
 		list := filterList{query: "pog", selected: 2}
-		if handleFilterListKey(tea.KeyMsg{Type: keyType}, &list, 4) {
+		if handleFilterListKey(tea.KeyPressMsg{Code: keyType}, &list, 4) {
 			t.Fatalf("handleFilterListKey(%v) reported the key as handled, want unhandled", keyType)
 		}
 		if list.query != "pog" || list.selected != 2 {

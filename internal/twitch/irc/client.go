@@ -15,6 +15,7 @@ import (
 	gempir "github.com/gempir/go-twitch-irc/v4"
 	"github.com/worxbend/twi/internal/auth"
 	"github.com/worxbend/twi/internal/debuglog"
+	"github.com/worxbend/twi/internal/sendquota"
 	"github.com/worxbend/twi/internal/twitch"
 	"github.com/worxbend/twi/internal/twitch/jsonbody"
 )
@@ -37,17 +38,24 @@ const (
 // Config contains the credentials and channels needed to open a Twitch IRC
 // session. OAuthToken must be an IRC token with the oauth: prefix.
 type Config struct {
-	Username     string
-	OAuthToken   string
-	RefreshToken string
-	ClientID     string
-	ClientSecret string
-	TokenURL     string
-	HTTPClient   *http.Client
-	Channels     []string
-	Buffer       int
-	Now          func() time.Time
-	DebugLogger  debuglog.Logger
+	// ValidateOAuth performs bounded hourly token maintenance when supplied.
+	ValidateOAuth      func(context.Context) error
+	ValidationInterval time.Duration
+	// RefreshOAuth delegates refresh to the shared account owner when supplied.
+	RefreshOAuth func(context.Context, time.Time) (OAuthRefresh, error)
+	// ReservePermit overrides local process quota coordination for embedded callers and tests.
+	ReservePermit func(context.Context, string, string) error
+	Username      string
+	OAuthToken    string
+	RefreshToken  string
+	ClientID      string
+	ClientSecret  string
+	TokenURL      string
+	HTTPClient    *http.Client
+	Channels      []string
+	Buffer        int
+	Now           func() time.Time
+	DebugLogger   debuglog.Logger
 	// OnOAuthRefresh is called after a successful auth refresh and before the
 	// replacement IRC session connects. Callback errors are reported as
 	// redacted warnings and do not prevent reconnect with the refreshed token.
@@ -94,16 +102,21 @@ type chatSession interface {
 
 // Client adapts go-twitch-irc callbacks into twi's normalized event stream.
 type Client struct {
-	client         chatSession
-	username       string
-	token          string
-	channels       []string
-	buffer         int
-	now            func() time.Time
-	refresh        oauthRefreshConfig
-	logger         debuglog.Logger
-	onOAuthRefresh func(context.Context, OAuthRefresh) error
-	mu             sync.RWMutex
+	channelLease       *sendquota.ChannelLease
+	validateOAuth      func(context.Context) error
+	validationInterval time.Duration
+	reservePermit      func(context.Context, string, string) error
+	roles              map[string]sendquota.Role
+	client             chatSession
+	username           string
+	token              string
+	channels           []string
+	buffer             int
+	now                func() time.Time
+	refresh            oauthRefreshConfig
+	logger             debuglog.Logger
+	onOAuthRefresh     func(context.Context, OAuthRefresh) error
+	mu                 sync.RWMutex
 
 	done      chan struct{}
 	closeOnce sync.Once
@@ -120,7 +133,9 @@ type Client struct {
 	// go-twitch-irc's Say/Reply queue a line and return nothing, so this is
 	// the only way to tell a send that reached Twitch from one written into a
 	// buffer on a dead socket.
-	connected atomic.Bool
+	connected     atomic.Bool
+	registrations atomic.Uint64
+	lastEventAt   atomic.Int64
 }
 
 var (
@@ -154,6 +169,9 @@ func NewClient(cfg Config) (*Client, error) {
 	// --channel/--channels connects to Twitch and waits for the /channels
 	// picker to join the first one.
 	channels := normalizeChannels(cfg.Channels)
+	if len(channels) > 100 {
+		return nil, errors.New("normal Twitch accounts support at most 100 joined channels")
+	}
 
 	buffer := cfg.Buffer
 	if buffer <= 0 {
@@ -164,6 +182,7 @@ func NewClient(cfg Config) (*Client, error) {
 		now = time.Now
 	}
 
+	permit := cfg.ReservePermit
 	client := newSession(username, token, channels)
 	logger := cfg.DebugLogger.WithSecrets(
 		auth.NewSecret(token),
@@ -172,13 +191,18 @@ func NewClient(cfg Config) (*Client, error) {
 	)
 
 	return &Client{
-		client:   client,
-		username: username,
-		token:    token,
-		channels: channels,
-		buffer:   buffer,
-		now:      now,
+		validateOAuth:      cfg.ValidateOAuth,
+		validationInterval: cfg.ValidationInterval,
+		reservePermit:      permit,
+		roles:              make(map[string]sendquota.Role),
+		client:             client,
+		username:           username,
+		token:              token,
+		channels:           channels,
+		buffer:             buffer,
+		now:                now,
 		refresh: oauthRefreshConfig{
+			RefreshOAuth: cfg.RefreshOAuth,
 			ClientID:     cfg.ClientID,
 			ClientSecret: cfg.ClientSecret,
 			RefreshToken: cfg.RefreshToken,
@@ -201,10 +225,28 @@ func (c *Client) Connect(ctx context.Context) (<-chan twitch.Event, error) {
 		ctx = context.Background()
 	}
 
-	events := make(chan twitch.Event, c.buffer)
 	c.mu.RLock()
-	channelCount := len(c.channels)
+	initialChannels := append([]string(nil), c.channels...)
 	c.mu.RUnlock()
+	lease, err := sendquota.ReserveChannels(ctx, strings.ToLower(c.username), initialChannels)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	select {
+	case <-c.done:
+		c.mu.Unlock()
+		_ = lease.Close()
+		return nil, gempir.ErrClientDisconnected
+	default:
+	}
+	c.channelLease = lease
+	c.mu.Unlock()
+	if reclaimed := lease.ReclaimedCount(); reclaimed > 0 {
+		c.logger.Log(ctx, "twitch.quota.stale_channel_leases_reclaimed", slog.Int("leases", reclaimed))
+	}
+	events := make(chan twitch.Event, c.buffer)
+	channelCount := len(initialChannels)
 	c.logger.Log(ctx, "twitch.irc.connect.start",
 		slog.Int("channel_count", channelCount),
 		slog.Int("buffer", c.buffer),
@@ -215,17 +257,22 @@ func (c *Client) Connect(ctx context.Context) (<-chan twitch.Event, error) {
 	// stops keepalives and Twitch closes the connection. Losing the oldest
 	// unread event is a far smaller failure than losing the session.
 	emit := func(event twitch.Event) {
+		if event.Kind != twitch.EventConnection {
+			c.lastEventAt.Store(c.now().UnixNano())
+		}
 		// Track registration state on the way past: Send has no other way to
 		// know whether the socket is live.
 		if event.Kind == twitch.EventConnection {
 			switch event.Connection.Type {
 			case twitch.ConnectionEventConnect:
+				c.resetRoles()
 				c.connected.Store(true)
 			case twitch.ConnectionEventReconnect, twitch.ConnectionEventDisconnect:
 				// A reconnect means the registered session is gone: until the
 				// replacement completes registration, Send must not report a
 				// queue into a buffer that may never flush as success.
 				c.connected.Store(false)
+				c.resetRoles()
 			}
 		}
 		select {
@@ -258,6 +305,52 @@ func (c *Client) Connect(ctx context.Context) (<-chan twitch.Event, error) {
 
 	go func() {
 		defer close(events)
+		defer lease.Close()
+		maintenance, cancelMaintenance := context.WithCancel(ctx)
+		var checking sync.WaitGroup
+		defer func() { cancelMaintenance(); checking.Wait() }()
+		checking.Add(1)
+		go func() {
+			defer checking.Done()
+			select {
+			case <-maintenance.Done():
+				return
+			case <-c.done:
+				return
+			case err := <-lease.Errors():
+				emit(twitch.Event{Kind: twitch.EventError, Err: err})
+				_ = c.Close()
+			}
+		}()
+		if c.validateOAuth != nil {
+			checking.Add(1)
+			go func() {
+				defer checking.Done()
+				interval := c.validationInterval
+				if interval <= 0 {
+					interval = time.Hour
+				}
+				ticker := time.NewTicker(interval)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-maintenance.Done():
+						return
+					case <-c.done:
+						return
+					case <-ticker.C:
+						bounded, cancel := context.WithTimeout(maintenance, 15*time.Second)
+						err := c.validateOAuth(bounded)
+						cancel()
+						if err != nil {
+							emit(twitch.Event{Kind: twitch.EventError, Err: credentialSafeError(err)})
+							_ = c.Close()
+							return
+						}
+					}
+				}
+			}()
+		}
 
 		err := c.connectWithAuthRefresh(ctx, emit, client)
 		if err == nil || errors.Is(err, gempir.ErrClientDisconnected) {
@@ -286,13 +379,26 @@ func (c *Client) registerHandlers(client chatSession, emit func(twitch.Event)) {
 			return
 		default:
 		}
+		if c.registrations.Add(1) > 1 {
+			at := c.now()
+			if last := c.lastEventAt.Load(); last > 0 {
+				at = time.Unix(0, last)
+			}
+			emit(twitch.Event{Kind: twitch.EventConnection, Connection: twitch.ConnectionEvent{Type: twitch.ConnectionEventReconnect, At: at, Reason: "IRC connection replaced; disconnected interval cannot be replayed"}})
+		}
 		emit(NormalizeConnect(c.now()))
 	})
 	client.OnPrivateMessage(func(message gempir.PrivateMessage) {
 		emit(NormalizePrivateMessage(message))
 	})
 	client.OnNoticeMessage(func(message gempir.NoticeMessage) {
-		emit(NormalizeNoticeMessage(message))
+		event := NormalizeNoticeMessage(message)
+		// The adapter owns configured auth recovery. Readers only see terminal
+		// authorization failure after refresh is unavailable or exhausted.
+		if event.Notice.AuthFailed && c.refresh.available() {
+			return
+		}
+		emit(event)
 	})
 	client.OnUserNoticeMessage(func(message gempir.UserNoticeMessage) {
 		emit(NormalizeUserNoticeMessage(message))
@@ -307,12 +413,28 @@ func (c *Client) registerHandlers(client chatSession, emit func(twitch.Event)) {
 		emit(NormalizeClearMessage(message))
 	})
 	client.OnUserStateMessage(func(message gempir.UserStateMessage) {
+		c.observeOwnRoleFrom(client, message)
 		emit(NormalizeUserStateMessage(message))
 	})
 	client.OnUserJoinMessage(func(message gempir.UserJoinMessage) {
 		emit(NormalizeUserJoinMessage(message, c.now()))
 	})
 	client.OnUserPartMessage(func(message gempir.UserPartMessage) {
+		if strings.EqualFold(message.User, c.username) {
+			c.mu.Lock()
+			delete(c.roles, twitch.ChannelKey(message.Channel))
+			lease := c.channelLease
+			c.mu.Unlock()
+			if lease != nil {
+				bounded, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				err := lease.Remove(bounded, normalizeChannel(message.Channel))
+				cancel()
+				if err != nil && !errors.Is(err, sendquota.ErrLeaseClosed) {
+					emit(twitch.Event{Kind: twitch.EventError, Err: err})
+					_ = c.Close()
+				}
+			}
+		}
 		emit(NormalizeUserPartMessage(message, c.now()))
 	})
 	client.OnReconnectMessage(func(message gempir.ReconnectMessage) {
@@ -369,7 +491,12 @@ func (c *Client) connectWithAuthRefresh(ctx context.Context, emit func(twitch.Ev
 var errAuthRetryable = errors.New("twitch IRC auth refreshed; retry connect")
 
 func (c *Client) connectOnceWithAuthRefresh(ctx context.Context, emit func(twitch.Event), client chatSession) error {
-	err := client.Connect()
+	var err error
+	if contextual, ok := client.(interface{ ConnectContext(context.Context) error }); ok {
+		err = contextual.ConnectContext(ctx)
+	} else {
+		err = client.Connect()
+	}
 	if !errors.Is(err, gempir.ErrLoginAuthenticationFailed) || !c.refresh.available() {
 		return err
 	}
@@ -448,7 +575,10 @@ func (c *Client) Send(ctx context.Context, message twitch.OutboundMessage) error
 	}
 
 	if replyTo == "" {
-		if err := c.limiter.allow(channel, wire); err != nil {
+		if err := c.limiter.allowForRole(channel, wire, c.roleForChannel(channel)); err != nil {
+			return err
+		}
+		if err := c.reserveSend(ctx, channel); err != nil {
 			return err
 		}
 		c.currentClient().Say(channel, wire)
@@ -457,7 +587,10 @@ func (c *Client) Send(ctx context.Context, message twitch.OutboundMessage) error
 	// Replies count against the same allowance, but a reply to a different
 	// message is not a duplicate even with identical text, so the parent ID
 	// is part of the key.
-	if err := c.limiter.allow(channel+"\x00"+replyTo, wire); err != nil {
+	if err := c.limiter.allowForRole(channel+"\x00"+replyTo, wire, c.roleForChannel(channel)); err != nil {
+		return err
+	}
+	if err := c.reserveSend(ctx, channel); err != nil {
 		return err
 	}
 	c.currentClient().Reply(channel, replyTo, wire)
@@ -495,11 +628,23 @@ func (c *Client) Join(ctx context.Context, channels ...string) error {
 		return errMissingChannel
 	}
 	c.mu.Lock()
+	pending := append([]string(nil), c.channels...)
 	for _, channel := range normalized {
-		if !containsChannel(c.channels, channel) {
-			c.channels = append(c.channels, channel)
+		if !containsChannel(pending, channel) {
+			pending = append(pending, channel)
 		}
 	}
+	if len(pending) > 100 {
+		c.mu.Unlock()
+		return errors.New("normal Twitch accounts support at most 100 joined channels")
+	}
+	if c.channelLease != nil {
+		if err := c.channelLease.Add(ctx, normalized); err != nil {
+			c.mu.Unlock()
+			return err
+		}
+	}
+	c.channels = pending
 	c.mu.Unlock()
 	c.currentClient().Join(normalized...)
 	c.logger.Log(ctx, "twitch.irc.join", slog.Int("channel_count", len(normalized)))
@@ -521,6 +666,7 @@ func (c *Client) Depart(ctx context.Context, channel string) error {
 		}
 	}
 	c.channels = remaining
+	delete(c.roles, target)
 	c.mu.Unlock()
 	c.currentClient().Depart(target)
 	c.logger.Log(ctx, "twitch.irc.depart", slog.String("channel", target))
@@ -544,6 +690,16 @@ func (c *Client) Close() error {
 		if errors.Is(err, gempir.ErrConnectionIsNotOpen) {
 			err = nil
 		}
+		c.mu.RLock()
+		lease := c.channelLease
+		c.mu.RUnlock()
+		if lease != nil {
+			leaseErr := lease.Close()
+			if err == nil {
+				err = leaseErr
+			}
+		}
+
 	})
 	return err
 }
@@ -555,20 +711,7 @@ func (c *Client) currentClient() chatSession {
 }
 
 var newSession = func(username, token string, channels []string) chatSession {
-	client := gempir.NewClient(username, token)
-	// Tags carry badges, colors, emote spans, and reply metadata; commands
-	// carry moderation and room-state events; membership carries the
-	// JOIN/PART lines the chatter roster is built from. Membership is
-	// best-effort on Twitch's side - it is batched, delayed, and dropped
-	// entirely for large channels - but without requesting it here twi
-	// receives none at all.
-	client.Capabilities = []string{
-		gempir.TagsCapability,
-		gempir.CommandsCapability,
-		gempir.MembershipCapability,
-	}
-	client.Join(channels...)
-	return client
+	return newManagedSession(username, token, channels)
 }
 
 func (c *Client) persistOAuthRefresh(ctx context.Context, refreshed OAuthRefresh, oldToken, oldRefreshToken string, emit func(twitch.Event)) error {
@@ -637,7 +780,7 @@ func normalizeChannels(values []string) []string {
 	channels := make([]string, 0, len(values))
 	for _, value := range values {
 		channel := normalizeChannel(value)
-		if channel != "" {
+		if channel != "" && !containsChannel(channels, channel) {
 			channels = append(channels, channel)
 		}
 	}
@@ -674,6 +817,7 @@ func stripControlChars(value string) string {
 }
 
 type oauthRefreshConfig struct {
+	RefreshOAuth func(context.Context, time.Time) (OAuthRefresh, error)
 	ClientID     string
 	ClientSecret string
 	RefreshToken string
@@ -699,6 +843,9 @@ func (c oauthRefreshConfig) available() bool {
 }
 
 func (c oauthRefreshConfig) refresh(ctx context.Context, refreshedAt time.Time) (OAuthRefresh, error) {
+	if c.RefreshOAuth != nil {
+		return c.RefreshOAuth(ctx, refreshedAt)
+	}
 	endpoint := strings.TrimSpace(c.TokenURL)
 	if endpoint == "" {
 		endpoint = defaultOAuthTokenURL
@@ -772,4 +919,66 @@ func (c oauthRefreshConfig) refresh(ctx context.Context, refreshedAt time.Time) 
 		result.ExpiresAt = refreshedAt.Add(time.Duration(decoded.ExpiresIn) * time.Second)
 	}
 	return result, nil
+}
+
+// observeOwnRole accepts only Twitch's authenticated USERSTATE callback. A
+// PRIVMSG author's badges never grant the sender privileges. Empty badges revoke
+// prior privilege; departed channels and replacement sessions retain no role.
+func (c *Client) observeOwnRole(message gempir.UserStateMessage) {
+	c.observeOwnRoleFrom(nil, message)
+}
+func (c *Client) observeOwnRoleFrom(expected chatSession, message gempir.UserStateMessage) {
+	channel := twitch.ChannelKey(message.Channel)
+	role := sendquota.RoleNormal
+	for badge, version := range message.User.Badges {
+		if version <= 0 {
+			continue
+		}
+		switch badge {
+		case "broadcaster":
+			role = sendquota.RoleBroadcaster
+		case "moderator":
+			if role != sendquota.RoleBroadcaster {
+				role = sendquota.RoleModerator
+			}
+		case "vip":
+			if role == sendquota.RoleNormal {
+				role = sendquota.RoleVIP
+			}
+		}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if expected != nil && c.client != expected {
+		return
+	}
+	if !containsChannel(c.channels, channel) {
+		return
+	}
+	if c.roles == nil {
+		c.roles = make(map[string]sendquota.Role)
+	}
+	c.roles[channel] = role
+}
+func (c *Client) resetRoles() { c.mu.Lock(); clear(c.roles); c.mu.Unlock() }
+func (c *Client) roleForChannel(channel string) sendquota.Role {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	role := c.roles[twitch.ChannelKey(channel)]
+	if role == "" {
+		return sendquota.RoleNormal
+	}
+	return role
+}
+func (c *Client) reserveSend(ctx context.Context, channel string) error {
+	var err error
+	if c.reservePermit != nil {
+		err = c.reservePermit(ctx, strings.ToLower(c.username), channel)
+	} else {
+		err = sendquota.AcquireForRole(ctx, strings.ToLower(c.username), channel, c.roleForChannel(channel), true, 0)
+	}
+	if errors.Is(err, sendquota.ErrLimited) {
+		return twitch.ErrRateLimited
+	}
+	return err
 }

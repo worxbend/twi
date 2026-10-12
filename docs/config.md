@@ -379,3 +379,14 @@ Current behavior:
 Future target:
 
 - Cache sizing and pruning configuration.
+
+## Automation and durable history
+
+Producer, consumer, foreground recorder, and local history commands are implemented
+through UI-independent services and explicit public DTOs. See [Automation](automation.md) for
+capabilities, examples, coverage/cursor guarantees, retention, and validation limits.
+Live Twitch observation parity requires controlled credentialed validation.
+
+Nonpositive `scrollback_limit` values use the default 2,000-message cap. The TUI
+never selects unlimited scrollback accidentally. Pending sends are bounded at
+100 per channel; queue pressure keeps the draft and shows feedback.

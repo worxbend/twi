@@ -1,24 +1,24 @@
 # Authentication
 
-This document describes the authentication model for `twi`. It covers the current environment/config-file credential path for Twitch IRC, the OAuth login command, and the restrictive Unix credential-file fallback. To register your own Twitch application and get its client ID/secret (required for `twi login` and Twitch-API features), read [register-twitch-app.md](register-twitch-app.md). For setup symptoms and fixes, read [troubleshooting.md](troubleshooting.md); for the full docs map, read [index.md](index.md).
+This document describes the authentication model for `twi`. It covers the environment/config credential path, authorization-code and device OAuth login, explicit named accounts, and restrictive Unix credential storage. To register your own Twitch application and get its client ID/secret (required for `twi login` and Twitch-API features), read [register-twitch-app.md](register-twitch-app.md). For setup symptoms and fixes, read [troubleshooting.md](troubleshooting.md); for the full docs map, read [index.md](index.md).
 
 ## Current State
 
 - On supported Unix builds, `twi login` starts a Twitch authorization-code login through the browser/local-callback flow, validates the returned token, saves it through the private credential store, and reports identity/scope/storage status without printing token values. Non-Unix builds stop before the browser opens, and users should use environment variables or a private flat config file.
 - Mock chat is ready and needs no Twitch credentials.
-- The MVP accepts Twitch credentials from environment variables, a local flat config file, or saved credentials on supported Unix platforms. CLI flags currently override the config path and channels, not username or token values.
-- Multi-channel live IRC read/send is partially shipped for configured credentials, including startup token validation when Twitch OAuth validation is reachable, composer sends, selected-message replies, and `/me` actions.
-- Multi-channel UX is partially shipped: the keyboard-first sidebar, command palette, optional mouse controls, and selected-message inspect panel are current behavior.
+- Credentials come from environment variables, a flat config file, or supported Unix credential storage. Explicit `--account NAME` selects that private account and never falls back to another environment/default token.
+- Multi-channel IRC and EventSub reading, recorder/history commands, acknowledged Helix sending, selected-message replies, and native IRC actions are implemented. See [automation](automation.md) for transport-specific receipt semantics.
+- Multi-channel UX includes: the keyboard-first sidebar, command palette, optional mouse controls, and selected-message inspect panel are current behavior.
 - Twitch OAuth validation is wired into both `twi doctor` and live chat startup. It reports or enforces identity, expiry, required IRC scopes, and refresh availability without printing credential values, and supplies the IRC login that live chat authenticates with.
 - The internal credential storage boundary and Unix-only restrictive file
   fallback are wired into `twi login`, `twi chat`, `twi config show`, and
   `twi doctor`. `twi setup` can update
   non-secret config values and hand off to login.
-  Richer EventSub/API chat support remains later work.
+  EventSub/API chat scopes are selected through explicit login capabilities.
 
-## MVP Credential Model
+## Credential sources
 
-For Twitch IRC chat, the MVP needs:
+For Twitch IRC chat, the client needs:
 
 - Twitch username.
 - Twitch OAuth token.
@@ -55,9 +55,9 @@ The canonical `TWI_TWITCH_USERNAME`, `TWI_TWITCH_OAUTH_TOKEN`, `TWI_TWITCH_REFRE
 
 Do not commit shell profiles, `.env` files, config files, screenshots, or logs that contain these values.
 
-## Refresh On Auth Failure
+## Refresh on authentication failure
 
-When live Twitch IRC login fails with an authentication error, `twi` tries one OAuth refresh and reconnects with the refreshed access token if these values are configured:
+The shared session authorization manager validates identity and the selected operation’s scopes. On an explicit expired/malformed token or authentication rejection, it coordinates refresh through a private account lock when these values are configured:
 
 - Twitch username.
 - Current access token.
@@ -79,12 +79,13 @@ When live Twitch IRC login fails with an authentication error, `twi` tries one O
 > without a secret, and `twi doctor`'s **client secret** check reports the
 > same thing.
 
-The refresh request is sent to Twitch's OAuth token endpoint. On supported
-platforms, the refreshed access token and refresh token are saved through the
-private credential store. If the credential store is unavailable or saving
-fails, live chat keeps using the refreshed tokens in memory for the current
-process and reports a redacted warning with next-step guidance. Refresh never
-writes token material back to `.env` or the flat config file automatically.
+Refresh uses Twitch’s OAuth endpoint. Saved-account refresh reloads credentials
+under the shared account lock and persists the rotated pair atomically, so a
+second process can reuse that rotation. Persistence failure is reported;
+headless commands fail rather than claim durable rotation. The IRC compatibility
+path may retain active tokens in memory while reporting its persistence warning.
+Explicit environment credentials stay in memory and do not overwrite saved
+accounts. Refresh never writes tokens back to `.env` or flat config automatically.
 
 If refresh fails, the user-facing error remains redacted and tells you to verify username, OAuth token, and `chat:read`.
 
@@ -216,15 +217,16 @@ saves them through `CredentialStore`. Token values remain typed secrets until
 the storage-owned marshal path deliberately reveals them for the private Unix
 credential file.
 
-The adapter falls back to the MVP chat scopes when a caller supplies no
+The authorization-code adapter falls back to IRC chat scopes when a caller supplies no
 explicit scope list:
 
 - `chat:read`
 - `chat:edit`
 
-`twi login` always supplies its own explicit list (chat scopes plus
-`channel:manage:broadcast`), so this fallback only matters for other callers
-of the `auth` package that omit `LoginRequest.Scopes`.
+`twi login` supplies the list selected by `--capability` (default `tui`), so
+this fallback only applies to other callers omitting `LoginRequest.Scopes`.
+Device login validates the granted scopes and returned client/user identity
+before private persistence.
 
 It rejects missing, mismatched, expired, or duplicate OAuth state, denied
 authorization callbacks, unsupported callback listeners, unsupported browser
@@ -355,9 +357,9 @@ boundary now.
 
 Missing or invalid auth should produce actionable errors without echoing the token value.
 
-## MVP vs Future Scopes
+## Implemented capability scopes
 
-MVP IRC scopes:
+IRC scopes:
 
 - `chat:read`
 - `chat:edit`
@@ -384,14 +386,21 @@ to IRC readiness — without it the picker still accepts any typed name):
 
 - `user:read:follows`
 
-Future EventSub or API chat work may require scopes such as:
+EventSub/API capabilities use:
 
 - `user:read:chat`
 - `user:write:chat`
 - `user:bot`
 - broadcaster-granted `channel:bot`
 
-Do not request future scopes for the MVP unless the implementation actually needs them.
+Request scopes for the selected operation. `eventsub-read` uses
+`user:read:chat`; `chat-send` uses `user:write:chat`; `bot-send` also requests
+`user:bot`, and `channel-bot` requests the broadcaster’s `channel:bot` grant.
+`moderation-read` and `validation` cover documented moderation-event scopes
+and verified moderated-channel discovery. `validation` additionally includes
+IRC sending/reading and message deletion for controlled acceptance tests.
+Scopes authorize API operations; they do not prove moderator/VIP roles.
+See [live authorization](live-authorization.md) and [send transports](send-transports.md).
 
 ## Secret Redaction Rules
 
@@ -430,3 +439,30 @@ Planned user-facing errors should distinguish:
 - Twitch reachability or network failure.
 
 The app should keep these messages specific enough to fix the problem while never exposing credentials.
+
+## Automation and durable history
+
+Producer, consumer, foreground recorder, and local history commands are implemented
+through UI-independent services and explicit public DTOs. See [Automation](automation.md) for
+capabilities, examples, coverage/cursor guarantees, retention, and validation limits.
+Live Twitch observation parity requires controlled credentialed validation.
+
+## Device login without a local browser
+
+```sh
+twi login --device --account validation --capability validation --timeout 30m
+```
+
+The command displays Twitch’s activation URL and user code. Complete consent
+in a browser signed in to the intended Twitch account. No localhost callback or
+local browser is needed. The private device code, access token, refresh token,
+and client secret are excluded from public output and logs. The command polls
+at the provider’s interval, slows down when instructed, respects cancellation
+and expiry, validates identity/scopes/client, and saves the grant privately.
+`--device` conflicts with an explicit `--redirect-uri`; `--dry-run` performs
+no network or credential-store access.
+
+The client ID is required. Confidential applications use their configured
+client secret, which is not stored with the tokens. The named account can be
+selected in subsequent commands with `--account validation`.
+See Twitch’s [device grant specification](https://dev.twitch.tv/docs/authentication/getting-tokens-oauth/#device-code-grant-flow).

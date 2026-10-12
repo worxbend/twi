@@ -33,7 +33,7 @@ var _ twitch.MarkerManager = (*MarkersClient)(nil)
 func NewMarkersClient(cfg MarkersClientConfig) *MarkersClient {
 	return &MarkersClient{
 		endpoint:  endpointOrDefault(cfg.Endpoint, defaultHelixStreamMarkersURL),
-		transport: newTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken),
+		transport: newTransport(cfg.HTTPClient, cfg.ClientID, cfg.OAuthTokenSource, cfg.OAuthToken, cfg.RetryPolicy),
 	}
 }
 

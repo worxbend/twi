@@ -38,15 +38,22 @@ jobs:
       HAVE_SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS != '' }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # snapcraft.yaml derives the snap version from `git describe --tags`,
           # which needs real tag history, not a shallow clone.
           fetch-depth: 0
 
+      - name: Set up Go for package metadata validation
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
       - name: Build snap
-        uses: snapcore/action-build@v1
+        uses: snapcore/action-build@3bdaa03e1ba6bf59a65f84a751d943d549a54e79 # v1.3.0
         id: build
+        with:
+          snapcraft-args: --platform amd64
 
       - name: Smoke the built snap
         env:
@@ -62,14 +69,16 @@ jobs:
           TWITCH_CLIENT_SECRET: ""
         run: |
           set -eu
+          scripts/snap-smoke.sh "${{ steps.build.outputs.snap }}"
           sudo snap install --dangerous --classic "${{ steps.build.outputs.snap }}"
           twi --help >/dev/null
           twi doctor >/dev/null
+          twi produce -t example -m fixture --dry-run >/dev/null
           twi chat --mock --channel example >/dev/null
           sudo snap remove twi
 
       - name: Upload snap artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: twi-snap
           path: ${{ steps.build.outputs.snap }}
@@ -91,7 +100,7 @@ jobs:
         if: |
           github.event_name == 'push' && github.ref == 'refs/heads/main' &&
           env.HAVE_SNAPCRAFT_STORE_CREDENTIALS == 'true'
-        uses: snapcore/action-publish@v1
+        uses: snapcore/action-publish@214b86e5ca036ead1668c79afb81e550e6c54d40 # v1.2.0
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
         with:
@@ -102,7 +111,7 @@ jobs:
         if: |
           github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') &&
           env.HAVE_SNAPCRAFT_STORE_CREDENTIALS == 'true'
-        uses: snapcore/action-publish@v1
+        uses: snapcore/action-publish@214b86e5ca036ead1668c79afb81e550e6c54d40 # v1.2.0
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
         with:

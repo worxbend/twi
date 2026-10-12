@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
 	"github.com/rivo/uniseg"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/twitch"
@@ -31,8 +29,6 @@ func TestWriteDocsScreenshots(t *testing.T) {
 	if os.Getenv("TWI_WRITE_SCREENSHOTS") != "1" {
 		t.Skip("set TWI_WRITE_SCREENSHOTS=1 to regenerate docs screenshots")
 	}
-	forceColorProfile(t)
-	lipgloss.SetColorProfile(termenv.TrueColor)
 
 	outDir := filepath.Join("..", "..", "docs", "assets", "screenshots")
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
@@ -133,19 +129,19 @@ func screenshotModel(t *testing.T, theme string, layout string, width, height in
 
 func sceneGrouped(t *testing.T) string {
 	model := screenshotModel(t, "claude", "grouped", 132, 30)
-	return model.View()
+	return model.View().Content
 }
 
 func sceneInline(t *testing.T) string {
 	model := screenshotModel(t, "tokyo-night", "inline", 132, 30)
-	return model.View()
+	return model.View().Content
 }
 
 func sceneMentions(t *testing.T) string {
 	model := screenshotModel(t, "catppuccin-mocha", "grouped", 132, 30)
 	model.focus = focusComposer
 	model.activeChannelState().composerText = "great point @nov"
-	return model.View()
+	return model.View().Content
 }
 
 func sceneThemePicker(t *testing.T) string {
@@ -154,7 +150,7 @@ func sceneThemePicker(t *testing.T) string {
 	for i := 0; i < 9; i++ {
 		model.moveThemeSettingsSelection(1)
 	}
-	return model.View()
+	return model.View().Content
 }
 
 // --- ANSI to SVG ---------------------------------------------------------

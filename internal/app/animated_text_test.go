@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/worxbend/twi/internal/animation"
 	"github.com/worxbend/twi/internal/config"
 )
@@ -55,7 +55,6 @@ func TestSplashTaglineFinishesBeforeTheSplashLifts(t *testing.T) {
 }
 
 func TestSplashLinesAnimateBetweenFrames(t *testing.T) {
-	forceColorProfile(t)
 	model := newMockModel("alpha", config.Default())
 	model.width, model.height = 88, 22
 	started := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
@@ -74,7 +73,6 @@ func TestSplashLinesAnimateBetweenFrames(t *testing.T) {
 }
 
 func TestEmptyStateAnimatesOnTheSharedFrameClock(t *testing.T) {
-	forceColorProfile(t)
 	model := newMockModel("alpha", config.Default())
 
 	model.frames.lastFrameAt = time.UnixMilli(1000)
@@ -95,7 +93,6 @@ func TestEmptyStateAnimatesOnTheSharedFrameClock(t *testing.T) {
 }
 
 func TestEmptyStateHoldsStillWhenAnimationIsOff(t *testing.T) {
-	forceColorProfile(t)
 	cfg := config.Default()
 	cfg.Features.AnimationMode = string(animation.ModeOff)
 	model := newMockModel("alpha", cfg)
@@ -116,7 +113,6 @@ func TestEmptyStateHoldsStillWhenAnimationIsOff(t *testing.T) {
 }
 
 func TestEmptyStateRowsStayInsideTheirWidth(t *testing.T) {
-	forceColorProfile(t)
 	model := newMockModel("alpha", config.Default())
 	model.frames.lastFrameAt = time.UnixMilli(1400)
 
@@ -130,7 +126,6 @@ func TestEmptyStateRowsStayInsideTheirWidth(t *testing.T) {
 }
 
 func TestCenteredEffectLinePaintsPaddingWithBackground(t *testing.T) {
-	forceColorProfile(t)
 	background := newMockModel("alpha", config.Default()).canvasBackground()
 	backgroundCode := backgroundOnlySGRCode(t, background)
 

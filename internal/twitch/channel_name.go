@@ -1,6 +1,9 @@
 package twitch
 
-import "strings"
+import (
+	"errors"
+	"strings"
+)
 
 // NormalizeChannel turns a channel name in any of the forms a user, a config
 // file or a command-line flag might supply it into the plain name twi uses
@@ -41,4 +44,41 @@ func NormalizeChannels(values []string) []string {
 		}
 	}
 	return channels
+}
+
+// Channel is a validated canonical Twitch login. Its zero value is invalid.
+// ParseChannel accepts channel selectors; mentions are parsed separately.
+type Channel struct{ login string }
+
+func ParseChannel(value string) (Channel, error) {
+	login := ChannelKey(value)
+	if len(login) < 1 || len(login) > 25 {
+		return Channel{}, errors.New("invalid channel login")
+	}
+	for _, r := range login {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_') {
+			return Channel{}, errors.New("invalid channel login")
+		}
+	}
+	return Channel{login: login}, nil
+}
+func (c Channel) String() string { return c.login }
+func (c Channel) Valid() bool    { return c.login != "" }
+
+// ParseChannels validates every selector and removes duplicates in input order.
+// Unlike NormalizeChannels, empty selectors are errors.
+func ParseChannels(values []string) ([]Channel, error) {
+	result := make([]Channel, 0, len(values))
+	seen := make(map[string]bool)
+	for _, value := range values {
+		channel, err := ParseChannel(value)
+		if err != nil {
+			return nil, err
+		}
+		if !seen[channel.login] {
+			seen[channel.login] = true
+			result = append(result, channel)
+		}
+	}
+	return result, nil
 }

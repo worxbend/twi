@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/worxbend/twi/internal/config"
 )
 
@@ -19,7 +19,7 @@ func TestActivityLogColumnAppearsAboveMinWidthAndRenders(t *testing.T) {
 	if layout.activityWidth != activityLogWideSize {
 		t.Fatalf("activityWidth = %d, want %d at width 140", layout.activityWidth, activityLogWideSize)
 	}
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "Activity") || !strings.Contains(view, "NewViewer followed") {
 		t.Fatalf("view missing activity log content:\n%s", view)
 	}
@@ -39,8 +39,8 @@ func TestActivityLogColumnHiddenBelowMinWidth(t *testing.T) {
 	if layout.activityWidth != 0 {
 		t.Fatalf("activityWidth = %d at width 88, want 0 (below activityLogMinWidth)", layout.activityWidth)
 	}
-	if strings.Contains(model.View(), " Activity") {
-		t.Fatalf("narrow view unexpectedly shows the activity log column:\n%s", model.View())
+	if strings.Contains(model.View().Content, " Activity") {
+		t.Fatalf("narrow view unexpectedly shows the activity log column:\n%s", model.View().Content)
 	}
 }
 
@@ -70,21 +70,19 @@ func TestMouseInChatRegionExcludesActivityLogColumn(t *testing.T) {
 		t.Fatal("test setup: expected a visible activity log column")
 	}
 
-	insideActivity := tea.MouseEvent{
+	insideActivity := tea.Mouse{
 		X:      layout.sidebarWidth + layout.chatWidth + 1,
 		Y:      layout.tabBarHeight + layout.statusHeight + 1,
-		Button: tea.MouseButtonLeft,
-		Action: tea.MouseActionPress,
+		Button: tea.MouseLeft,
 	}
 	if model.mouseInChatRegion(insideActivity, layout) {
 		t.Fatal("mouseInChatRegion = true for a point inside the activity log column, want false")
 	}
 
-	insideChat := tea.MouseEvent{
+	insideChat := tea.Mouse{
 		X:      layout.sidebarWidth + 1,
 		Y:      layout.tabBarHeight + layout.statusHeight + 1,
-		Button: tea.MouseButtonLeft,
-		Action: tea.MouseActionPress,
+		Button: tea.MouseLeft,
 	}
 	if !model.mouseInChatRegion(insideChat, layout) {
 		t.Fatal("mouseInChatRegion = false for a point inside chat, want true")

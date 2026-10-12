@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/worxbend/twi/internal/auth"
+	"github.com/worxbend/twi/internal/chatservice"
 	"github.com/worxbend/twi/internal/debuglog"
+	"github.com/worxbend/twi/internal/output"
 	"github.com/worxbend/twi/internal/twitch"
 )
 
@@ -61,6 +63,7 @@ type LiveChatClient struct {
 	// can wait for them before closing the output channels they emit on.
 	autoReconnects sync.WaitGroup
 	debugLogger    debuglog.Logger
+	recorder       ChatRecorder
 	// joinedAtRuntime and partedAtRuntime record channels opened or closed
 	// after the connection was established, so a reconnect can put the user
 	// back where they were.
@@ -82,6 +85,7 @@ var _ ChatClient = (*LiveChatClient)(nil)
 type LiveChatTransportFactory func(context.Context) (twitch.ChatClient, error)
 
 type LiveChatClientOptions struct {
+	Recorder    ChatRecorder
 	DebugLogger debuglog.Logger
 }
 
@@ -148,6 +152,7 @@ func newLiveChatClient(ctx context.Context, reconnectFactory, initialFactory Liv
 		done:        make(chan struct{}),
 		closed:      make(chan struct{}),
 		debugLogger: opts.DebugLogger,
+		recorder:    opts.Recorder,
 	}
 	client.debugLiveEvent("live_chat.start", slog.Int("buffer", buffer), slog.Bool("restartable", reconnectFactory != nil))
 	client.emitState(ctx, ConnectionState{
@@ -237,7 +242,7 @@ func (c *LiveChatClient) Send(ctx context.Context, req SendRequest) (SendResult,
 		c.debugLiveSendComplete(req, result, safeErr)
 		return result, safeErr
 	}
-	result := SendResult{AcceptedAt: time.Now()}
+	result := SendResult{QueuedAt: time.Now(), Detail: "queued (delivery unconfirmed)"}
 	c.debugLiveSendComplete(req, result, nil)
 	return result, nil
 }
@@ -452,6 +457,7 @@ func (c *LiveChatClient) reconnect(ctx context.Context, kind string) error {
 	// Tear the old session down before starting a replacement, so the two
 	// never hold a connection to Twitch at the same time.
 	old := c.swapSession(nil)
+	c.captureLost(ctx, time.Now().UTC())
 	if err := old.stop(true); err != nil {
 		return c.logReconnectFailure(credentialSafeError(err))
 	}
@@ -500,13 +506,45 @@ func (c *LiveChatClient) bridge(session *liveChatSession) {
 	defer close(session.done)
 
 	terminalStateSeen := false
+	var loss <-chan time.Time
+	var lossTimer *time.Ticker
+	previous := uint64(0)
+	lastCheck := time.Now().UTC()
+	if c.recorder != nil {
+		lossTimer = time.NewTicker(100 * time.Millisecond)
+		defer lossTimer.Stop()
+		loss = lossTimer.C
+	}
+	reportLoss := func() {
+		if counter, ok := session.transport.(twitch.EventDropCounter); ok && c.recorder != nil {
+			current := counter.DroppedEvents()
+			at := time.Now().UTC()
+			if current > previous {
+				if sink, ok := c.recorder.(interface {
+					Loss(context.Context, time.Time, time.Time, uint64) error
+				}); ok {
+					if err := sink.Loss(session.ctx, lastCheck, at, current-previous); err != nil {
+						c.captureFailure(err)
+					}
+				} else {
+					c.captureLost(session.ctx, lastCheck)
+				}
+			}
+			previous = current
+			lastCheck = at
+		}
+	}
 	for {
 		select {
+		case <-loss:
+			reportLoss()
 		case event, ok := <-session.events:
+			reportLoss()
 			if session.suppressed() {
 				return
 			}
 			if !ok {
+				c.captureLost(context.Background(), time.Now().UTC())
 				if !terminalStateSeen {
 					c.emitState(session.ctx, ConnectionState{
 						Status: ConnectionDisconnected,
@@ -549,7 +587,6 @@ func (c *LiveChatClient) autoReconnect(gen uint64) {
 	if c.factory == nil {
 		return
 	}
-	delay := initialAutoReconnectDelay
 	for attempt := 1; attempt <= maxAutoReconnectAttempts; attempt++ {
 		if c.stale(gen) {
 			return
@@ -557,7 +594,7 @@ func (c *LiveChatClient) autoReconnect(gen uint64) {
 		select {
 		case <-c.done:
 			return
-		case <-time.After(delay):
+		case <-time.After(chatservice.ReconnectDelay(attempt, initialAutoReconnectDelay, maxAutoReconnectDelay)):
 		}
 		// Rechecked after the sleep, not only before it: the whole point of
 		// the generation check is the window while this goroutine is
@@ -583,7 +620,6 @@ func (c *LiveChatClient) autoReconnect(gen uint64) {
 			slog.Int("attempt", attempt),
 			slog.String("error", credentialSafeDetail(err)),
 		)
-		delay = min(delay*2, maxAutoReconnectDelay)
 	}
 	if c.isClosed() || c.stale(gen) {
 		return
@@ -634,45 +670,15 @@ func (c *LiveChatClient) newSession(ctx context.Context, factory LiveChatTranspo
 		c.debugLiveEvent("live_chat.session.create_failed", slog.String("error", err.Error()))
 		return nil, err
 	}
-	sessionCtx, cancel := context.WithCancel(c.baseCtx)
-	session := &liveChatSession{
-		ctx:       sessionCtx,
-		cancel:    cancel,
-		transport: transport,
-		done:      make(chan struct{}),
-	}
 	c.debugLiveEvent("live_chat.transport.connect.start")
-	events, err := connectTransport(ctx, sessionCtx, transport)
+	owner, err := chatservice.OpenSession(c.baseCtx, ctx, transport)
 	if err != nil {
-		cancel()
-		_ = transport.Close()
 		c.debugLiveEvent("live_chat.transport.connect_failed", slog.String("error", credentialSafeDetail(err)))
 		return nil, err
 	}
-	session.events = events
+	session := &liveChatSession{ctx: owner.Context, cancel: func() { _ = owner.Close() }, transport: transport, events: owner.Events, done: make(chan struct{}), owner: owner}
 	c.debugLiveEvent("live_chat.transport.connect_started")
 	return session, nil
-}
-
-type connectResult struct {
-	events <-chan twitch.Event
-	err    error
-}
-
-func connectTransport(ctx, sessionCtx context.Context, transport twitch.ChatClient) (<-chan twitch.Event, error) {
-	resultCh := make(chan connectResult, 1)
-	go func() {
-		events, err := transport.Connect(sessionCtx)
-		resultCh <- connectResult{events: events, err: err}
-	}()
-
-	select {
-	case result := <-resultCh:
-		return result.events, result.err
-	case <-ctx.Done():
-		_ = transport.Close()
-		return nil, ctx.Err()
-	}
 }
 
 func (c *LiveChatClient) currentTransport() (twitch.ChatClient, error) {
@@ -749,6 +755,7 @@ func (c *LiveChatClient) setReconnecting(reconnecting bool) {
 }
 
 type liveChatSession struct {
+	owner     *chatservice.Session
 	ctx       context.Context
 	cancel    context.CancelFunc
 	transport twitch.ChatClient
@@ -770,8 +777,13 @@ func (s *liveChatSession) stop(suppressCloseState bool) error {
 	}
 	bridged := s.bridged
 	s.mu.Unlock()
-	s.cancel()
-	err := s.transport.Close()
+	var err error
+	if s.owner != nil {
+		err = s.owner.Close()
+	} else {
+		s.cancel()
+		err = s.transport.Close()
+	}
 	// done is closed only by the bridge goroutine. A session that never got
 	// one -- reconnect built it, then found the client closed before
 	// installing it -- has nobody to close done, so waiting on it would hang
@@ -793,6 +805,7 @@ func (s *liveChatSession) suppressed() bool {
 
 func (c *LiveChatClient) handleEvent(ctx context.Context, event twitch.Event) {
 	c.debugTransportEvent(event)
+	c.captureEvent(ctx, event)
 	switch event.Kind {
 	case twitch.EventMessage:
 		c.emitMessage(ctx, event.Message)
@@ -1021,8 +1034,9 @@ func messageFromUserNotice(notice twitch.UserNotice) twitch.ChatMessage {
 		DisplayName:   notice.DisplayName,
 		AuthorColor:   notice.AuthorColor,
 		Badges:        notice.Badges,
+		SourceBadges:  notice.SourceBadges,
 		Text:          text,
-		Fragments:     notice.Fragments,
+		Fragments:     noticeDisplayFragments(notice.SystemText, notice.Text, notice.Fragments),
 		Emotes:        notice.Emotes,
 		Type:          twitch.MessageTypeNotice,
 		SystemEventID: systemEventID,
@@ -1149,4 +1163,60 @@ func nonEmptyStrings(values ...string) []string {
 		}
 	}
 	return out
+}
+
+// captureEvent runs on the transport bridge before UI filtering, local echoes,
+// or display queue overflow can affect durable history.
+func (c *LiveChatClient) captureEvent(ctx context.Context, event twitch.Event) {
+	if c.recorder == nil {
+		return
+	}
+	at := time.Now().UTC()
+	if event.Kind == twitch.EventRoomState || event.Kind == twitch.EventChannelReady {
+		if err := c.recorder.Ready(ctx, twitch.ChannelKey(event.RoomState.Channel), at); err != nil {
+			c.captureFailure(err)
+		}
+	}
+	if event.Kind == twitch.EventConnection && (event.Connection.Type == twitch.ConnectionEventDisconnect || event.Connection.Type == twitch.ConnectionEventReconnect) {
+		c.captureLost(ctx, at)
+	}
+	if record, ok := output.FromEvent(event, at, "irc"); ok && record.Channel.Login != "" {
+		if err := c.recorder.Submit(record); err != nil {
+			c.captureFailure(err)
+		}
+	}
+}
+func (c *LiveChatClient) captureLost(ctx context.Context, at time.Time) {
+	if c.recorder == nil {
+		return
+	}
+	bounded, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if err := c.recorder.Lost(bounded, at); err != nil {
+		c.captureFailure(err)
+	}
+}
+func (c *LiveChatClient) captureFailure(err error) {
+	c.debugLiveEvent("live_chat.recording_failed", slog.String("error", credentialSafeDetail(err)))
+	if reporter, ok := c.recorder.(interface{ Fail(error) }); ok {
+		reporter.Fail(err)
+		return
+	}
+	c.emitState(context.Background(), ConnectionState{Status: ConnectionConnected, Detail: "history recording failed: " + credentialSafeDetail(err), Err: err, At: time.Now()})
+}
+
+// Display prefixes do not mutate observed fragments persisted by the recorder.
+func noticeDisplayFragments(systemText, userText string, fragments []twitch.MessageFragment) []twitch.MessageFragment {
+	if len(fragments) == 0 {
+		return nil
+	}
+	copy := append([]twitch.MessageFragment(nil), fragments...)
+	prefix := strings.TrimSpace(systemText)
+	if prefix == "" {
+		return copy
+	}
+	if strings.TrimSpace(userText) != "" {
+		prefix += " "
+	}
+	return append([]twitch.MessageFragment{{Type: twitch.FragmentText, Text: prefix}}, copy...)
 }
